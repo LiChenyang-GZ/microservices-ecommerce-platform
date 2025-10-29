@@ -1,0 +1,155 @@
+/* 邮箱验证页面样式 */
+.email-verification-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 20px;
+}
+
+.verification-container {
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-radius: 20px;
+  padding: 40px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+  width: 100%;
+  max-width: 500px;
+  text-align: center;
+}
+
+.verification-header {
+  margin-bottom: 30px;
+}
+
+.verification-header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: #2d3748;
+  margin-bottom: 15px;
+}
+
+.verification-header p {
+  font-size: 16px;
+  color: #4a5568;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.verification-header strong {
+  color: #667eea;
+  font-weight: 600;
+}
+
+.verification-form {
+  margin-bottom: 30px;
+}
+
+.verification-input-group {
+  margin-bottom: 20px;
+}
+
+.verification-input-group .input-field {
+  font-size: 24px;
+  font-weight: 600;
+  text-align: center;
+  letter-spacing: 8px;
+  padding: 20px;
+}
+
+.verification-input-group .input-field::placeholder {
+  letter-spacing: 2px;
+  font-size: 16px;
+}
+
+.success-message {
+  background: #c6f6d5;
+  color: #22543d;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  font-weight: 500;
+  border: 1px solid #9ae6b4;
+}
+
+.verification-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.verification-actions .button {
+  width: 100%;
+  padding: 15px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.verification-footer {
+  border-top: 1px solid #e2e8f0;
+  padding-top: 20px;
+}
+
+.verification-footer p {
+  font-size: 14px;
+  color: #718096;
+  margin-bottom: 15px;
+}
+
+.back-to-register {
+  background: none;
+  border: none;
+  color: #667eea;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+  transition: color 0.2s ease;
+}
+
+.back-to-register:hover {
+  color: #5a67d8;
+}
+
+/* 响应式设计 */
+@media (max-width: 640px) {
+  .verification-container {
+    padding: 30px 20px;
+    margin: 10px;
+  }
+  
+  .verification-header h1 {
+    font-size: 24px;
+  }
+  
+  .verification-input-group .input-field {
+    font-size: 20px;
+    letter-spacing: 6px;
+    padding: 15px;
+  }
+}
+
+/* 深色模式支持 */
+@media (prefers-color-scheme: dark) {
+  .verification-container {
+    background: rgba(45, 55, 72, 0.95);
+    color: #e2e8f0;
+  }
+  
+  .verification-header h1 {
+    color: #e2e8f0;
+  }
+  
+  .verification-header p {
+    color: #a0aec0;
+  }
+  
+  .verification-footer {
+    border-color: #4a5568;
+  }
+  
+  .verification-footer p {
+    color: #a0aec0;
+  }
+}

@@ -1,0 +1,6 @@
+rootProject.name = 'COMP5348-GroupProject'
+
+include 'deliveryService'
+include 'emailService'
+include 'storeService'
+include 'bankService'

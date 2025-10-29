@@ -1,0 +1,56 @@
+# ======================================
+# General project-level ignores
+# ======================================
+
+# macOS / Windows system files
+.DS_Store
+Thumbs.db
+
+# IDE / Editor settings
+.idea/
+*.iml
+.vscode/
+*.sw?
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Gradle wrapper (backend will handle details)
+.gradle/
+**/build/
+!gradlew
+!gradlew.bat
+!gradle/wrapper/gradle-wrapper.properties
+!gradle/wrapper/gradle-wrapper.jar
+
+# Temp / Log / Cache files
+*.log
+*.tmp
+*.lock
+*.cache
+*.pid
+*.seed
+*.bin
+*.probe
+*.html
+*.xml
+*.csv
+*.gz
+*.zip
+*.tar
+*.7z
+
+# Ignore backup or merge artifacts
+*.orig
+*.rej
+
+# Environment and secrets
+.env
+.env.*
+secrets/
+*.pem
+*.key
+
+# Others
+HELP.md

@@ -1,0 +1,82 @@
+/* 输入框组件样式 */
+.input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.input-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 4px;
+}
+
+.required {
+  color: #e53e3e;
+  margin-left: 4px;
+}
+
+.input-field {
+  padding: 12px 16px;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 16px;
+  transition: all 0.2s ease;
+  background: #f8fafc;
+  color: #1a202c;
+  font-family: inherit;
+}
+
+.input-field:focus {
+  outline: none;
+  border-color: #4a90e2;
+  background: white;
+  box-shadow: 0 0 0 3px rgba(74, 144, 226, 0.1);
+}
+
+.input-field.error {
+  border-color: #e53e3e;
+  background: #fed7d7;
+}
+
+.input-field.error:focus {
+  border-color: #e53e3e;
+  box-shadow: 0 0 0 3px rgba(229, 62, 62, 0.1);
+}
+
+.input-field:disabled {
+  background: #f7fafc;
+  color: #a0aec0;
+  cursor: not-allowed;
+}
+
+.input-error {
+  font-size: 14px;
+  color: #e53e3e;
+  font-weight: 500;
+  margin-top: 4px;
+}
+
+/* 深色模式支持 */
+@media (prefers-color-scheme: dark) {
+  .input-label {
+    color: #e2e8f0;
+  }
+  
+  .input-field {
+    background: #2d3748;
+    border-color: #4a5568;
+    color: #e2e8f0;
+  }
+  
+  .input-field:focus {
+    background: #2d3748;
+    border-color: #667eea;
+  }
+  
+  .input-field.error {
+    background: #742a2a;
+    border-color: #e53e3e;
+  }
+}
