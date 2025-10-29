@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { deliveryAPI } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 
 function DeliveryDetailPage() {
     const [delivery, setDelivery] = useState(null);
@@ -8,34 +9,62 @@ function DeliveryDetailPage() {
     const [error, setError] = useState('');
     const { id } = useParams(); // 从URL中获取ID，例如 /delivery/1
     const navigate = useNavigate();
-    const userEmail = 'grace.hopper@example.com';
-    useEffect(() => {
-        const fetchDelivery = async () => {
-            try {
-                setIsLoading(true);
-                const response = await deliveryAPI.getDeliveryById(id);
-                setDelivery(response.data);
-                setError('');
-            } catch (err) {
-                setError('无法加载订单详情。');
-                console.error(err);
-            } finally {
-                setIsLoading(false);
-            }
-        };
+    const { isLoggedIn, isLoading: authLoading } = useAuth();
 
-        fetchDelivery();
-    }, [id]); // 当ID变化时，重新获取数据
+    useEffect(() => {
+        // 如果用户未登录，跳转到登录页
+        if (!authLoading && !isLoggedIn) {
+            navigate('/login');
+            return;
+        }
+
+        // 如果用户已登录，获取订单详情
+        if (isLoggedIn) {
+            const fetchDelivery = async () => {
+                try {
+                    setIsLoading(true);
+                    const response = await deliveryAPI.getDeliveryById(id);
+                    setDelivery(response.data);
+                    setError('');
+                } catch (err) {
+                    console.error('获取订单详情失败:', err);
+                    if (err.response?.status === 401) {
+                        setError('请先登录');
+                        navigate('/login');
+                    } else if (err.response?.status === 404) {
+                        setError('订单不存在或您无权访问此订单');
+                    } else {
+                        setError('无法加载订单详情，请稍后再试。');
+                    }
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            fetchDelivery();
+        }
+    }, [id, isLoggedIn, authLoading, navigate]); // 依赖项包含登录状态
 
     const handleCancel = async () => {
         if (window.confirm('您确定要取消这个配送任务吗？')) {
             try {
                 await deliveryAPI.cancelDeliveryById(id);
                 alert('订单已成功取消！');
-                navigate('/'); // 取消成功后返回列表页
+                navigate('/deliveries'); // 取消成功后返回列表页
             } catch (err) {
-                alert('取消失败：' + (err.response?.data || '该订单可能已无法取消。'));
-                console.error(err);
+                console.error('取消失败:', err);
+                let errorMessage = '取消失败';
+                if (err.response?.status === 401) {
+                    errorMessage = '请先登录';
+                    navigate('/login');
+                } else if (err.response?.status === 404 || err.response?.status === 403) {
+                    errorMessage = '订单不存在或您无权取消此订单';
+                } else if (err.response?.data) {
+                    errorMessage = typeof err.response.data === 'string' 
+                        ? err.response.data 
+                        : err.response.data.message || '该订单可能已无法取消';
+                }
+                alert(errorMessage);
             }
         }
     };

@@ -74,13 +74,17 @@ const LoginPage = () => {
       console.log('登录成功:', response);
       
       // 处理成功响应
-      alert('登录成功！欢迎回来！');
-      
-      // 使用认证上下文更新登录状态
-      login(formData.email);
-      
-      // 重定向到首页
-      navigate('/');
+      if (response.success && response.token) {
+        // 使用认证上下文更新登录状态，保存 token 和用户信息
+        login(response.email, response.token, response.userId);
+        
+        alert('登录成功！欢迎回来！');
+        
+        // 重定向到首页
+        navigate('/');
+      } else {
+        throw new Error(response.message || '登录失败');
+      }
       
     } catch (error) {
       console.error('登录失败:', error);
@@ -92,7 +96,8 @@ const LoginPage = () => {
         // 服务器返回的错误
         const { status, data } = error.response;
         if (status === 401) {
-          errorMessage = '邮箱或密码错误，请检查后重试';
+          // 尝试从响应数据中获取错误信息
+          errorMessage = (data && data.message) ? data.message : '邮箱或密码错误，请检查后重试';
         } else if (status === 400) {
           errorMessage = '请检查输入的信息是否正确';
         } else if (status === 500) {
@@ -100,7 +105,9 @@ const LoginPage = () => {
         }
         
         // 如果有具体的错误信息，使用它
-        if (data && typeof data === 'string') {
+        if (data && data.message) {
+          errorMessage = data.message;
+        } else if (data && typeof data === 'string') {
           errorMessage = data;
         }
       } else if (error.request) {

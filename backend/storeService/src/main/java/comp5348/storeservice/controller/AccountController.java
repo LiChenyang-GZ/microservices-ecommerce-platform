@@ -1,11 +1,18 @@
 package comp5348.storeservice.controller;
 
 import comp5348.storeservice.dto.AccountDTO;
+import comp5348.storeservice.dto.TokenValidationRequest;
+import comp5348.storeservice.dto.TokenValidationResponse;
 import comp5348.storeservice.service.AccountService;
+import comp5348.storeservice.service.TokenValidationService;
+import comp5348.storeservice.utils.JwtUtil;
+import comp5348.storeservice.model.Account;
 import lombok.Getter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/user")
@@ -13,10 +20,14 @@ import org.springframework.web.bind.annotation.*;
 public class AccountController {
 
     private final AccountService accountService;
+    private final JwtUtil jwtUtil;
+    private final TokenValidationService tokenValidationService;
 
     @Autowired
-    public AccountController(AccountService accountService) {
+    public AccountController(AccountService accountService, JwtUtil jwtUtil, TokenValidationService tokenValidationService) {
         this.accountService = accountService;
+        this.jwtUtil = jwtUtil;
+        this.tokenValidationService = tokenValidationService;
     }
 
     /**
@@ -54,13 +65,20 @@ public class AccountController {
     public ResponseEntity<?> loginUser(@RequestBody LoginRequest request) {
         boolean success = accountService.verifyLogin(request.email, request.password);
         if (success) {
-            return ResponseEntity.ok(new LoginResponse(true, "登录成功"));
+            // 获取用户信息生成 JWT token
+            Optional<Account> accountOpt = accountService.getAccountByEmail(request.email);
+            if (accountOpt.isPresent()) {
+                Account account = accountOpt.get();
+                String token = jwtUtil.generateToken(account.getId(), account.getEmail());
+                return ResponseEntity.ok(new LoginResponse(true, "登录成功", token, account.getId(), account.getEmail()));
+            }
+            return ResponseEntity.ok(new LoginResponse(true, "登录成功", null, null, null));
         } else {
             // 检查是否是邮箱未验证的问题
             if (accountService.emailExists(request.email) && !accountService.isEmailVerified(request.email)) {
-                return ResponseEntity.status(401).body(new LoginResponse(false, "请先验证您的邮箱"));
+                return ResponseEntity.status(401).body(new LoginResponse(false, "请先验证您的邮箱", null, null, null));
             }
-            return ResponseEntity.status(401).body(new LoginResponse(false, "邮箱或密码错误"));
+            return ResponseEntity.status(401).body(new LoginResponse(false, "邮箱或密码错误", null, null, null));
         }
     }
 
@@ -116,6 +134,19 @@ public class AccountController {
         }
     }
 
+    /**
+     * 验证 token（供其他服务调用）
+     */
+    @PostMapping("/validate-token")
+    public ResponseEntity<TokenValidationResponse> validateToken(@RequestBody TokenValidationRequest request) {
+        TokenValidationResponse response = tokenValidationService.validateToken(request.getToken());
+        if (response.isValid()) {
+            return ResponseEntity.ok(response);
+        } else {
+            return ResponseEntity.status(401).body(response);
+        }
+    }
+
     // 请求和响应类
     public static class CreateAccountRequest {
         public String firstName;
@@ -158,10 +189,16 @@ public class AccountController {
     public static class LoginResponse {
         public boolean success;
         public String message;
+        public String token;
+        public Long userId;
+        public String email;
 
-        public LoginResponse(boolean success, String message) {
+        public LoginResponse(boolean success, String message, String token, Long userId, String email) {
             this.success = success;
             this.message = message;
+            this.token = token;
+            this.userId = userId;
+            this.email = email;
         }
     }
 

@@ -32,10 +32,10 @@ const HomePage = () => {
       <div className="home-content">
         <div className="feature-cards">
           <div className="feature-card" onClick={() => navigate('/deliveries')}>
-            <h3>📦 我的订单</h3>
-            <p>查看您的订单历史和支付状态</p>
+            <h3>📦订单状态</h3>
+            <p>查看您的所有订单</p>
             <Button onClick={(e) => { e.stopPropagation(); navigate('/deliveries'); }}>
-              查看订单
+              查看
             </Button>
           </div>
           

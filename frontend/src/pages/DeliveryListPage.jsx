@@ -1,33 +1,59 @@
 import React, { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { deliveryAPI } from '../services/api';
+import { useAuth } from '../contexts/AuthContext';
 
 function DeliveryListPage() {
     const [deliveries, setDeliveries] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState('');
-
-    // 为了演示，我们硬编码一个用户邮箱。
-    // 在一个真实的应用中，这个邮箱会从用户登录状态中获取。
-    const userEmail = 'grace.hopper@example.com';
+    const { isLoggedIn, userEmail, isLoading: authLoading } = useAuth();
+    const navigate = useNavigate();
 
     useEffect(() => {
-        const fetchDeliveries = async () => {
-            try {
-                setIsLoading(true);
-                const response = await deliveryAPI.getAllDeliveriesByEmail(userEmail);
-                setDeliveries(response.data);
-                setError('');
-            } catch (err) {
-                setError('无法加载订单列表，请稍后再试。');
-                console.error(err);
-            } finally {
-                setIsLoading(false);
-            }
-        };
+        // 如果用户未登录，跳转到登录页
+        if (!authLoading && !isLoggedIn) {
+            navigate('/login');
+            return;
+        }
 
-        fetchDeliveries();
-    }, []); // 空数组意味着这个effect只在组件首次加载时运行一次
+        // 如果用户已登录，获取配送列表
+        if (isLoggedIn) {
+            const fetchDeliveries = async () => {
+                try {
+                    setIsLoading(true);
+                    // 使用新的 API，不需要传入 email，后端会自动从 token 获取
+                    const response = await deliveryAPI.getMyDeliveries();
+                    setDeliveries(response.data);
+                    setError('');
+                } catch (err) {
+                    console.error('获取配送列表失败:', err);
+                    console.error('错误详情:', {
+                        status: err.response?.status,
+                        statusText: err.response?.statusText,
+                        data: err.response?.data,
+                        message: err.message,
+                        request: err.config?.url
+                    });
+                    
+                    if (err.response?.status === 401) {
+                        setError('请先登录');
+                        navigate('/login');
+                    } else if (err.response?.status === 500) {
+                        setError('服务器错误，请稍后再试');
+                    } else if (err.request && !err.response) {
+                        setError('无法连接到服务器，请检查网络连接');
+                    } else {
+                        setError(`无法加载订单列表: ${err.response?.data?.message || err.message || '未知错误'}`);
+                    }
+                } finally {
+                    setIsLoading(false);
+                }
+            };
+
+            fetchDeliveries();
+        }
+    }, [isLoggedIn, authLoading, navigate]); // 依赖项包含登录状态
 
     if (isLoading) {
         return <div>正在加载您的订单...</div>;

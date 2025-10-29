@@ -12,7 +12,11 @@ const api = axios.create({
 // 请求拦截器
 api.interceptors.request.use(
   (config) => {
-    // 可以在这里添加认证token等
+    // 从 localStorage 获取 token 并添加到请求头
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
     console.log('发送请求:', config);
     return config;
   },
@@ -35,6 +39,18 @@ api.interceptors.response.use(
       // 服务器返回了错误状态码
       const { status, data } = error.response;
       console.error(`HTTP ${status}:`, data);
+      
+      // 如果是 401 未授权，清除 token 并跳转到登录页
+      if (status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userEmail');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('isLoggedIn');
+        // 可以在这里触发登出操作
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+      }
     } else if (error.request) {
       // 请求已发出但没有收到响应
       console.error('网络错误: 无法连接到服务器');
@@ -162,15 +178,68 @@ const deliveryApi = axios.create({
 });
 
 // 让deliveryApi也使用同样的请求拦截器来附加token
-deliveryApi.interceptors.request.use(api.interceptors.request.handlers[0].fulfilled);
+deliveryApi.interceptors.request.use(
+  (config) => {
+    // 从 localStorage 获取 token 并添加到请求头
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    console.log('Delivery API 请求:', config.url, 'Token:', token ? '已设置' : '未找到');
+    return config;
+  },
+  (error) => {
+    console.error('Delivery API 请求错误:', error);
+    return Promise.reject(error);
+  }
+);
+
 // 让deliveryApi也使用同样的响应拦截器来处理错误
-deliveryApi.interceptors.response.use(api.interceptors.response.handlers[0].fulfilled, api.interceptors.response.handlers[0].rejected);
+deliveryApi.interceptors.response.use(
+  (response) => {
+    console.log('Delivery API 响应:', response.config.url, response.status);
+    return response;
+  },
+  (error) => {
+    console.error('Delivery API 响应错误:', error.config?.url, error.response?.status, error.response?.data);
+    // 统一处理错误
+    if (error.response) {
+      const { status, data } = error.response;
+      console.error(`Delivery API HTTP ${status}:`, data);
+      
+      // 如果是 401 未授权，清除 token 并跳转到登录页
+      if (status === 401) {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userEmail');
+        localStorage.removeItem('userId');
+        localStorage.removeItem('isLoggedIn');
+        if (window.location.pathname !== '/login') {
+          window.location.href = '/login';
+        }
+      }
+    } else if (error.request) {
+      console.error('Delivery API 网络错误: 无法连接到服务器');
+    } else {
+      console.error('Delivery API 请求配置错误:', error.message);
+    }
+    return Promise.reject(error);
+  }
+);
 
 
 // 导出你的DeliveryCo服务相关API
 export const deliveryAPI = {
   /**
-   * 根据邮箱获取所有配送任务
+   * 获取当前登录用户的所有配送任务
+   * @returns Promise
+   */
+  getMyDeliveries: () => {
+    return deliveryApi.get(`/deliveries/me`);
+  },
+  
+  /**
+   * 根据邮箱获取所有配送任务（已废弃，请使用 getMyDeliveries）
+   * @deprecated 请使用 getMyDeliveries()，不再需要传入 email 参数
    * @param {string} email
    * @returns Promise
    */

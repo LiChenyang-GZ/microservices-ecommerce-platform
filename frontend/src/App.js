@@ -71,8 +71,16 @@ function App() {
                 <ResetPasswordPage />
               </PublicRoute>
             } />
-              <Route path="/deliveries" element={<DeliveryListPage />} />
-              <Route path="/delivery/:id" element={<DeliveryDetailPage />} />
+            <Route path="/deliveries" element={
+              <ProtectedRoute>
+                <DeliveryListPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/delivery/:id" element={
+              <ProtectedRoute>
+                <DeliveryDetailPage />
+              </ProtectedRoute>
+            } />
             <Route path="/orders" element={
               <ProtectedRoute>
                 <MyOrdersPage />

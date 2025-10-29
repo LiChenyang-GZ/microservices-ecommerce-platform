@@ -67,13 +67,14 @@ public class DeliveryService {
     }
 
     /**
-     * 取消一个配送任务。
+     * 取消一个配送任务（验证是否属于指定用户）
      * @param deliveryId 需要被取消的配送任务ID
+     * @param userEmail 用户邮箱（用于验证订单是否属于该用户）
      * @return 如果成功取消，返回 true；如果因状态不允许等原因无法取消，返回 false。
      */
     @Transactional
-    public boolean cancelDelivery(Long deliveryId) {
-        logger.info("收到取消请求，针对配送ID: {}", deliveryId);
+    public boolean cancelDelivery(Long deliveryId, String userEmail) {
+        logger.info("收到取消请求，针对配送ID: {}，用户: {}", deliveryId, userEmail);
 
         // 1. 根据ID查找订单
         Optional<Delivery> deliveryOptional = deliveryRepository.findById(deliveryId);
@@ -85,19 +86,27 @@ public class DeliveryService {
         }
 
         Delivery deliveryToCancel = deliveryOptional.get();
+        
+        // 2. 验证订单是否属于该用户
+        if (!deliveryToCancel.getEmail().equals(userEmail)) {
+            logger.warn("无法取消：用户 {} 尝试取消不属于自己的配送订单 {}（属于 {}）", 
+                    userEmail, deliveryId, deliveryToCancel.getEmail());
+            return false;
+        }
+        
         DeliveryStatus currentStatus = deliveryToCancel.getDeliveryStatus();
 
-        // 2. 核心业务规则：只有在特定状态下才允许取消
+        // 3. 核心业务规则：只有在特定状态下才允许取消
         // 假设：一旦开始派送(DELIVERING)，就无法取消了
         if (currentStatus == DeliveryStatus.CREATED || currentStatus == DeliveryStatus.PICKED_UP) {
 
-            // 3. 执行取消操作
+            // 4. 执行取消操作
             deliveryToCancel.setDeliveryStatus(DeliveryStatus.CANCELLED);
             deliveryToCancel.setUpdateTime(LocalDateTime.now());
             Delivery savedDelivery = deliveryRepository.save(deliveryToCancel);
             logger.info("配送ID: {} 的状态已成功更新为 -> CANCELLED", savedDelivery.getId());
 
-            // 4. [关键] 发送Webhook通知，告诉Store服务“取消成功了”！
+            // 5. [关键] 发送Webhook通知，告诉Store服务"取消成功了"！
             // 这复用了我们第三阶段的成果，形成了一个完整的闭环
             if (savedDelivery.getNotificationUrl() != null && !savedDelivery.getNotificationUrl().isEmpty()) {
                 NotificationRequest payload = new NotificationRequest(savedDelivery.getId(), savedDelivery.getDeliveryStatus());
@@ -110,11 +119,40 @@ public class DeliveryService {
             return true; // 返回成功
 
         } else {
-            // 5. 如果状态不满足条件，则拒绝取消
+            // 6. 如果状态不满足条件，则拒绝取消
             logger.warn("无法取消配送ID: {}，因为它当前的状态是 {}，已经无法撤销。",
                     deliveryId, currentStatus);
             return false; // 返回失败
         }
+    }
+    
+    /**
+     * 取消一个配送任务（不验证用户，用于内部调用）
+     * @deprecated 请使用 cancelDelivery(Long, String) 方法
+     */
+    @Deprecated
+    @Transactional
+    public boolean cancelDelivery(Long deliveryId) {
+        Optional<Delivery> deliveryOptional = deliveryRepository.findById(deliveryId);
+        if (deliveryOptional.isEmpty()) {
+            return false;
+        }
+        Delivery deliveryToCancel = deliveryOptional.get();
+        DeliveryStatus currentStatus = deliveryToCancel.getDeliveryStatus();
+        
+        if (currentStatus == DeliveryStatus.CREATED || currentStatus == DeliveryStatus.PICKED_UP) {
+            deliveryToCancel.setDeliveryStatus(DeliveryStatus.CANCELLED);
+            deliveryToCancel.setUpdateTime(LocalDateTime.now());
+            Delivery savedDelivery = deliveryRepository.save(deliveryToCancel);
+            
+            if (savedDelivery.getNotificationUrl() != null && !savedDelivery.getNotificationUrl().isEmpty()) {
+                NotificationRequest payload = new NotificationRequest(savedDelivery.getId(), savedDelivery.getDeliveryStatus());
+                NotificationMessage message = new NotificationMessage(payload, savedDelivery.getNotificationUrl());
+                rabbitTemplate.convertAndSend(RabbitMQConfig.NOTIFICATION_QUEUE_NAME, message);
+            }
+            return true;
+        }
+        return false;
     }
 
     /**
@@ -145,15 +183,41 @@ public class DeliveryService {
     }
 
     /**
-     * 根据ID获取单个配送任务的详细信息。
+     * 根据ID获取单个配送任务的详细信息（验证是否属于指定用户）
      * @param deliveryId 配送任务ID
-     * @return 配送任务的DTO，如果找不到则返回null
+     * @param userEmail 用户邮箱（用于验证订单是否属于该用户）
+     * @return 配送任务的DTO，如果找不到或不属于该用户则返回null
      */
-    @Transactional(readOnly = true) // readOnly = true 是一个查询优化
+    @Transactional(readOnly = true)
+    public DeliveryOrderDTO getDeliveryOrder(Long deliveryId, String userEmail) {
+        Optional<Delivery> deliveryOptional = deliveryRepository.findById(deliveryId);
+        
+        if (deliveryOptional.isEmpty()) {
+            return null;
+        }
+        
+        Delivery delivery = deliveryOptional.get();
+        
+        // 验证订单是否属于该用户
+        if (!delivery.getEmail().equals(userEmail)) {
+            logger.warn("User {} attempted to access delivery {} which belongs to {}", 
+                    userEmail, deliveryId, delivery.getEmail());
+            return null;
+        }
+        
+        return new DeliveryOrderDTO(delivery);
+    }
+    
+    /**
+     * 根据ID获取单个配送任务的详细信息（不验证用户，用于内部调用）
+     * @deprecated 请使用 getDeliveryOrder(Long, String) 方法
+     */
+    @Deprecated
+    @Transactional(readOnly = true)
     public DeliveryOrderDTO getDeliveryOrder(Long deliveryId) {
         return deliveryRepository.findById(deliveryId)
-                .map(DeliveryOrderDTO::new) // 如果找到了，就用它创建一个新的DTO
-                .orElse(null); // 如果没找到，就返回null
+                .map(DeliveryOrderDTO::new)
+                .orElse(null);
     }
 
     /**

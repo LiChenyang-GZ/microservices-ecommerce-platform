@@ -7,17 +7,22 @@ const AuthContext = createContext();
 export const AuthProvider = ({ children }) => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userEmail, setUserEmail] = useState('');
+  const [userId, setUserId] = useState(null);
+  const [token, setToken] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // 初始化时检查localStorage中的登录状态
   useEffect(() => {
     const checkAuthStatus = () => {
-      const savedLoginStatus = localStorage.getItem('isLoggedIn');
+      const savedToken = localStorage.getItem('token');
       const savedUserEmail = localStorage.getItem('userEmail');
+      const savedUserId = localStorage.getItem('userId');
       
-      if (savedLoginStatus === 'true' && savedUserEmail) {
+      if (savedToken && savedUserEmail) {
         setIsLoggedIn(true);
         setUserEmail(savedUserEmail);
+        setToken(savedToken);
+        setUserId(savedUserId ? parseInt(savedUserId) : null);
       }
       setIsLoading(false);
     };
@@ -26,24 +31,34 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   // 登录函数
-  const login = (email) => {
+  const login = (email, token, userId) => {
     setIsLoggedIn(true);
     setUserEmail(email);
-    localStorage.setItem('isLoggedIn', 'true');
+    setToken(token);
+    setUserId(userId);
+    localStorage.setItem('token', token);
     localStorage.setItem('userEmail', email);
+    localStorage.setItem('userId', userId);
+    localStorage.setItem('isLoggedIn', 'true');
   };
 
   // 登出函数
   const logout = () => {
     setIsLoggedIn(false);
     setUserEmail('');
-    localStorage.removeItem('isLoggedIn');
+    setToken(null);
+    setUserId(null);
+    localStorage.removeItem('token');
     localStorage.removeItem('userEmail');
+    localStorage.removeItem('userId');
+    localStorage.removeItem('isLoggedIn');
   };
 
   const value = {
     isLoggedIn,
     userEmail,
+    userId,
+    token,
     isLoading,
     login,
     logout

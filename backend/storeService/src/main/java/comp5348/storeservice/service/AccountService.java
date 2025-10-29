@@ -90,6 +90,13 @@ public class AccountService {
     }
 
     /**
+     * 根据邮箱获取账户信息
+     */
+    public Optional<Account> getAccountByEmail(String email) {
+        return accountRepository.findByEmail(email);
+    }
+
+    /**
      * 检查邮箱是否存在
      */
     public boolean emailExists(String email) {
