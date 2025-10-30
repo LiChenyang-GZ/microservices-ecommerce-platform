@@ -9,6 +9,7 @@ import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 
 import java.time.Duration;
 
@@ -21,14 +22,17 @@ public class DeliveryAdapter {
     
     private final RestTemplate restTemplate;
     
-    @Value("${delivery.service.url:http://localhost:8084}")
+    @Value("${delivery.service.url:http://localhost:8081}")
     private String deliveryServiceUrl;
     
-    @SuppressWarnings("deprecation")
     public DeliveryAdapter(RestTemplateBuilder builder) {
         this.restTemplate = builder
-                .setConnectTimeout(Duration.ofSeconds(5))
-                .setReadTimeout(Duration.ofSeconds(5))
+                .requestFactory(() -> {
+                    SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+                    factory.setConnectTimeout((int) Duration.ofSeconds(5).toMillis());
+                    factory.setReadTimeout((int) Duration.ofSeconds(5).toMillis());
+                    return factory;
+                })
                 .build();
     }
     
@@ -46,20 +50,23 @@ public class DeliveryAdapter {
                 headers.setContentType(MediaType.APPLICATION_JSON);
                 HttpEntity<DeliveryRequestDTO> entity = new HttpEntity<>(request, headers);
                 
-                ResponseEntity<DeliveryResponseDTO> response = restTemplate.postForEntity(
-                        url, entity, DeliveryResponseDTO.class);
-                
-                DeliveryResponseDTO result = response.getBody();
-                if (result != null) {
-                    logger.info("Delivery request successful: orderId={}, deliveryId={}", 
-                            request.getOrderId(), result.getDeliveryId());
-                    return result;
-                }
-                
-                // If response body is null but status is successful, create a success response
+                ResponseEntity<java.util.Map> response = restTemplate.postForEntity(
+                        url, entity, java.util.Map.class);
+
                 if (response.getStatusCode().is2xxSuccessful()) {
-                    logger.info("Delivery request successful (empty response): orderId={}", request.getOrderId());
-                    return new DeliveryResponseDTO(true, null, "Delivery created successfully");
+                    Object body = response.getBody();
+                    Long deliveryId = null;
+                    if (body instanceof java.util.Map<?, ?> map) {
+                        Object idVal = map.get("id");
+                        if (idVal instanceof Number) {
+                            deliveryId = ((Number) idVal).longValue();
+                        } else if (idVal != null) {
+                            try { deliveryId = Long.parseLong(String.valueOf(idVal)); } catch (Exception ignore) {}
+                        }
+                    }
+                    logger.info("Delivery request successful: orderId={}, deliveryId={}",
+                            request.getOrderId(), deliveryId);
+                    return new DeliveryResponseDTO(true, deliveryId, "Delivery created successfully");
                 }
                 
             } catch (Exception e) {

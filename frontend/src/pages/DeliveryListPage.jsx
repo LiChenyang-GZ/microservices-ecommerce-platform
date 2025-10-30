@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import BackButton from '../components/BackButton';
 import { deliveryAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -64,12 +65,13 @@ function DeliveryListPage() {
     }
 
     return (
-        <div className="container">
+        <div className="container" style={{ paddingBottom: 24 }}>
+            <BackButton fallback="/" />
             <h1>我的配送</h1>
             {deliveries.length === 0 ? (
                 <p>您当前没有配送中的订单。</p>
             ) : (
-                <ul className="delivery-list">
+                <ul className="delivery-list" style={{ maxHeight: '70vh', overflowY: 'auto', paddingRight: 8 }}>
                     {deliveries.map(delivery => (
                         <li key={delivery.id} className="delivery-item">
                             <div>

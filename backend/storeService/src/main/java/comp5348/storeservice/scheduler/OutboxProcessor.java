@@ -67,11 +67,14 @@ public class OutboxProcessor {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final RestTemplate restTemplate;
     
-    @SuppressWarnings("deprecation")
     public OutboxProcessor(RestTemplateBuilder restTemplateBuilder) {
         this.restTemplate = restTemplateBuilder
-                .setConnectTimeout(Duration.ofSeconds(5))
-                .setReadTimeout(Duration.ofSeconds(5))
+                .requestFactory(() -> {
+                    org.springframework.http.client.SimpleClientHttpRequestFactory factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
+                    factory.setConnectTimeout((int) Duration.ofSeconds(5).toMillis());
+                    factory.setReadTimeout((int) Duration.ofSeconds(5).toMillis());
+                    return factory;
+                })
                 .build();
     }
     

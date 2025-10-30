@@ -66,7 +66,7 @@ public class AccountController {
         boolean success = accountService.verifyLogin(request.email, request.password);
         if (success) {
             // 获取用户信息生成 JWT token
-            Optional<Account> accountOpt = accountService.getAccountByEmail(request.email);
+            Optional<Account> accountOpt = accountService.getAccountByIdentifier(request.email);
             if (accountOpt.isPresent()) {
                 Account account = accountOpt.get();
                 String token = jwtUtil.generateToken(account.getId(), account.getEmail());

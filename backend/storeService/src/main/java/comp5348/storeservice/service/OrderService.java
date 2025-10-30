@@ -89,6 +89,17 @@ public class OrderService {
             Product product = productRepository.findById(itemRequest.getProductId())
                     .orElseThrow(() -> new RuntimeException("Product not found: " + itemRequest.getProductId()));
             
+            // 庫存校驗與扣減
+            Integer stock = product.getStockQuantity() == null ? 0 : product.getStockQuantity();
+            if (itemRequest.getQty() == null || itemRequest.getQty() <= 0) {
+                throw new RuntimeException("Invalid quantity for product: " + product.getId());
+            }
+            if (stock < itemRequest.getQty()) {
+                throw new RuntimeException("Insufficient stock for product: " + product.getId());
+            }
+            product.setStockQuantity(stock - itemRequest.getQty());
+            productRepository.save(product);
+
             OrderItem orderItem = new OrderItem();
             orderItem.setOrder(order);
             orderItem.setProduct(product);

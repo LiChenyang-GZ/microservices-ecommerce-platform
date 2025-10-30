@@ -41,6 +41,26 @@ public class AccountService {
         account.setFirstName(firstName);
         account.setLastName(lastName);
         account.setEmail(email);
+        // 用户名唯一：优先用 firstName.lastName 组合；缺失则用邮箱前缀；再缺失用 user
+        String base = null;
+        String fn = firstName != null ? firstName.trim() : "";
+        String ln = lastName != null ? lastName.trim() : "";
+        if (!fn.isEmpty() || !ln.isEmpty()) {
+            base = (fn + (ln.isEmpty()? "" : "." + ln))
+                    .replaceAll("\\s+", "")
+                    .toLowerCase();
+        }
+        if (base == null || base.isEmpty()) {
+            try { base = email != null ? email.split("@")[0] : null; } catch (Exception ignore) {}
+        }
+        if (base == null || base.isEmpty()) base = "user";
+        String candidate = base;
+        int suffix = 1;
+        while (accountRepository.findByUsername(candidate).isPresent()) {
+            candidate = base + suffix;
+            suffix++;
+        }
+        account.setUsername(candidate);
         String encodedPassword = passwordEncoder.encode(password);
         account.setPassword(encodedPassword);
         account.setEmailVerified(false); // 初始状态为未验证
@@ -76,8 +96,11 @@ public class AccountService {
     /**
      * 验证登录（只允许已验证的账户登录）
      */
-    public boolean verifyLogin(String email, String password) {
-        Optional<Account> userOpt = accountRepository.findByEmail(email);
+    public boolean verifyLogin(String identifier, String password) {
+        Optional<Account> userOpt = accountRepository.findByEmail(identifier);
+        if (!userOpt.isPresent()) {
+            userOpt = accountRepository.findByUsername(identifier);
+        }
         if (userOpt.isPresent()) {
             Account user = userOpt.get();
             // 检查账户是否激活且邮箱已验证
@@ -96,6 +119,12 @@ public class AccountService {
         return accountRepository.findByEmail(email);
     }
 
+    public Optional<Account> getAccountByIdentifier(String identifier) {
+        Optional<Account> opt = accountRepository.findByEmail(identifier);
+        if (!opt.isPresent()) opt = accountRepository.findByUsername(identifier);
+        return opt;
+    }
+
     /**
      * 检查邮箱是否存在
      */
@@ -106,16 +135,18 @@ public class AccountService {
     /**
      * 检查邮箱是否已验证
      */
-    public boolean isEmailVerified(String email) {
-        Optional<Account> accountOpt = accountRepository.findByEmail(email);
+    public boolean isEmailVerified(String identifier) {
+        Optional<Account> accountOpt = accountRepository.findByEmail(identifier);
+        if (!accountOpt.isPresent()) accountOpt = accountRepository.findByUsername(identifier);
         return accountOpt.isPresent() && Boolean.TRUE.equals(accountOpt.get().getEmailVerified());
     }
 
     /**
      * 检查账户是否激活
      */
-    public boolean isAccountActive(String email) {
-        Optional<Account> accountOpt = accountRepository.findByEmail(email);
+    public boolean isAccountActive(String identifier) {
+        Optional<Account> accountOpt = accountRepository.findByEmail(identifier);
+        if (!accountOpt.isPresent()) accountOpt = accountRepository.findByUsername(identifier);
         return accountOpt.isPresent() && Boolean.TRUE.equals(accountOpt.get().getActive());
     }
 

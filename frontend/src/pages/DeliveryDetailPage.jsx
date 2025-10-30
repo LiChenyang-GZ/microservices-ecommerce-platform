@@ -86,7 +86,7 @@ function DeliveryDetailPage() {
 
     return (
         <div className="container">
-            <button onClick={() => navigate('/')} className="btn-back">← 返回列表</button>
+            <button onClick={() => navigate('/deliveries')} className="btn-back">← 返回列表</button>
             <h1>订单详情</h1>
             <div className="delivery-details">
                 <p><strong>商品:</strong> {delivery.productName}</p>

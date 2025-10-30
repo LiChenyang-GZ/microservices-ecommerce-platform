@@ -1,5 +1,6 @@
 package comp5348.storeservice.service;
 
+import comp5348.storeservice.adapter.BankAdapter;
 import comp5348.storeservice.dto.*;
 import comp5348.storeservice.model.*;
 import comp5348.storeservice.repository.OrderRepository;
@@ -40,6 +41,12 @@ public class OrderProductService {
     @Autowired
     private OrderRepository orderRepository;
     
+    @Autowired
+    private BankAdapter bankAdapter;
+    
+    @org.springframework.beans.factory.annotation.Value("${bank.customer.account:CUSTOMER_ACCOUNT_001}")
+    private String customerAccount;
+    
     /**
      * 創建訂單並處理支付
      * 這是整合的核心方法，處理從商品選擇到支付完成的整個流程
@@ -47,6 +54,18 @@ public class OrderProductService {
     public OrderDTO createOrderWithPayment(CreateOrderRequest request) {
         logger.info("Creating order with payment for user: {}", request.getUserId());
         
+        // 0. 预估总价并预校验余额，余额不足则直接拒单
+        java.math.BigDecimal estimatedTotal = java.math.BigDecimal.ZERO;
+        for (CreateOrderRequest.OrderItemRequest item : request.getOrderItems()) {
+            comp5348.storeservice.model.Product p = productRepository.findById(item.getProductId())
+                    .orElseThrow(() -> new RuntimeException("Product not found: " + item.getProductId()));
+            estimatedTotal = estimatedTotal.add(p.getPrice().multiply(java.math.BigDecimal.valueOf(item.getQty())));
+        }
+        java.math.BigDecimal balance = bankAdapter.getBalance(customerAccount);
+        if (balance != null && balance.compareTo(estimatedTotal) < 0) {
+            throw new IllegalArgumentException("Insufficient balance. Available: " + balance + ", Required: " + estimatedTotal);
+        }
+
         // 1. 創建訂單
         OrderDTO order = orderService.createOrder(request);
         

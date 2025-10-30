@@ -11,6 +11,7 @@ import org.springframework.http.*;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 
 import java.time.Duration;
 
@@ -28,9 +29,32 @@ public class BankAdapter {
     
     public BankAdapter(RestTemplateBuilder builder) {
         this.restTemplate = builder
-                .setConnectTimeout(Duration.ofSeconds(5))
-                .setReadTimeout(Duration.ofSeconds(5))
+                .requestFactory(() -> {
+                    SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+                    factory.setConnectTimeout((int) Duration.ofSeconds(5).toMillis());
+                    factory.setReadTimeout((int) Duration.ofSeconds(5).toMillis());
+                    return factory;
+                })
                 .build();
+    }
+
+    /**
+     * 查询账户余额
+     */
+    public java.math.BigDecimal getBalance(String accountNumber) {
+        String url = bankServiceUrl + "/api/bank/account/" + accountNumber + "/balance";
+        try {
+            ResponseEntity<java.util.Map> resp = restTemplate.getForEntity(url, java.util.Map.class);
+            if (resp.getStatusCode().is2xxSuccessful() && resp.getBody() != null) {
+                Object bal = resp.getBody().get("balance");
+                if (bal != null) {
+                    return new java.math.BigDecimal(String.valueOf(bal));
+                }
+            }
+        } catch (Exception e) {
+            logger.error("Get balance failed for account {}: {}", accountNumber, e.getMessage());
+        }
+        return null;
     }
     
     /**

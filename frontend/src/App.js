@@ -9,6 +9,9 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import HomePage from './pages/HomePage';
 import DeliveryListPage from './pages/DeliveryListPage.jsx';     // <-- 导入你的页面
 import DeliveryDetailPage from './pages/DeliveryDetailPage.jsx';
+import ProductCatalogPage from './pages/ProductCatalogPage.jsx';
+import ProductDetailPage from './pages/ProductDetailPage.jsx';
+import CheckoutPage from './pages/CheckoutPage.jsx';
 import MyOrdersPage from './pages/MyOrdersPage';
 import OrderDetailPage from './pages/OrderDetailPage';
 import './App.css';
@@ -46,6 +49,9 @@ function App() {
                 <HomePage />
               </ProtectedRoute>
             } />
+            <Route path="/products" element={<ProductCatalogPage />} />
+            <Route path="/products/:id" element={<ProductDetailPage />} />
+            <Route path="/checkout" element={<CheckoutPage />} />
             <Route path="/login" element={
               <PublicRoute>
                 <LoginPage />
