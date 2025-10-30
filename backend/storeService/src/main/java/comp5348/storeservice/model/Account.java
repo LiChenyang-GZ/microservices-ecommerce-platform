@@ -45,6 +45,11 @@ public class Account {
     @Getter
     @Setter
     private Boolean active = true; // 账户是否激活
+
+  @Getter
+  @Setter
+  @Column(unique = true)
+  private String bankAccountNumber; // 关联银行账户（激活时自动开户）
 }
 
 

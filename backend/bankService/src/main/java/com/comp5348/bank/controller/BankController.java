@@ -55,6 +55,16 @@ public class BankController {
             return ResponseEntity.notFound().build();
         }
     }
+
+    /**
+     * 创建银行账户
+     */
+    @PostMapping("/account")
+    public ResponseEntity<BankAccountCreateResponse> createAccount(@RequestBody BankAccountCreateRequest request) {
+        BankAccountCreateResponse resp = bankService.createAccount(request);
+        if (resp.isSuccess()) return ResponseEntity.ok(resp);
+        return ResponseEntity.badRequest().body(resp);
+    }
 }
 
 

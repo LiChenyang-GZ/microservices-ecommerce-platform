@@ -140,6 +140,30 @@ public class BankAdapter {
         
         return new BankRefundResponse(false, null, "Bank refund failed after retries");
     }
+
+    /**
+     * 为用户创建银行账户，返回账户号
+     * 预期银行服务端点: POST /api/bank/account  body:{"ownerEmail":"...","initialBalance":10000}
+     */
+    public String createCustomerAccount(String ownerEmail, java.math.BigDecimal initialBalance) {
+        String url = bankServiceUrl + "/api/bank/account";
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            java.util.Map<String, Object> body = new java.util.HashMap<>();
+            body.put("ownerEmail", ownerEmail);
+            body.put("initialBalance", initialBalance);
+            HttpEntity<java.util.Map<String, Object>> entity = new HttpEntity<>(body, headers);
+            ResponseEntity<java.util.Map> resp = restTemplate.postForEntity(url, entity, java.util.Map.class);
+            if (resp.getStatusCode().is2xxSuccessful() && resp.getBody() != null) {
+                Object acct = resp.getBody().get("accountNumber");
+                if (acct != null) return String.valueOf(acct);
+            }
+        } catch (Exception e) {
+            logger.warn("Create bank account failed for {}: {}", ownerEmail, e.getMessage());
+        }
+        return null;
+    }
 }
 
 

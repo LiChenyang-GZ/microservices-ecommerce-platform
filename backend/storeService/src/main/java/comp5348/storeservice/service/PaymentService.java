@@ -37,7 +37,13 @@ public class PaymentService {
     private String storeAccount;
     
     @Value("${bank.customer.account:CUSTOMER_ACCOUNT_001}")
-    private String customerAccount;
+    private String customerAccount; // 全局默认（若用户未开户则使用）
+
+    @Autowired
+    private comp5348.storeservice.repository.OrderRepository orderRepository;
+
+    @Autowired
+    private comp5348.storeservice.repository.AccountRepository accountRepository;
     
     /**
      * 创建支付记录 - 幂等性保证
@@ -127,9 +133,21 @@ public class PaymentService {
         // 生成唯一的交易参考号
         String transactionRef = "TXN-" + orderId + "-" + UUID.randomUUID().toString().substring(0, 8);
         
+        // 选择付款方账户：优先使用用户专属银行账户
+        String fromAccount = customerAccount;
+        try {
+            var order = orderRepository.findById(orderId).orElse(null);
+            if (order != null) {
+                var acc = accountRepository.findById(order.getUserId()).orElse(null);
+                if (acc != null && acc.getBankAccountNumber() != null && !acc.getBankAccountNumber().isEmpty()) {
+                    fromAccount = acc.getBankAccountNumber();
+                }
+            }
+        } catch (Exception ignore) {}
+
         // 调用Bank服务转账
         BankTransferRequest transferRequest = new BankTransferRequest(
-                customerAccount,
+                fromAccount,
                 storeAccount,
                 payment.getAmount(),
                 transactionRef

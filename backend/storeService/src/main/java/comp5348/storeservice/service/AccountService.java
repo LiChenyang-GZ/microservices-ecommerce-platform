@@ -12,6 +12,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.client.RestTemplate;
 import java.beans.Transient;
+import java.math.BigDecimal;
 import java.util.Optional;
 
 @Service
@@ -26,6 +27,9 @@ public class AccountService {
     public AccountService(AccountRepository accountRepository) {
         this.accountRepository = accountRepository;
     }
+
+    @Autowired
+    private comp5348.storeservice.adapter.BankAdapter bankAdapter;
 
     /**
      * 创建账户（需要邮箱验证）
@@ -68,6 +72,14 @@ public class AccountService {
 
         // 保存到数据库
         Account savedAccount = accountRepository.save(account);
+        // 注册后立即开户（默认余额10000），并绑定到账户
+        try {
+            String acctNo = bankAdapter.createCustomerAccount(email, new BigDecimal("10000"));
+            if (acctNo != null) {
+                savedAccount.setBankAccountNumber(acctNo);
+                savedAccount = accountRepository.save(savedAccount);
+            }
+        } catch (Exception ignore) {}
 
         return new AccountDTO(
                 savedAccount.getFirstName(),
@@ -87,6 +99,13 @@ public class AccountService {
             Account account = accountOpt.get();
             account.setEmailVerified(true);
             account.setActive(true);
+            // 激活时为用户开户（默认余额10000），仅当尚未绑定银行账户
+            if (account.getBankAccountNumber() == null || account.getBankAccountNumber().isEmpty()) {
+                try {
+                    String acctNo = bankAdapter.createCustomerAccount(account.getEmail(), new java.math.BigDecimal("10000"));
+                    if (acctNo != null) account.setBankAccountNumber(acctNo);
+                } catch (Exception ignore) {}
+            }
             accountRepository.save(account);
             return true;
         }
