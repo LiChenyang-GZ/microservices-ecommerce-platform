@@ -31,11 +31,19 @@ const HomePage = () => {
       
       <div className="home-content">
         <div className="feature-cards">
+          <div className="feature-card" onClick={() => navigate('/orders')}>
+            <h3>💳 我的订单</h3>
+            <p>查看订单和付款状态</p>
+            <Button onClick={(e) => { e.stopPropagation(); navigate('/orders'); }}>
+              查看订单
+            </Button>
+          </div>
+          
           <div className="feature-card" onClick={() => navigate('/deliveries')}>
-            <h3>📦订单状态</h3>
-            <p>查看您的所有订单</p>
+            <h3>📦 配送追踪</h3>
+            <p>查看包裹配送进度</p>
             <Button onClick={(e) => { e.stopPropagation(); navigate('/deliveries'); }}>
-              查看
+              查看配送
             </Button>
           </div>
           
