@@ -154,6 +154,23 @@ public class StoreController {
                     .body(OrderResponse.error("Failed to process payment success: " + e.getMessage()));
         }
     }
+
+    /**
+     * 取消订单（仅在配送未取件前允许）
+     * POST /api/store/orders/{id}/cancel
+     */
+    @PostMapping("/orders/{id}/cancel")
+    public ResponseEntity<OrderResponse> cancelOrder(@PathVariable Long id) {
+        logger.info("POST /api/store/orders/{}/cancel - Cancelling order", id);
+        try {
+            OrderDTO order = orderService.cancelOrder(id);
+            return ResponseEntity.ok(OrderResponse.success(order, "Order cancelled successfully"));
+        } catch (Exception e) {
+            logger.error("Error cancelling order {}: {}", id, e.getMessage(), e);
+            return ResponseEntity.badRequest()
+                    .body(OrderResponse.error("Failed to cancel order: " + e.getMessage()));
+        }
+    }
     
     /**
      * 處理支付失敗

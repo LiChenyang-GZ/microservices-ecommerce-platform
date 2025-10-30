@@ -51,6 +51,9 @@ public class OutboxProcessor {
     
     @Autowired
     private AccountRepository accountRepository;
+
+    @Autowired
+    private comp5348.storeservice.adapter.EmailAdapter emailAdapter;
     
     @Value("${outbox.processor.max-retries:3}")
     private int maxRetries;
@@ -310,11 +313,20 @@ public class OutboxProcessor {
                 return false;
             }
             
-            // 2. 发送失败通知邮件（等待组员D提供接口）
-            // TODO: 等待组员D提供订单失败通知接口
-            // 接口格式: POST /api/email/order-failure-notification
-            // emailOutboxService.createFailureNotification(orderId, error);
-            logger.warn("Email failure notification not implemented - waiting for Member D's interface");
+            // 2. 发送失败通知邮件
+            try {
+                Order order = orderRepository.findById(orderId).orElse(null);
+                String email = null;
+                if (order != null) {
+                    var acc = accountRepository.findById(order.getUserId()).orElse(null);
+                    if (acc != null) email = acc.getEmail();
+                }
+                if (email != null) {
+                    emailAdapter.sendOrderFailed(email, String.valueOf(orderId), error);
+                }
+            } catch (Exception e) {
+                logger.warn("Send order failed email error: {}", e.getMessage());
+            }
             
             // 预留已释放，即使邮件未发送也认为处理成功（邮件可以后续补发）
             logger.info("Payment failure processed for orderId={}, reservation released={}", 
@@ -329,7 +341,6 @@ public class OutboxProcessor {
     
     /**
      * 处理退款成功事件 - 发送Email通知
-     * 等待组员D提供接口后集成
      */
     private boolean processRefundSuccess(PaymentOutbox outbox) {
         try {
@@ -340,13 +351,20 @@ public class OutboxProcessor {
             
             logger.info("Refund success for orderId={}, refundTxnId={}", orderId, refundTxnId);
             
-            // TODO: 等待组员D提供退款通知接口
-            // 接口格式: POST /api/email/refund-notification
-            // emailOutboxService.createRefundNotification(orderId, refundTxnId);
-            logger.warn("Email refund notification not implemented - waiting for Member D's interface");
-            
-            // 暂时返回true以避免无限重试，实际应该在接口就绪后改为实际调用结果
-            logger.info("Refund success event logged for orderId={}, awaiting integration", orderId);
+            try {
+                Order order = orderRepository.findById(orderId).orElse(null);
+                String email = null;
+                if (order != null) {
+                    var acc = accountRepository.findById(order.getUserId()).orElse(null);
+                    if (acc != null) email = acc.getEmail();
+                }
+                if (email != null) {
+                    emailAdapter.sendRefundSuccess(email, String.valueOf(orderId), refundTxnId);
+                }
+            } catch (Exception e) {
+                logger.warn("Send refund success email error: {}", e.getMessage());
+            }
+
             return true;
             
         } catch (Exception e) {

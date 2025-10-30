@@ -89,5 +89,19 @@ public class DeliveryAdapter {
         
         return new DeliveryResponseDTO(false, null, "Delivery request failed after retries");
     }
+
+    /**
+     * 取消配送（按订单ID，仅 CREATED 可取消）
+     */
+    public boolean cancelByOrderId(String orderId) {
+        String url = deliveryServiceUrl + "/api/deliveries/cancel-by-order/" + orderId;
+        try {
+            ResponseEntity<Void> resp = restTemplate.postForEntity(url, null, Void.class);
+            return resp.getStatusCode().is2xxSuccessful();
+        } catch (Exception e) {
+            logger.warn("Cancel delivery by orderId {} failed: {}", orderId, e.getMessage());
+            return false;
+        }
+    }
 }
 

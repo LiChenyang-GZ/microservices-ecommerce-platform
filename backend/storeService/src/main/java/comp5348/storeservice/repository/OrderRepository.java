@@ -53,6 +53,6 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
     /**
      * 根據訂單ID查找訂單（包含訂單項目）
      */
-    @Query("SELECT o FROM Order o LEFT JOIN FETCH o.orderItems WHERE o.id = :orderId")
+    @Query("SELECT o FROM Order o LEFT JOIN FETCH o.orderItems oi LEFT JOIN FETCH oi.product WHERE o.id = :orderId")
     Optional<Order> findByIdWithOrderItems(@Param("orderId") Long orderId);
 }

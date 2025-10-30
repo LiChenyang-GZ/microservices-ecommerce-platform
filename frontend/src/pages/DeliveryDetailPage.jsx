@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { deliveryAPI } from '../services/api';
+import { deliveryAPI, orderAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 
 function DeliveryDetailPage() {
@@ -48,8 +48,14 @@ function DeliveryDetailPage() {
     const handleCancel = async () => {
         if (window.confirm('您确定要取消这个配送任务吗？')) {
             try {
-                await deliveryAPI.cancelDeliveryById(id);
-                alert('订单已成功取消！');
+                // 优先通过 StoreService 统一取消（按 orderId），确保回退库存与退款
+                if (delivery?.orderId) {
+                    await orderAPI.cancelOrder(delivery.orderId);
+                } else {
+                    // 回退到旧行为：仅取消配送（可能无法回退库存/退款）
+                    await deliveryAPI.cancelDeliveryById(id);
+                }
+                alert('订单已成功取消（已联动库存/退款处理，如适用）！');
                 navigate('/deliveries'); // 取消成功后返回列表页
             } catch (err) {
                 console.error('取消失败:', err);

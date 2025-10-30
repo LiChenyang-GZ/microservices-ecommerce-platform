@@ -29,6 +29,18 @@ public class OrderService {
     
     @Autowired
     private ProductService productService;
+
+    @Autowired
+    private comp5348.storeservice.repository.AccountRepository accountRepository;
+
+    @Autowired
+    private comp5348.storeservice.adapter.EmailAdapter emailAdapter;
+
+    @Autowired
+    private PaymentService paymentService;
+
+    @Autowired
+    private comp5348.storeservice.adapter.DeliveryAdapter deliveryAdapter;
     
     /**
      * 獲取所有訂單列表
@@ -126,7 +138,7 @@ public class OrderService {
     public OrderDTO updateOrderStatus(Long orderId, OrderStatus status) {
         logger.info("Updating order status: orderId={}, status={}", orderId, status);
         
-        Order order = orderRepository.findById(orderId)
+        Order order = orderRepository.findByIdWithOrderItems(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
         
         order.setStatus(status);
@@ -149,9 +161,45 @@ public class OrderService {
             throw new RuntimeException("Cannot cancel order with status: " + order.getStatus());
         }
         
+        // 尝试取消配送：必须在未取件前成功取消，否则拒绝订单取消
+        try {
+            boolean cancelled = deliveryAdapter.cancelByOrderId(String.valueOf(order.getId()));
+            if (!cancelled) {
+                throw new RuntimeException("Cannot cancel after pickup or delivery not found");
+            }
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new RuntimeException("Cancel delivery failed: " + e.getMessage());
+        }
+
+        // 回滚库存
+        for (OrderItem oi : order.getOrderItems()) {
+            Product p = oi.getProduct();
+            Integer stock = p.getStockQuantity() == null ? 0 : p.getStockQuantity();
+            p.setStockQuantity(stock + oi.getQty());
+            productRepository.save(p);
+        }
+
         order.setStatus(OrderStatus.CANCELLED);
         Order savedOrder = orderRepository.save(order);
-        
+
+        // 退款（若已支付成功）
+        try {
+            paymentService.refundPayment(order.getId(), "Order cancelled by user");
+        } catch (Exception e) {
+            logger.info("Refund skipped or failed for order {}: {}", order.getId(), e.getMessage());
+        }
+
+        // 邮件通知
+        try {
+            var acc = accountRepository.findById(order.getUserId()).orElse(null);
+            String email = acc != null ? acc.getEmail() : null;
+            if (email != null && !email.isEmpty()) {
+                emailAdapter.sendOrderCancelled(email, String.valueOf(order.getId()), "用户主动取消");
+            }
+        } catch (Exception ignore) {}
+
         logger.info("Order cancelled successfully");
         return convertToDTO(savedOrder);
     }

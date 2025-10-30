@@ -32,16 +32,18 @@ public class DeliveryStatusUpdateService {
     private final Random random = new Random(); // 用于生成随机数
 
     // 模拟配送的常量
-    private static final int BASE_WAIT_TIME_MS = 10000; // 基础等待时间：5秒
+    private static final int BASE_WAIT_TIME_MS = 10000; // 基础等待时间：10秒
     private static final double PACKAGE_LOSS_RATE = 0.05; // 5% 的丢包率
 
     @Autowired
     public DeliveryStatusUpdateService(DeliveryRepository deliveryRepository,
                                        RabbitTemplate rabbitTemplate,
-                                       PlatformTransactionManager transactionManager) {
+                                       PlatformTransactionManager transactionManager,
+                                       com.comp5348.delivery.adapters.EmailAdapter emailAdapter) {
         this.deliveryRepository = deliveryRepository;
         this.rabbitTemplate = rabbitTemplate;
         this.transactionManager = transactionManager;
+        this.emailAdapter = emailAdapter;
     }
 
     // @RabbitListener注解告诉Spring：请一直监听这个队列，一旦有消息进来，就调用这个方法！
@@ -70,11 +72,23 @@ public class DeliveryStatusUpdateService {
 
             // 2. 模拟真实世界中的运输延迟
             try {
-                int waitTime = BASE_WAIT_TIME_MS + random.nextInt(2000); // 5-7秒的随机延迟
-                Thread.sleep(waitTime);
+                // 固定每个状态变化间隔为 10 秒
+                Thread.sleep(BASE_WAIT_TIME_MS);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt(); // 重新设置中断状态
                 logger.error("线程在等待时被中断", e);
+            }
+
+            // 2.5 在延迟期间，订单可能被取消。这里重新从数据库读取最新状态，若已达终态则停止推进
+            delivery = deliveryRepository.findById(deliveryId).orElse(null);
+            if (delivery == null) {
+                transactionManager.commit(status);
+                return;
+            }
+            if (!shouldContinueProcessing(delivery)) {
+                transactionManager.commit(status);
+                logger.info("配送任务 {} 在等待期间已变为终态 ({}), 停止推进。", deliveryId, delivery.getDeliveryStatus());
+                return;
             }
 
             // 3. 模拟包裹丢失的可能性
@@ -91,6 +105,16 @@ public class DeliveryStatusUpdateService {
             Delivery savedDelivery = deliveryRepository.saveAndFlush(delivery); // saveAndFlush会立即写入数据库
             transactionManager.commit(status); // !! 在这里手动提交事务 !!
             logger.info("配送ID: {} 的状态已更新为 -> {}，并保存至数据库。", deliveryId, delivery.getDeliveryStatus());
+
+            // 在成功持久化后再发送通知邮件，避免并发取消导致的误发
+            try {
+                DeliveryStatus s = savedDelivery.getDeliveryStatus();
+                if (s == DeliveryStatus.PICKED_UP || s == DeliveryStatus.DELIVERING || s == DeliveryStatus.RECEIVED) {
+                    emailAdapter.sendDeliveryUpdate(savedDelivery.getEmail(), savedDelivery.getOrderId(), savedDelivery.getId(), s.name());
+                }
+            } catch (Exception mailEx) {
+                logger.warn("发送配送状态邮件失败: {}", mailEx.getMessage());
+            }
 
             // 6. 检查 notificationUrl 是否存在，如果存在就发送Webhook通知
             if (savedDelivery.getNotificationUrl() != null && !savedDelivery.getNotificationUrl().isEmpty()) {
@@ -123,6 +147,8 @@ public class DeliveryStatusUpdateService {
     /**
      * 这是一个私有辅助方法，用于根据当前状态更新到下一个状态
      */
+    private final com.comp5348.delivery.adapters.EmailAdapter emailAdapter;
+
     private void updateDeliveryStatus(Delivery delivery) {
         DeliveryStatus currentStatus = delivery.getDeliveryStatus();
         switch (currentStatus) {
@@ -136,7 +162,6 @@ public class DeliveryStatusUpdateService {
                 delivery.setDeliveryStatus(DeliveryStatus.RECEIVED);
                 break;
             default:
-                // 如果已经是 DELIVERED 或 LOST 状态，则什么都不做
                 logger.info("配送ID: {} 状态为 {}，无需更新。", delivery.getId(), currentStatus);
                 break;
         }

@@ -287,16 +287,12 @@ export const orderAPI = {
     }
   },
 
-  // 取消订单并退款
-  cancelOrderWithRefund: async (orderId, reason) => {
+  // 取消订单（统一入口：回退库存 + 如已扣款则退款 + 邮件）
+  cancelOrder: async (orderId) => {
     try {
-      const response = await api.put(`/store/orders/${orderId}/cancel-with-refund`, 
-        reason ? { reason } : null
-      );
+      const response = await api.post(`/store/orders/${orderId}/cancel`);
       return response.data;
-    } catch (error) {
-      throw error;
-    }
+    } catch (error) { throw error; }
   }
 };
 

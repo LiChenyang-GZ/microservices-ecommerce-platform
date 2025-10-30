@@ -8,6 +8,7 @@ import com.comp5348.email.model.EmailOutbox;
 import com.comp5348.email.repository.EmailOutboxRepository;
 import java.util.Random;
 import java.time.LocalDateTime;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Service
 public class EmailService {
@@ -17,6 +18,8 @@ public class EmailService {
     
     @Autowired
     private EmailOutboxRepository emailOutboxRepository;
+
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
      * 生成6位数字验证码
@@ -192,5 +195,113 @@ public class EmailService {
         emailOutboxRepository.save(emailOutbox);
         
         return true;
+    }
+
+    /**
+     * 发送配送状态更新邮件，并写入 outbox
+     */
+    public void sendDeliveryStatusEmail(String to, String orderId, Long deliveryId, String status) {
+        try {
+            EmailOutbox outbox = new EmailOutbox();
+            outbox.setEmail(to);
+            outbox.setOrderId(orderId);
+            outbox.setTemplate("delivery_status_update");
+            outbox.setStatus("PENDING");
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("orderId", orderId);
+            payload.put("deliveryId", deliveryId);
+            payload.put("status", status);
+            outbox.setPayload(objectMapper.writeValueAsString(payload));
+            emailOutboxRepository.save(outbox);
+
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setTo(to);
+            message.setSubject("配送状态更新通知");
+            message.setText(String.format("您的订单 %s 的配送状态更新为：%s (配送ID: %s)", orderId, status, String.valueOf(deliveryId)));
+            mailSender.send(message);
+
+            outbox.setStatus("SENT");
+            emailOutboxRepository.save(outbox);
+        } catch (Exception e) {
+            throw new RuntimeException("发送配送通知失败: " + e.getMessage());
+        }
+    }
+
+    public void sendOrderCancelledEmail(String to, String orderId, String reason) {
+        try {
+            EmailOutbox outbox = new EmailOutbox();
+            outbox.setEmail(to);
+            outbox.setOrderId(orderId);
+            outbox.setTemplate("order_cancelled");
+            outbox.setStatus("PENDING");
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("orderId", orderId);
+            payload.put("reason", reason);
+            outbox.setPayload(objectMapper.writeValueAsString(payload));
+            emailOutboxRepository.save(outbox);
+
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setTo(to);
+            message.setSubject("订单已取消");
+            message.setText(String.format("您的订单 %s 已取消。原因：%s", orderId, reason == null ? "无" : reason));
+            mailSender.send(message);
+
+            outbox.setStatus("SENT");
+            emailOutboxRepository.save(outbox);
+        } catch (Exception e) {
+            throw new RuntimeException("发送取消通知失败: " + e.getMessage());
+        }
+    }
+
+    public void sendOrderFailedEmail(String to, String orderId, String reason) {
+        try {
+            EmailOutbox outbox = new EmailOutbox();
+            outbox.setEmail(to);
+            outbox.setOrderId(orderId);
+            outbox.setTemplate("order_failed");
+            outbox.setStatus("PENDING");
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("orderId", orderId);
+            payload.put("reason", reason);
+            outbox.setPayload(objectMapper.writeValueAsString(payload));
+            emailOutboxRepository.save(outbox);
+
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setTo(to);
+            message.setSubject("订单处理失败");
+            message.setText(String.format("很抱歉，您的订单 %s 处理失败。原因：%s。系统已取消该订单。", orderId, reason == null ? "未知" : reason));
+            mailSender.send(message);
+
+            outbox.setStatus("SENT");
+            emailOutboxRepository.save(outbox);
+        } catch (Exception e) {
+            throw new RuntimeException("发送失败通知失败: " + e.getMessage());
+        }
+    }
+
+    public void sendRefundSuccessEmail(String to, String orderId, String refundTxnId) {
+        try {
+            EmailOutbox outbox = new EmailOutbox();
+            outbox.setEmail(to);
+            outbox.setOrderId(orderId);
+            outbox.setTemplate("refund_success");
+            outbox.setStatus("PENDING");
+            java.util.Map<String, Object> payload = new java.util.HashMap<>();
+            payload.put("orderId", orderId);
+            payload.put("refundTxnId", refundTxnId);
+            outbox.setPayload(objectMapper.writeValueAsString(payload));
+            emailOutboxRepository.save(outbox);
+
+            SimpleMailMessage message = new SimpleMailMessage();
+            message.setTo(to);
+            message.setSubject("退款成功通知");
+            message.setText(String.format("您的订单 %s 已退款成功，退款流水号：%s。", orderId, refundTxnId));
+            mailSender.send(message);
+
+            outbox.setStatus("SENT");
+            emailOutboxRepository.save(outbox);
+        } catch (Exception e) {
+            throw new RuntimeException("发送退款成功通知失败: " + e.getMessage());
+        }
     }
 }

@@ -39,6 +39,8 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         if (path.startsWith("/api/deliveries/create") || 
             path.startsWith("/api/deliveries/webhook") ||
+            // 内部调用：按订单ID取消配送（由 StoreService 调用），允许无 token
+            path.startsWith("/api/deliveries/cancel-by-order") ||
             path.startsWith("/actuator")) {
             filterChain.doFilter(request, response);
             return;
