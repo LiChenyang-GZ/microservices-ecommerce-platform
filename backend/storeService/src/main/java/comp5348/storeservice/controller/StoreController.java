@@ -118,17 +118,7 @@ public class StoreController {
         }
     }
     
-    /**
-     * 更新商品庫存
-     * PUT /api/store/products/{id}/stock
-     */
-    @PutMapping("/products/{id}/stock")
-    public ResponseEntity<ProductResponse> updateProductStock(@PathVariable Long id, 
-                                                              @RequestParam Integer stock) {
-        logger.info("PUT /api/store/products/{}/stock - Deprecated endpoint called", id);
-        return ResponseEntity.badRequest()
-                .body(ProductResponse.error("Deprecated: update stock via warehouse endpoints"));
-    }
+    
     
     /**
      * 處理支付成功

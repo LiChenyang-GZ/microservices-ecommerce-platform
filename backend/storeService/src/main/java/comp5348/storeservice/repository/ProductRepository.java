@@ -25,21 +25,5 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     List<Product> findByPriceRange(@Param("minPrice") BigDecimal minPrice, 
                                    @Param("maxPrice") BigDecimal maxPrice);
     
-    /**
-     * 查找有庫存的商品
-     */
-    @Query("SELECT p FROM Product p WHERE p.stockQuantity > 0")
-    List<Product> findAvailableProducts();
     
-    /**
-     * 根據商品ID查找商品（包含庫存檢查）
-     */
-    @Query("SELECT p FROM Product p WHERE p.id = :id AND p.stockQuantity > 0")
-    Optional<Product> findAvailableById(@Param("id") Long id);
-    
-    /**
-     * 更新商品庫存
-     */
-    @Query("UPDATE Product p SET p.stockQuantity = :quantity WHERE p.id = :productId")
-    void updateStockQuantity(@Param("productId") Long productId, @Param("quantity") Integer quantity);
 }

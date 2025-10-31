@@ -231,11 +231,5 @@ public class OrderProductService {
         return stockInfo;
     }
     
-    /**
-     * 更新商品庫存（用於庫存管理）
-     */
-    public ProductDTO updateProductStock(Long productId, Integer newStock) {
-        logger.warn("OrderProductService.updateProductStock is deprecated. Use warehouse APIs instead. pid={}, newStock={}", productId, newStock);
-        throw new UnsupportedOperationException("Deprecated API: update stock via warehouse endpoints");
-    }
+    
 }

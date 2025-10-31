@@ -128,24 +128,7 @@ public class ProductService {
         return convertToDTO(savedProduct);
     }
     
-    /**
-     * 更新商品庫存
-     */
-    @Deprecated
-    public void updateProductStock(Long productId, Integer quantity) {
-        // 遗留接口：不再支持直接更新 Product.stockQuantity，请改用仓库相关接口
-        logger.warn("updateProductStock is deprecated. Use Warehouse APIs instead. productId={}, quantity={}", productId, quantity);
-        throw new UnsupportedOperationException("Deprecated API: Use warehouse inventory endpoints instead");
-    }
     
-    /**
-     * 驗證商品庫存是否足夠
-     */
-    public boolean isStockAvailable(Long productId, Integer quantity) {
-        if (quantity == null || quantity <= 0) return false;
-        int total = warehouseService.getProductQuantity(productId);
-        return total >= quantity;
-    }
 
     /**
      * 將商品分配到多個倉庫
