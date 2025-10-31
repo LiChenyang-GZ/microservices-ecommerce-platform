@@ -35,9 +35,7 @@ const LoginPage = () => {
     const newErrors = {};
     
     if (!formData.email) {
-      newErrors.email = 'Please enter your email address';
-    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Please enter a valid email address';
+      newErrors.email = 'Please enter your email or username';
     }
     
     if (!formData.password) {
@@ -131,12 +129,12 @@ const LoginPage = () => {
         
         <form className="login-form" onSubmit={handleSubmit}>
           <Input
-            type="email"
+            type="text"
             name="email"
-            label="Email Address"
+            label="Email / Username"
             value={formData.email}
             onChange={handleChange}
-            placeholder="Enter your email"
+            placeholder="Enter email or 'customer'"
             error={errors.email}
             disabled={isLoading}
             required

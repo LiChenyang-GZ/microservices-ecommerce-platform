@@ -47,10 +47,12 @@ const HomePage = () => {
             </Button>
           </div>
           
-          <div className="feature-card">
+          <div className="feature-card" onClick={() => navigate('/products')}>
             <h3>🛍️ 商品目录</h3>
             <p>浏览商品并下单购买</p>
-            <Button disabled>即将推出</Button>
+            <Button onClick={(e) => { e.stopPropagation(); navigate('/products'); }}>
+              去选购
+            </Button>
           </div>
           
           <div className="feature-card">

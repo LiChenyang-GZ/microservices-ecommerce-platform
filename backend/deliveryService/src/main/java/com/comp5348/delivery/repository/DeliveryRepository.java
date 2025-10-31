@@ -14,4 +14,9 @@ public interface DeliveryRepository extends JpaRepository<Delivery, Long> {
      * @return 配送任务列表
      */
     List<Delivery> findByEmail(String email);
+
+    /**
+     * 根据订单ID查找配送
+     */
+    java.util.Optional<Delivery> findByOrderId(String orderId);
 }

@@ -37,7 +37,13 @@ public class PaymentService {
     private String storeAccount;
     
     @Value("${bank.customer.account:CUSTOMER_ACCOUNT_001}")
-    private String customerAccount;
+    private String customerAccount; // 全局默认（若用户未开户则使用）
+
+    @Autowired
+    private comp5348.storeservice.repository.OrderRepository orderRepository;
+
+    @Autowired
+    private comp5348.storeservice.repository.AccountRepository accountRepository;
     
     /**
      * 创建支付记录 - 幂等性保证
@@ -49,8 +55,44 @@ public class PaymentService {
         // 幂等性检查
         Optional<Payment> existingPayment = paymentRepository.findByOrderId(orderId);
         if (existingPayment.isPresent()) {
-            logger.info("Payment already exists for orderId={}", orderId);
-            return existingPayment.get();
+            Payment existing = existingPayment.get();
+            logger.info("Payment already exists for orderId={}, status={}", orderId, existing.getStatus());
+            
+            // 情况1：已有但仍处于待处理 → 补发事件
+            if (existing.getStatus() == PaymentStatus.PENDING) {
+                try {
+                    outboxService.createPaymentPendingEvent(orderId, existing.getAmount());
+                    logger.info("Re-enqueued PAYMENT_PENDING event for orderId={}", orderId);
+                } catch (Exception e) {
+                    logger.warn("Failed to re-enqueue PAYMENT_PENDING for orderId={}: {}", orderId, e.getMessage());
+                }
+                return existing;
+            }
+
+            // 情况2：上次失败（例如你手动删库或银行失败）→ 将其复位为待处理并补发事件
+            if (existing.getStatus() == PaymentStatus.FAILED) {
+                existing.setStatus(PaymentStatus.PENDING);
+                existing.setErrorMessage(null);
+                Payment saved = paymentRepository.save(existing);
+                try {
+                    outboxService.createPaymentPendingEvent(orderId, saved.getAmount());
+                    logger.info("Re-enqueued PAYMENT_PENDING after FAILED for orderId={}", orderId);
+                } catch (Exception e) {
+                    logger.warn("Failed to re-enqueue after FAILED for orderId={}: {}", orderId, e.getMessage());
+                }
+                return saved;
+            }
+
+            // 情况3：已成功（或已退款）→ 幂等补发 PAYMENT_SUCCESS，避免下游事件缺失
+            if (existing.getStatus() == PaymentStatus.SUCCESS) {
+                try {
+                    outboxService.createPaymentSuccessEvent(orderId, existing.getBankTxnId());
+                    logger.info("Re-enqueued PAYMENT_SUCCESS for orderId={}", orderId);
+                } catch (Exception e) {
+                    logger.warn("Failed to re-enqueue PAYMENT_SUCCESS for orderId={}: {}", orderId, e.getMessage());
+                }
+            }
+            return existing;
         }
         
         Payment payment = new Payment();
@@ -91,9 +133,26 @@ public class PaymentService {
         // 生成唯一的交易参考号
         String transactionRef = "TXN-" + orderId + "-" + UUID.randomUUID().toString().substring(0, 8);
         
+        // 选择付款方账户：优先使用用户专属银行账户
+        String fromAccount = null;
+        try {
+            var order = orderRepository.findById(orderId).orElse(null);
+            if (order != null) {
+                var acc = accountRepository.findById(order.getUserId()).orElse(null);
+                if (acc != null && acc.getBankAccountNumber() != null && !acc.getBankAccountNumber().isEmpty()) {
+                    fromAccount = acc.getBankAccountNumber();
+                }
+            }
+        } catch (Exception ignore) {}
+
+        if (fromAccount == null || fromAccount.isEmpty()) {
+            handlePaymentFailure(payment, "No linked bank account for user");
+            return;
+        }
+
         // 调用Bank服务转账
         BankTransferRequest transferRequest = new BankTransferRequest(
-                customerAccount,
+                fromAccount,
                 storeAccount,
                 payment.getAmount(),
                 transactionRef
@@ -145,7 +204,7 @@ public class PaymentService {
     /**
      * 退款处理
      */
-    @Transactional
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     public Payment refundPayment(Long orderId, String reason) {
         logger.info("Processing refund for orderId={}, reason={}", orderId, reason);
         

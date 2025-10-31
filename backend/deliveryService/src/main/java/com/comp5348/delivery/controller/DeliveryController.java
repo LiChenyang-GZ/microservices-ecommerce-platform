@@ -92,6 +92,17 @@ public class DeliveryController {
     }
 
     /**
+     * 内部调用：按订单ID取消配送（仅 CREATED 可取消）
+     */
+    @PostMapping("/cancel-by-order/{orderId}")
+    public ResponseEntity<?> cancelByOrderId(@PathVariable String orderId) {
+        boolean ok = deliveryService.cancelByOrderId(orderId);
+        if (ok) return ResponseEntity.ok().build();
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body("Cannot cancel after pickup or delivery not found");
+    }
+
+    /**
      * 兼容旧的 API 端点（已废弃，保留用于向后兼容）
      * @deprecated 请使用 GET /api/deliveries/me
      */

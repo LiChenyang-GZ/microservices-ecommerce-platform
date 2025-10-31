@@ -4,6 +4,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Column;
 import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
@@ -29,7 +30,13 @@ public class Account {
 
     @Getter
     @Setter
-    private String email;
+    @Column(unique = true)
+    private String email; // 真实唯一登录标识
+
+    @Getter
+    @Setter
+    @Column(unique = true)
+    private String username; // 用户名（唯一）
 
     @Getter
     @Setter
@@ -38,6 +45,11 @@ public class Account {
     @Getter
     @Setter
     private Boolean active = true; // 账户是否激活
+
+  @Getter
+  @Setter
+  @Column(unique = true)
+  private String bankAccountNumber; // 关联银行账户（激活时自动开户）
 }
 
 

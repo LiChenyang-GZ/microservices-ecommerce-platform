@@ -287,17 +287,64 @@ export const orderAPI = {
     }
   },
 
-  // 取消订单并退款
-  cancelOrderWithRefund: async (orderId, reason) => {
+  // 取消订单（统一入口：回退库存 + 如已扣款则退款 + 邮件）
+  cancelOrder: async (orderId) => {
     try {
-      const response = await api.put(`/store/orders/${orderId}/cancel-with-refund`, 
-        reason ? { reason } : null
-      );
+      const response = await api.post(`/store/orders/${orderId}/cancel`);
       return response.data;
+    } catch (error) { throw error; }
+  }
+};
+
+// 结算/下单（整合下单+支付）
+export const checkoutAPI = {
+  createOrderWithPayment: async ({ userId, items }) => {
+    // items: [{ productId, qty }]
+    try {
+      const response = await api.post('/store/orders/create-with-payment', {
+        userId,
+        orderItems: items
+      });
+      return response.data; // OrderResponse
     } catch (error) {
       throw error;
     }
   }
+};
+
+// 商品服务API（直接使用默认 api 实例，指向 http://localhost:8082/api）
+export const productAPI = {
+  // 获取全部商品
+  getAll: async () => {
+    try {
+      const res = await api.get('/products');
+      return res.data?.products || [];
+    } catch (e) { throw e; }
+  },
+
+  // 仅获取有库存的商品
+  getAvailable: async () => {
+    try {
+      const res = await api.get('/products/available');
+      return res.data?.products || [];
+    } catch (e) { throw e; }
+  },
+
+  // 根据ID获取
+  getById: async (id) => {
+    try {
+      const res = await api.get(`/products/${id}`);
+      return res.data?.product || null;
+    } catch (e) { throw e; }
+  },
+
+  // 按名称搜索
+  searchByName: async (name) => {
+    try {
+      const res = await api.get('/products/search', { params: { name } });
+      return res.data?.products || [];
+    } catch (e) { throw e; }
+  },
 };
 
 // 支付相关API

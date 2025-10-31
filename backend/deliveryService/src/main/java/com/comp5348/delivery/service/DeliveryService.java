@@ -30,11 +30,13 @@ public class DeliveryService {
     // 依赖注入：我们需要仓库和RabbitMQ模板
     private final DeliveryRepository deliveryRepository;
     private final RabbitTemplate rabbitTemplate;
+    private final com.comp5348.delivery.adapters.EmailAdapter emailAdapter;
 
     @Autowired
-    public DeliveryService(DeliveryRepository deliveryRepository, RabbitTemplate rabbitTemplate) {
+    public DeliveryService(DeliveryRepository deliveryRepository, RabbitTemplate rabbitTemplate, com.comp5348.delivery.adapters.EmailAdapter emailAdapter) {
         this.deliveryRepository = deliveryRepository;
         this.rabbitTemplate = rabbitTemplate;
+        this.emailAdapter = emailAdapter;
     }
 
     /**
@@ -233,5 +235,36 @@ public class DeliveryService {
         return deliveries.stream()
                 .map(DeliveryOrderDTO::new)
                 .collect(Collectors.toList());
+    }
+
+    /**
+     * 根据订单ID取消配送：仅当状态为 CREATED 时允许取消
+     */
+    @Transactional
+    public boolean cancelByOrderId(String orderId) {
+        java.util.Optional<Delivery> opt = deliveryRepository.findByOrderId(orderId);
+        if (opt.isEmpty()) return false;
+        Delivery d = opt.get();
+        if (d.getDeliveryStatus() != com.comp5348.delivery.utils.DeliveryStatus.CREATED) {
+            return false;
+        }
+        d.setDeliveryStatus(com.comp5348.delivery.utils.DeliveryStatus.CANCELLED);
+        d.setUpdateTime(java.time.LocalDateTime.now());
+        Delivery saved = deliveryRepository.save(d);
+
+        // 发送取消邮件
+        try {
+            emailAdapter.sendDeliveryUpdate(saved.getEmail(), saved.getOrderId(), saved.getId(), "CANCELLED");
+        } catch (Exception ignore) {}
+
+        // 若有通知URL，发Webhook通知到 StoreService，让其进行退款/回滚库存/邮件
+        try {
+            if (saved.getNotificationUrl() != null && !saved.getNotificationUrl().isEmpty()) {
+                com.comp5348.delivery.dto.NotificationRequest payload = new com.comp5348.delivery.dto.NotificationRequest(saved.getId(), saved.getDeliveryStatus());
+                com.comp5348.delivery.dto.NotificationMessage message = new com.comp5348.delivery.dto.NotificationMessage(payload, saved.getNotificationUrl());
+                rabbitTemplate.convertAndSend(com.comp5348.delivery.config.RabbitMQConfig.NOTIFICATION_QUEUE_NAME, message);
+            }
+        } catch (Exception ignore) {}
+        return true;
     }
 }

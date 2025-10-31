@@ -13,6 +13,8 @@ import comp5348.storeservice.repository.AccountRepository;
 import comp5348.storeservice.repository.OrderRepository;
 import comp5348.storeservice.repository.PaymentOutboxRepository;
 import comp5348.storeservice.service.PaymentService;
+import comp5348.storeservice.service.WarehouseService;
+import comp5348.storeservice.dto.UnholdProductRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -51,6 +53,12 @@ public class OutboxProcessor {
     
     @Autowired
     private AccountRepository accountRepository;
+
+    @Autowired
+    private comp5348.storeservice.adapter.EmailAdapter emailAdapter;
+
+    @Autowired
+    private WarehouseService warehouseService;
     
     @Value("${outbox.processor.max-retries:3}")
     private int maxRetries;
@@ -67,11 +75,14 @@ public class OutboxProcessor {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final RestTemplate restTemplate;
     
-    @SuppressWarnings("deprecation")
     public OutboxProcessor(RestTemplateBuilder restTemplateBuilder) {
         this.restTemplate = restTemplateBuilder
-                .setConnectTimeout(Duration.ofSeconds(5))
-                .setReadTimeout(Duration.ofSeconds(5))
+                .requestFactory(() -> {
+                    org.springframework.http.client.SimpleClientHttpRequestFactory factory = new org.springframework.http.client.SimpleClientHttpRequestFactory();
+                    factory.setConnectTimeout((int) Duration.ofSeconds(5).toMillis());
+                    factory.setReadTimeout((int) Duration.ofSeconds(5).toMillis());
+                    return factory;
+                })
                 .build();
     }
     
@@ -294,24 +305,55 @@ public class OutboxProcessor {
             
             logger.info("Payment failed for orderId={}, error={}", orderId, error);
             
-            // 1. 释放库存预留（调用组员B提供的API）✅
+            // 1. 释放库存预留（调用 WarehouseService.unholdProduct）✅
             boolean reservationReleased = false;
+            Order order = null;
             try {
-                String releaseUrl = storeServiceUrl + "/api/reservations/order/" + orderId;
-                restTemplate.delete(releaseUrl);
-                logger.info("Released reservations for failed payment, orderId={}", orderId);
-                reservationReleased = true;
+                // 查询订单获取保存的库存事务ID
+                order = orderRepository.findById(orderId).orElse(null);
+                if (order != null && order.getInventoryTransactionIds() != null && !order.getInventoryTransactionIds().isEmpty()) {
+                    // 解析逗号分隔的事务ID列表
+                    List<Long> txIds = java.util.Arrays.stream(order.getInventoryTransactionIds().split(","))
+                            .filter(s -> s != null && !s.trim().isEmpty())
+                            .map(Long::valueOf)
+                            .collect(java.util.stream.Collectors.toList());
+                    
+                    if (!txIds.isEmpty()) {
+                        UnholdProductRequest unholdRequest = new UnholdProductRequest();
+                        unholdRequest.setInventoryTransactionIds(txIds);
+                        reservationReleased = warehouseService.unholdProduct(unholdRequest);
+                        logger.info("Released inventory reservations for failed payment, orderId={}, txIds={}", 
+                                orderId, txIds);
+                    } else {
+                        logger.warn("No inventory transaction IDs found for orderId={}", orderId);
+                        reservationReleased = true; // 没有事务ID也算成功（可能是旧订单）
+                    }
+                } else {
+                    logger.warn("Order not found or no inventory transaction IDs for orderId={}", orderId);
+                    reservationReleased = true; // 没有事务ID也算成功（可能是旧订单或测试数据）
+                }
             } catch (Exception e) {
-                logger.error("Failed to release reservations for orderId={}: {}", orderId, e.getMessage());
+                logger.error("Failed to release inventory reservations for orderId={}: {}", orderId, e.getMessage(), e);
                 // 预留释放失败，应该重试
                 return false;
             }
             
-            // 2. 发送失败通知邮件（等待组员D提供接口）
-            // TODO: 等待组员D提供订单失败通知接口
-            // 接口格式: POST /api/email/order-failure-notification
-            // emailOutboxService.createFailureNotification(orderId, error);
-            logger.warn("Email failure notification not implemented - waiting for Member D's interface");
+            // 2. 发送失败通知邮件
+            try {
+                if (order == null) {
+                    order = orderRepository.findById(orderId).orElse(null);
+                }
+                String email = null;
+                if (order != null) {
+                    var acc = accountRepository.findById(order.getUserId()).orElse(null);
+                    if (acc != null) email = acc.getEmail();
+                }
+                if (email != null) {
+                    emailAdapter.sendOrderFailed(email, String.valueOf(orderId), error);
+                }
+            } catch (Exception e) {
+                logger.warn("Send order failed email error: {}", e.getMessage());
+            }
             
             // 预留已释放，即使邮件未发送也认为处理成功（邮件可以后续补发）
             logger.info("Payment failure processed for orderId={}, reservation released={}", 
@@ -326,7 +368,6 @@ public class OutboxProcessor {
     
     /**
      * 处理退款成功事件 - 发送Email通知
-     * 等待组员D提供接口后集成
      */
     private boolean processRefundSuccess(PaymentOutbox outbox) {
         try {
@@ -337,13 +378,20 @@ public class OutboxProcessor {
             
             logger.info("Refund success for orderId={}, refundTxnId={}", orderId, refundTxnId);
             
-            // TODO: 等待组员D提供退款通知接口
-            // 接口格式: POST /api/email/refund-notification
-            // emailOutboxService.createRefundNotification(orderId, refundTxnId);
-            logger.warn("Email refund notification not implemented - waiting for Member D's interface");
-            
-            // 暂时返回true以避免无限重试，实际应该在接口就绪后改为实际调用结果
-            logger.info("Refund success event logged for orderId={}, awaiting integration", orderId);
+            try {
+                Order order = orderRepository.findById(orderId).orElse(null);
+                String email = null;
+                if (order != null) {
+                    var acc = accountRepository.findById(order.getUserId()).orElse(null);
+                    if (acc != null) email = acc.getEmail();
+                }
+                if (email != null) {
+                    emailAdapter.sendRefundSuccess(email, String.valueOf(orderId), refundTxnId);
+                }
+            } catch (Exception e) {
+                logger.warn("Send refund success email error: {}", e.getMessage());
+            }
+
             return true;
             
         } catch (Exception e) {

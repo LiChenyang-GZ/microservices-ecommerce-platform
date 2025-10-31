@@ -184,6 +184,28 @@ public class BankService {
         BankAccount account = accountOpt.get();
         return new BalanceResponse(true, accountNumber, account.getBalance(), "Balance retrieved successfully");
     }
+
+    /**
+     * 创建银行账户
+     */
+    @Transactional
+    public BankAccountCreateResponse createAccount(BankAccountCreateRequest req) {
+        try {
+            BankAccount acc = new BankAccount();
+            acc.setAccountNumber(generateAccountNumber());
+            acc.setOwnerName(req.getOwnerEmail() != null ? req.getOwnerEmail() : "USER");
+            acc.setBalance(req.getInitialBalance() != null ? req.getInitialBalance() : BigDecimal.ZERO);
+            accountRepository.save(acc);
+            return new BankAccountCreateResponse(true, acc.getAccountNumber(), "Account created");
+        } catch (Exception e) {
+            logger.error("Create account failed: {}", e.getMessage());
+            return new BankAccountCreateResponse(false, null, "Create account failed: " + e.getMessage());
+        }
+    }
+
+    private String generateAccountNumber() {
+        return "ACC-" + System.currentTimeMillis();
+    }
     
     /**
      * 创建失败的交易记录

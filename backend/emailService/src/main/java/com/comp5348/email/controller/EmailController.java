@@ -27,6 +27,63 @@ public class EmailController {
     }
 
     /**
+     * 发送配送状态更新通知
+     */
+    @PostMapping("/send-delivery-update")
+    public ResponseEntity<?> sendDeliveryUpdate(@RequestBody DeliveryUpdateRequest request) {
+        try {
+            emailService.sendDeliveryStatusEmail(
+                    request.email,
+                    request.orderId,
+                    request.deliveryId,
+                    request.status
+            );
+            return ResponseEntity.ok(new SimpleResponse(true, "通知邮件已发送"));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(new SimpleResponse(false, "发送失败: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * 发送订单取消通知
+     */
+    @PostMapping("/send-order-cancelled")
+    public ResponseEntity<?> sendOrderCancelled(@RequestBody OrderNotifyRequest request) {
+        try {
+            emailService.sendOrderCancelledEmail(request.email, request.orderId, request.reason);
+            return ResponseEntity.ok(new SimpleResponse(true, "取消邮件已发送"));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(new SimpleResponse(false, "发送失败: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * 发送订单处理失败通知
+     */
+    @PostMapping("/send-order-failed")
+    public ResponseEntity<?> sendOrderFailed(@RequestBody OrderNotifyRequest request) {
+        try {
+            emailService.sendOrderFailedEmail(request.email, request.orderId, request.reason);
+            return ResponseEntity.ok(new SimpleResponse(true, "失败通知邮件已发送"));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(new SimpleResponse(false, "发送失败: " + e.getMessage()));
+        }
+    }
+
+    /**
+     * 发送退款成功通知
+     */
+    @PostMapping("/send-refund-success")
+    public ResponseEntity<?> sendRefundSuccess(@RequestBody RefundNotifyRequest request) {
+        try {
+            emailService.sendRefundSuccessEmail(request.email, request.orderId, request.refundTxnId);
+            return ResponseEntity.ok(new SimpleResponse(true, "退款成功邮件已发送"));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(new SimpleResponse(false, "发送失败: " + e.getMessage()));
+        }
+    }
+
+    /**
      * 验证验证码
      */
     @PostMapping("/verify-code")
@@ -151,5 +208,35 @@ public class EmailController {
             this.success = success;
             this.message = message;
         }
+    }
+
+    // =============== Delivery Update DTOs ===============
+    public static class DeliveryUpdateRequest {
+        public String email;
+        public String orderId;
+        public Long deliveryId;
+        public String status;
+    }
+
+    public static class SimpleResponse {
+        public boolean success;
+        public String message;
+
+        public SimpleResponse(boolean success, String message) {
+            this.success = success;
+            this.message = message;
+        }
+    }
+
+    public static class OrderNotifyRequest {
+        public String email;
+        public String orderId;
+        public String reason;
+    }
+
+    public static class RefundNotifyRequest {
+        public String email;
+        public String orderId;
+        public String refundTxnId;
     }
 }
