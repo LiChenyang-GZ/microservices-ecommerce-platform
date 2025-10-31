@@ -39,6 +39,10 @@ public class Order {
     
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     private List<OrderItem> orderItems = new ArrayList<>();
+
+    // 逗号分隔的库存事务ID列表（HOLD 记录），用于取消/失败时回滚
+    @Column(name = "inventory_transaction_ids", length = 1000)
+    private String inventoryTransactionIds;
     
     @PrePersist
     protected void onCreate() {

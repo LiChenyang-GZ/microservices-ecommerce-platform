@@ -134,7 +134,7 @@ public class PaymentService {
         String transactionRef = "TXN-" + orderId + "-" + UUID.randomUUID().toString().substring(0, 8);
         
         // 选择付款方账户：优先使用用户专属银行账户
-        String fromAccount = customerAccount;
+        String fromAccount = null;
         try {
             var order = orderRepository.findById(orderId).orElse(null);
             if (order != null) {
@@ -144,6 +144,11 @@ public class PaymentService {
                 }
             }
         } catch (Exception ignore) {}
+
+        if (fromAccount == null || fromAccount.isEmpty()) {
+            handlePaymentFailure(payment, "No linked bank account for user");
+            return;
+        }
 
         // 调用Bank服务转账
         BankTransferRequest transferRequest = new BankTransferRequest(

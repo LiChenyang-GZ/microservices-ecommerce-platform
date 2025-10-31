@@ -2,9 +2,11 @@ package comp5348.storeservice.controller;
 
 import comp5348.storeservice.dto.*;
 import comp5348.storeservice.service.ProductService;
+import comp5348.storeservice.utils.ResponseCode;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -161,20 +163,33 @@ public class ProductController {
      */
     @PutMapping("/{id}/stock")
     public ResponseEntity<ProductResponse> updateProductStock(@PathVariable Long id, @RequestParam Integer quantity) {
-        logger.info("PUT /api/products/{}/stock - Updating product stock to {}", id, quantity);
+        logger.info("PUT /api/products/{}/stock - Deprecated endpoint called", id);
+        return ResponseEntity.badRequest().body(ProductResponse.error("Deprecated: use warehouse inventory endpoints instead"));
+    }
+
+    /**
+     * 分配商品到多個倉庫
+     * POST /api/products/{productId}/assign
+     */
+    @PostMapping("/{productId}/assign")
+    public ResponseEntity<BaseResponse> assignProductToWarehouses(@PathVariable Long productId,
+                                                                   @RequestBody AssignProductRequest request) {
+        logger.info("POST /api/products/{}/assign - Assigning product to multiple warehouses", productId);
         
         try {
-            productService.updateProductStock(id, quantity);
-            Optional<ProductDTO> product = productService.getProductById(id);
-            if (product.isPresent()) {
-                return ResponseEntity.ok(ProductResponse.success(product.get(), "Product stock updated successfully"));
-            } else {
-                return ResponseEntity.notFound().build();
+            Boolean assignResponse = productService.assignProductToWarehouses(productId, request);
+            if (!assignResponse) {
+                logger.warn("Failed to assign product {} to warehouses", productId);
+                ProductResponse response = new ProductResponse(ResponseCode.A3.getMessage(), ResponseCode.A3.getResponseCode());
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
             }
+            BaseResponse response = new BaseResponse(ResponseCode.A2.getMessage(),
+                    ResponseCode.A2.getResponseCode());
+            return ResponseEntity.ok(response);
         } catch (Exception e) {
-            logger.error("Error updating product stock for {}: {}", id, e.getMessage(), e);
+            logger.error("Error assigning product {} to warehouses: {}", productId, e.getMessage(), e);
             return ResponseEntity.badRequest()
-                    .body(ProductResponse.error("Failed to update product stock: " + e.getMessage()));
+                    .body(new BaseResponse(ResponseCode.A3.getMessage(), ResponseCode.A3.getResponseCode()));
         }
     }
 }

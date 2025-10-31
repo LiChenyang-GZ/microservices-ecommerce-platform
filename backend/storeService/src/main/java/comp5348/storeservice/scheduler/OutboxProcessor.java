@@ -13,6 +13,8 @@ import comp5348.storeservice.repository.AccountRepository;
 import comp5348.storeservice.repository.OrderRepository;
 import comp5348.storeservice.repository.PaymentOutboxRepository;
 import comp5348.storeservice.service.PaymentService;
+import comp5348.storeservice.service.WarehouseService;
+import comp5348.storeservice.dto.UnholdProductRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -54,6 +56,9 @@ public class OutboxProcessor {
 
     @Autowired
     private comp5348.storeservice.adapter.EmailAdapter emailAdapter;
+
+    @Autowired
+    private WarehouseService warehouseService;
     
     @Value("${outbox.processor.max-retries:3}")
     private int maxRetries;
@@ -300,22 +305,44 @@ public class OutboxProcessor {
             
             logger.info("Payment failed for orderId={}, error={}", orderId, error);
             
-            // 1. 释放库存预留（调用组员B提供的API）✅
+            // 1. 释放库存预留（调用 WarehouseService.unholdProduct）✅
             boolean reservationReleased = false;
+            Order order = null;
             try {
-                String releaseUrl = storeServiceUrl + "/api/reservations/order/" + orderId;
-                restTemplate.delete(releaseUrl);
-                logger.info("Released reservations for failed payment, orderId={}", orderId);
-                reservationReleased = true;
+                // 查询订单获取保存的库存事务ID
+                order = orderRepository.findById(orderId).orElse(null);
+                if (order != null && order.getInventoryTransactionIds() != null && !order.getInventoryTransactionIds().isEmpty()) {
+                    // 解析逗号分隔的事务ID列表
+                    List<Long> txIds = java.util.Arrays.stream(order.getInventoryTransactionIds().split(","))
+                            .filter(s -> s != null && !s.trim().isEmpty())
+                            .map(Long::valueOf)
+                            .collect(java.util.stream.Collectors.toList());
+                    
+                    if (!txIds.isEmpty()) {
+                        UnholdProductRequest unholdRequest = new UnholdProductRequest();
+                        unholdRequest.setInventoryTransactionIds(txIds);
+                        reservationReleased = warehouseService.unholdProduct(unholdRequest);
+                        logger.info("Released inventory reservations for failed payment, orderId={}, txIds={}", 
+                                orderId, txIds);
+                    } else {
+                        logger.warn("No inventory transaction IDs found for orderId={}", orderId);
+                        reservationReleased = true; // 没有事务ID也算成功（可能是旧订单）
+                    }
+                } else {
+                    logger.warn("Order not found or no inventory transaction IDs for orderId={}", orderId);
+                    reservationReleased = true; // 没有事务ID也算成功（可能是旧订单或测试数据）
+                }
             } catch (Exception e) {
-                logger.error("Failed to release reservations for orderId={}: {}", orderId, e.getMessage());
+                logger.error("Failed to release inventory reservations for orderId={}: {}", orderId, e.getMessage(), e);
                 // 预留释放失败，应该重试
                 return false;
             }
             
             // 2. 发送失败通知邮件
             try {
-                Order order = orderRepository.findById(orderId).orElse(null);
+                if (order == null) {
+                    order = orderRepository.findById(orderId).orElse(null);
+                }
                 String email = null;
                 if (order != null) {
                     var acc = accountRepository.findById(order.getUserId()).orElse(null);

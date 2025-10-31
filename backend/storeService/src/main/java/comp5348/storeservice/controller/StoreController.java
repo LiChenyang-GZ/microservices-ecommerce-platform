@@ -125,16 +125,9 @@ public class StoreController {
     @PutMapping("/products/{id}/stock")
     public ResponseEntity<ProductResponse> updateProductStock(@PathVariable Long id, 
                                                               @RequestParam Integer stock) {
-        logger.info("PUT /api/store/products/{}/stock - Updating product stock to {}", id, stock);
-        
-        try {
-            ProductDTO product = orderProductService.updateProductStock(id, stock);
-            return ResponseEntity.ok(ProductResponse.success(product, "Product stock updated successfully"));
-        } catch (Exception e) {
-            logger.error("Error updating product stock for {}: {}", id, e.getMessage(), e);
-            return ResponseEntity.badRequest()
-                    .body(ProductResponse.error("Failed to update product stock: " + e.getMessage()));
-        }
+        logger.info("PUT /api/store/products/{}/stock - Deprecated endpoint called", id);
+        return ResponseEntity.badRequest()
+                .body(ProductResponse.error("Deprecated: update stock via warehouse endpoints"));
     }
     
     /**

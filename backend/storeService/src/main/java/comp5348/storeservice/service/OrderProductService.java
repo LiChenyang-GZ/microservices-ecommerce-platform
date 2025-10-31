@@ -5,6 +5,7 @@ import comp5348.storeservice.dto.*;
 import comp5348.storeservice.model.*;
 import comp5348.storeservice.repository.OrderRepository;
 import comp5348.storeservice.repository.ProductRepository;
+import comp5348.storeservice.service.WarehouseService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,9 +44,15 @@ public class OrderProductService {
     
     @Autowired
     private BankAdapter bankAdapter;
+
+    @Autowired
+    private WarehouseService warehouseService;
     
     @org.springframework.beans.factory.annotation.Value("${bank.customer.account:CUSTOMER_ACCOUNT_001}")
     private String customerAccount;
+
+    @Autowired
+    private comp5348.storeservice.repository.AccountRepository accountRepository;
     
     /**
      * 創建訂單並處理支付
@@ -54,15 +61,26 @@ public class OrderProductService {
     public OrderDTO createOrderWithPayment(CreateOrderRequest request) {
         logger.info("Creating order with payment for user: {}", request.getUserId());
         
-        // 0. 预估总价并预校验余额，余额不足则直接拒单
+        // 0. 预估总价
         java.math.BigDecimal estimatedTotal = java.math.BigDecimal.ZERO;
         for (CreateOrderRequest.OrderItemRequest item : request.getOrderItems()) {
             comp5348.storeservice.model.Product p = productRepository.findById(item.getProductId())
                     .orElseThrow(() -> new RuntimeException("Product not found: " + item.getProductId()));
             estimatedTotal = estimatedTotal.add(p.getPrice().multiply(java.math.BigDecimal.valueOf(item.getQty())));
         }
-        java.math.BigDecimal balance = bankAdapter.getBalance(customerAccount);
-        if (balance != null && balance.compareTo(estimatedTotal) < 0) {
+
+        // 0.1 仅允许用户个人账户下单；若无账户或余额不足，则直接拒单
+        var userAcc = accountRepository.findById(request.getUserId()).orElse(null);
+        if (userAcc == null || userAcc.getBankAccountNumber() == null || userAcc.getBankAccountNumber().isEmpty()) {
+            throw new IllegalStateException("User has no linked bank account. Please bind a bank account before ordering");
+        }
+        String fromAccount = userAcc.getBankAccountNumber();
+
+        java.math.BigDecimal balance = bankAdapter.getBalance(fromAccount);
+        if (balance == null) {
+            throw new IllegalStateException("Bank service unavailable for account balance check");
+        }
+        if (balance.compareTo(estimatedTotal) < 0) {
             throw new IllegalArgumentException("Insufficient balance. Available: " + balance + ", Required: " + estimatedTotal);
         }
 
@@ -193,7 +211,7 @@ public class OrderProductService {
     }
     
     /**
-     * 獲取商品庫存資訊
+     * 獲取商品庫存資訊（使用多仓聚合库存）
      */
     public ProductStockDTO getProductStockInfo(Long productId) {
         logger.info("Getting product stock info for product: {}", productId);
@@ -201,11 +219,14 @@ public class OrderProductService {
         ProductDTO product = productService.getProductById(productId)
                 .orElseThrow(() -> new RuntimeException("Product not found: " + productId));
         
+        // 使用多仓聚合库存
+        int totalQuantity = warehouseService.getProductQuantity(productId);
+        
         ProductStockDTO stockInfo = new ProductStockDTO();
         stockInfo.setProductId(productId);
         stockInfo.setProductName(product.getName());
-        stockInfo.setCurrentStock(product.getStockQuantity());
-        stockInfo.setAvailable(product.getStockQuantity() > 0);
+        stockInfo.setCurrentStock(totalQuantity);
+        stockInfo.setAvailable(totalQuantity > 0);
         
         return stockInfo;
     }
@@ -214,11 +235,7 @@ public class OrderProductService {
      * 更新商品庫存（用於庫存管理）
      */
     public ProductDTO updateProductStock(Long productId, Integer newStock) {
-        logger.info("Updating product stock for product: {}, new stock: {}", productId, newStock);
-        
-        productService.updateProductStock(productId, newStock);
-        
-        return productService.getProductById(productId)
-                .orElseThrow(() -> new RuntimeException("Product not found: " + productId));
+        logger.warn("OrderProductService.updateProductStock is deprecated. Use warehouse APIs instead. pid={}, newStock={}", productId, newStock);
+        throw new UnsupportedOperationException("Deprecated API: update stock via warehouse endpoints");
     }
 }
