@@ -17,7 +17,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 @RestController
-@RequestMapping("/comp5348/warehouses")
+@RequestMapping("/api/warehouses")
 public class WarehouseController {
 
     @Autowired
@@ -124,14 +124,29 @@ public class WarehouseController {
     @GetMapping("/available/{productId}/{quantity}")
     public ResponseEntity<WarehouseResponse> getAvailableWarehouse(@PathVariable long productId,
                                                                    @PathVariable int quantity) {
-        WarehouseDTO warehouseDTOs = warehouseService.getAndUpdateAvailableWarehouse(productId, quantity);
-        if (warehouseDTOs == null) {
-            return ResponseEntity.ok(new WarehouseResponse(
-                    ResponseCode.W8.getMessage(), ResponseCode.W8.getResponseCode()));
+        // 1. 调用 Service 方法
+        WarehouseDTO serviceResponse = warehouseService.getAndUpdateAvailableWarehouse(productId, quantity, null);
+
+        // 2. 处理库存不足的情况 (service返回null)
+        if (serviceResponse == null) {
+            // 创建一个表示“库存不足”的失败响应
+            WarehouseResponse failureResponse = new WarehouseResponse(
+                    ResponseCode.W8.getMessage(), ResponseCode.W8.getResponseCode());
+            return ResponseEntity.ok(failureResponse);
         }
-        WarehouseResponse response = new WarehouseResponse(warehouseDTOs,
+
+        // 3. 【核心修改】解包 Service 返回的数据，并构建最终的成功响应
+
+        // 创建一个空的、成功的 WarehouseResponse 对象
+        WarehouseResponse successResponse = new WarehouseResponse(
                 ResponseCode.W7.getMessage(), ResponseCode.W7.getResponseCode());
-        return ResponseEntity.ok(response);
+
+        // 从 serviceResponse 中取出数据，填充到最终的 successResponse 中
+        successResponse.setWarehouses(serviceResponse.getWarehouses()); // 设置仓库列表
+        successResponse.setInventoryTransactionIds(serviceResponse.getInventoryTransactionIds()); // 设置【关键】的事务ID列表
+
+        // 4. 返回填充好数据的成功响应
+        return ResponseEntity.ok(successResponse);
     }
 
     @PutMapping("/unhold")

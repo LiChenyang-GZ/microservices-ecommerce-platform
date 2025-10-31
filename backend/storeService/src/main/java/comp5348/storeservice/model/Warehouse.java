@@ -29,16 +29,16 @@ public class Warehouse {
 
     @Column(name = "modify_time")
     private LocalDateTime modifyTime;
-
-    @PrePersist
-    protected void onCreate() {
-        modifyTime = LocalDateTime.now();
-    }
-
-    @PreUpdate
-    protected void onUpdate() {
-        modifyTime = LocalDateTime.now();
-    }
+//
+//    @PrePersist
+//    protected void onCreate() {
+//        modifyTime = LocalDateTime.now();
+//    }
+//
+//    @PreUpdate
+//    protected void onUpdate() {
+//        modifyTime = LocalDateTime.now();
+//    }
 }
 
 

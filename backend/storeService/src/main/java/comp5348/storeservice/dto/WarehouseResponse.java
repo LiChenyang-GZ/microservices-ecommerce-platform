@@ -10,6 +10,7 @@ import java.util.List;
 @EqualsAndHashCode(callSuper = true)
 public class WarehouseResponse extends BaseResponse {
     private List<WarehouseDTO> warehouses;
+    private List<Long> inventoryTransactionIds;
     private WarehouseDTO response;
 
     public WarehouseResponse(Warehouse warehouse, String message, String responseCode) {

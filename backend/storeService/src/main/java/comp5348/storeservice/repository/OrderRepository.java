@@ -24,35 +24,41 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
      */
     List<Order> findByStatus(OrderStatus status);
     
-    /**
-     * 根據用戶ID和訂單狀態查找訂單
-     */
-    List<Order> findByUserIdAndStatus(Long userId, OrderStatus status);
+//    /**
+//     * 根據用戶ID和訂單狀態查找訂單
+//     */
+//    List<Order> findByUserIdAndStatus(Long userId, OrderStatus status);
     
-    /**
-     * 根據創建時間範圍查找訂單
-     */
-    @Query("SELECT o FROM Order o WHERE o.createdAt BETWEEN :startDate AND :endDate")
-    List<Order> findByCreatedAtBetween(@Param("startDate") LocalDateTime startDate, 
-                                       @Param("endDate") LocalDateTime endDate);
+//    /**
+//     * 根據創建時間範圍查找訂單
+//     */
+//    @Query("SELECT o FROM Order o WHERE o.createdAt BETWEEN :startDate AND :endDate")
+//    List<Order> findByCreatedAtBetween(@Param("startDate") LocalDateTime startDate,
+//                                       @Param("endDate") LocalDateTime endDate);
     
-    /**
-     * 根據用戶ID和時間範圍查找訂單
-     */
-    @Query("SELECT o FROM Order o WHERE o.userId = :userId AND o.createdAt BETWEEN :startDate AND :endDate")
-    List<Order> findByUserIdAndCreatedAtBetween(@Param("userId") Long userId,
-                                                @Param("startDate") LocalDateTime startDate,
-                                                @Param("endDate") LocalDateTime endDate);
+//    /**
+//     * 根據用戶ID和時間範圍查找訂單
+//     */
+//    @Query("SELECT o FROM Order o WHERE o.userId = :userId AND o.createdAt BETWEEN :startDate AND :endDate")
+//    List<Order> findByUserIdAndCreatedAtBetween(@Param("userId") Long userId,
+//                                                @Param("startDate") LocalDateTime startDate,
+//                                                @Param("endDate") LocalDateTime endDate);
     
+//    /**
+//     * 查找待付款的訂單
+//     */
+//    @Query("SELECT o FROM Order o WHERE o.status = 'PENDING_PAYMENT'")
+//    List<Order> findPendingPaymentOrders();
+
     /**
-     * 查找待付款的訂單
+     * 根据订单ID查找订单，并同时加载关联的商品信息。
+     * 使用 LEFT JOIN FETCH 可以避免 N+1 查询问题，提升性能。
+     * @param orderId 订单ID
+     * @return 包含商品信息的订单Optional
      */
-    @Query("SELECT o FROM Order o WHERE o.status = 'PENDING_PAYMENT'")
-    List<Order> findPendingPaymentOrders();
-    
-    /**
-     * 根據訂單ID查找訂單（包含訂單項目）
-     */
-    @Query("SELECT o FROM Order o LEFT JOIN FETCH o.orderItems oi LEFT JOIN FETCH oi.product WHERE o.id = :orderId")
-    Optional<Order> findByIdWithOrderItems(@Param("orderId") Long orderId);
+    @Query("SELECT o FROM Order o LEFT JOIN FETCH o.product WHERE o.id = :orderId")
+    Optional<Order> findByIdWithProduct(@Param("orderId") Long orderId);
+
+    Optional<Order> findByDeliveryId(Long deliveryId);
+
 }

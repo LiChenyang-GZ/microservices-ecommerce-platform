@@ -19,6 +19,6 @@ public class CreateOrderRequest {
     @AllArgsConstructor
     public static class OrderItemRequest {
         private Long productId;
-        private Integer qty;
+        private Integer quantity;
     }
 }

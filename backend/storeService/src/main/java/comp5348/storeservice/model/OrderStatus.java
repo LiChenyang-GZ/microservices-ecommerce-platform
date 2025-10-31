@@ -1,6 +1,7 @@
 package comp5348.storeservice.model;
 
 public enum OrderStatus {
+    PENDING_STOCK_HOLD("PENDING_STOCK_HOLD"),
     PLACED("已下單"),
     PENDING_PAYMENT("待付款"),
     PAID("已付款"),
@@ -9,8 +10,8 @@ public enum OrderStatus {
     IN_TRANSIT("配送中"),
     DELIVERED("已送達"),
     CANCELLED("已取消"),
-    REFUNDED("已退款");
-    
+    REFUNDED("已退款"),
+    CANCELLED_SYSTEM("delivery服务挂机");
     private final String description;
     
     OrderStatus(String description) {

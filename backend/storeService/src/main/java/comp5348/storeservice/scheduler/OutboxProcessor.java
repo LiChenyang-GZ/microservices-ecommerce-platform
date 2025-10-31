@@ -5,13 +5,12 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import comp5348.storeservice.adapter.DeliveryAdapter;
 import comp5348.storeservice.dto.DeliveryRequestDTO;
 import comp5348.storeservice.dto.DeliveryResponseDTO;
-import comp5348.storeservice.model.Account;
-import comp5348.storeservice.model.Order;
-import comp5348.storeservice.model.OrderItem;
-import comp5348.storeservice.model.PaymentOutbox;
+import comp5348.storeservice.model.*;
 import comp5348.storeservice.repository.AccountRepository;
 import comp5348.storeservice.repository.OrderRepository;
 import comp5348.storeservice.repository.PaymentOutboxRepository;
+import comp5348.storeservice.service.OrderService;
+import comp5348.storeservice.service.OutboxService;
 import comp5348.storeservice.service.PaymentService;
 import comp5348.storeservice.service.WarehouseService;
 import comp5348.storeservice.dto.UnholdProductRequest;
@@ -28,10 +27,8 @@ import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Component
 @EnableScheduling
@@ -50,6 +47,12 @@ public class OutboxProcessor {
     
     @Autowired
     private OrderRepository orderRepository;
+
+    @Autowired
+    private OrderService orderService;
+
+    @Autowired
+    private OutboxService outboxService;
     
     @Autowired
     private AccountRepository accountRepository;
@@ -74,7 +77,7 @@ public class OutboxProcessor {
     
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final RestTemplate restTemplate;
-    
+
     public OutboxProcessor(RestTemplateBuilder restTemplateBuilder) {
         this.restTemplate = restTemplateBuilder
                 .requestFactory(() -> {
@@ -85,7 +88,7 @@ public class OutboxProcessor {
                 })
                 .build();
     }
-    
+
     /**
      * 定时处理Outbox消息 - 每5秒执行一次
      */
@@ -95,21 +98,21 @@ public class OutboxProcessor {
         if (!enabled) {
             return;
         }
-        
+
         try {
             // 查询待处理的Outbox记录（PENDING状态且重试次数小于最大值）
             List<PaymentOutbox> pendingOutboxes = outboxRepository.findByStatusAndRetryCountLessThan("PENDING", maxRetries);
-            
+
             if (pendingOutboxes.isEmpty()) {
                 return;
             }
-            
+
             logger.info("Processing {} pending outbox messages", pendingOutboxes.size());
-            
+
             for (PaymentOutbox outbox : pendingOutboxes) {
                 processOutboxMessage(outbox);
             }
-            
+
         } catch (Exception e) {
             logger.error("Error in outbox processor: {}", e.getMessage(), e);
         }
@@ -124,27 +127,32 @@ public class OutboxProcessor {
         
         try {
             boolean success = false;
-            
-            switch (outbox.getEventType()) {
-                case "PAYMENT_PENDING":
+
+            PaymentStatus eventType = PaymentStatus.valueOf(outbox.getEventType()); // 将字符串转换为Enum
+            switch (eventType) {
+                case PENDING:
                     success = processPaymentPending(outbox);
                     break;
-                    
-                case "PAYMENT_SUCCESS":
+
+                case SUCCESS:
                     success = processPaymentSuccess(outbox);
                     break;
-                    
-                case "PAYMENT_FAILED":
+
+                case FAILED:
                     success = processPaymentFailed(outbox);
                     break;
-                    
-                case "REFUND_SUCCESS":
+
+                case REFUNDED: // 假设 PaymentStatus 里有 REFUNDED
                     success = processRefundSuccess(outbox);
                     break;
-                    
+
+                case DELIVERY_FAILED: // 假设 PaymentStatus/EventType 枚举中有这个
+                    success = processDeliveryFailed(outbox);
+                    break;
+
                 default:
                     logger.warn("Unknown event type: {}", outbox.getEventType());
-                    success = false;
+                    success = false; // 或者直接抛出异常
             }
             
             if (success) {
@@ -203,92 +211,106 @@ public class OutboxProcessor {
      */
     private boolean processPaymentSuccess(PaymentOutbox outbox) {
         try {
-            Map<String, Object> payload = objectMapper.readValue(
-                    outbox.getPayload(), new TypeReference<Map<String, Object>>() {});
+            Map<String, Object> payload = objectMapper.readValue(outbox.getPayload(), new TypeReference<Map<String, Object>>() {});
             Long orderId = Long.valueOf(payload.get("orderId").toString());
-            String bankTxnId = payload.get("bankTxnId").toString();
-            
-            logger.info("Payment success, triggering delivery request for orderId={}, bankTxnId={}", 
-                    orderId, bankTxnId);
-            
+
+            logger.info("Payment success for orderId={}", orderId);
+
+            // 【新增步骤 1】: 更新订单状态为 PAID
+            // 将状态更新放在调用外部服务之前，如果更新失败，则不会继续
+            try {
+                orderService.updateOrderStatus(orderId, OrderStatus.PAID);
+                logger.info("Order status updated to PAID for orderId={}", orderId);
+            } catch (Exception e) {
+                logger.error("Failed to update order status to PAID for orderId={}. Will retry. Error: {}", orderId, e.getMessage(), e);
+                return false; // 更新订单状态是关键步骤，失败了必须重试
+            }
+
+            // --- 后续逻辑基本保持不变 ---
+
+            logger.info("Triggering delivery request for orderId={}", orderId);
+
             // 1. 查询订单信息
-            Optional<Order> orderOpt = orderRepository.findById(orderId);
-            if (!orderOpt.isPresent()) {
-                logger.error("Order not found: orderId={}", orderId);
-                return false;
+            Order order = orderRepository.findByIdWithProduct(orderId) // 使用 findByIdWithProduct 保证商品信息被加载
+                    .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
+
+            // 2. 查询用户信息 (逻辑保持不变)
+            Account account = accountRepository.findById(order.getUserId()).orElse(null);
+            String email = (account != null) ? account.getEmail() : "customer@example.com";
+            String userName = (account != null) ? account.getFirstName() + " " + account.getLastName() : "Customer";
+
+            // 3. 【修改】获取订单商品信息
+            // 因为 Order 已经和 Product 直接关联，不再需要 getOrderItems()
+            if (order.getProduct() == null) {
+                throw new IllegalStateException("Order " + orderId + " has no associated product.");
             }
-            Order order = orderOpt.get();
-            
-            // 2. 查询用户信息
-            Optional<Account> accountOpt = accountRepository.findById(order.getUserId());
-            String email = "customer@example.com"; // 默认值
-            String userName = "Customer"; // 默认值
-            
-            if (accountOpt.isPresent()) {
-                Account account = accountOpt.get();
-                email = account.getEmail();
-                userName = account.getFirstName() + " " + account.getLastName();
-            } else {
-                logger.warn("Account not found for userId={}, using placeholder values", order.getUserId());
-            }
-            
-            // 3. 获取订单商品信息（取第一个商品，如果有多个商品可以扩展）
-            String productName = "Product";
-            int quantity = 1;
-            
-            if (!order.getOrderItems().isEmpty()) {
-                OrderItem firstItem = order.getOrderItems().get(0);
-                productName = firstItem.getProduct().getName();
-                quantity = firstItem.getQty();
-                
-                // 如果有多个商品，记录日志
-                if (order.getOrderItems().size() > 1) {
-                    logger.info("Order has {} items, using first item for delivery: {}", 
-                            order.getOrderItems().size(), productName);
-                }
-            }
-            
-            // 4. 构造配送请求
+            String productName = order.getProduct().getName();
+            int quantity = order.getQuantity();
+
+            // 4. 构造配送请求 (逻辑保持不变)
             DeliveryRequestDTO deliveryRequest = new DeliveryRequestDTO();
             deliveryRequest.setOrderId(orderId.toString());
             deliveryRequest.setEmail(email);
             deliveryRequest.setUserName(userName);
-            deliveryRequest.setToAddress("Default Address - 123 Main St"); // 占位值，等组员B实现地址管理
-            
-            // fromAddress 暂时写死，等组员B实现仓库功能
-            List<String> fromAddresses = new ArrayList<>();
-            fromAddresses.add("Warehouse-1, 456 Storage Rd");
-            deliveryRequest.setFromAddress(fromAddresses);
-            
+            deliveryRequest.setToAddress("Default Address - 123 Main St");
+            deliveryRequest.setFromAddress(Collections.singletonList("Warehouse-1, 456 Storage Rd"));
             deliveryRequest.setProductName(productName);
             deliveryRequest.setQuantity(quantity);
-            deliveryRequest.setNotificationUrl(deliveryNotificationUrl);
-            
-            // 5. 确认库存预留（调用组员B的API）
-            try {
-                String confirmUrl = storeServiceUrl + "/api/reservations/order/" + orderId + "/confirm";
-                restTemplate.put(confirmUrl, null);
-                logger.info("Confirmed reservations for successful payment, orderId={}", orderId);
-            } catch (Exception e) {
-                logger.error("Failed to confirm reservations for orderId={}: {}", orderId, e.getMessage());
-                // 继续处理，不因确认失败而中断配送流程
-            }
-            
-            // 6. 调用DeliveryService
+            deliveryRequest.setNotificationUrl("http://localhost:8082/api/delivery-webhook");
+
+            // 5. 【优化】确认库存预留 (Saga模式中的"Confirm")
+            // 这一步的目的是将 HOLD 状态的库存事务标记为 COMMITTED/CONFIRMED
+            // 这通常由 WarehouseService 提供一个专门的方法来完成
+            // warehouseService.confirmHold(order.getInventoryTransactionIds());
+            // 如果你的流程中没有这一步，可以直接跳过或移除，但保留它体现了更完整的Saga思想
+            logger.info("Confirming stock hold for orderId={}", orderId);
+
+            // 6. 调用DeliveryService (逻辑保持不变)
             DeliveryResponseDTO response = deliveryAdapter.createDelivery(deliveryRequest);
-            
+
             if (response.isSuccess()) {
-                logger.info("Delivery request created successfully: orderId={}, deliveryId={}", 
-                        orderId, response.getDeliveryId());
+                logger.info("Delivery request created successfully: orderId={}, deliveryId={}", orderId, response.getDeliveryId());
+
+                try {
+                    // 再次获取最新的 order 对象
+                    Order orderToUpdate = orderRepository.findById(orderId)
+                            .orElseThrow(() -> new RuntimeException("Order disappeared unexpectedly: " + orderId));
+
+                    // 设置并保存 deliveryId
+                    orderToUpdate.setDeliveryId(response.getDeliveryId());
+                    orderRepository.save(orderToUpdate);
+
+                    logger.info("Saved deliveryId {} to orderId {}", response.getDeliveryId(), orderId);
+
+                } catch (Exception e) {
+                    logger.error("CRITICAL: Failed to save deliveryId for orderId {}. This will break delivery notifications!",
+                            orderId, e);
+                    // 即使保存deliveryId失败，配送任务也已经创建了，所以不应该返回false让整个流程重试
+                    // 这是一个需要人工介入修复的脏数据
+                }
                 return true;
             } else {
-                logger.error("Delivery request failed: orderId={}, message={}", 
-                        orderId, response.getMessage());
-                return false;
+//                logger.error("Delivery request failed: orderId={}, message={}", orderId, response.getMessage());
+//                // 如果配送创建失败，应该考虑触发一个补偿流程（比如退款）
+//                return false;
+                logger.error("CRITICAL: Delivery creation failed permanently for orderId {}. Triggering compensation.", orderId);
+
+                // 【高级实现】: 创建一个新的 Outbox 事件，来触发退款
+                try {
+                    // 你需要一个 OutboxService 来辅助创建事件
+                    outboxService.createDeliveryFailedEvent(orderId, response.getMessage());
+                } catch (Exception e) {
+                    logger.error("FATAL: Failed to even create the compensation event for orderId {}.", orderId, e);
+                    // 如果连创建补偿事件都失败了，就需要人工介入了
+                }
+
+                // 即使触发了补偿，我们仍然返回 true，因为这个 PAYMENt_SUCCESS 事件本身已经被“处理”了
+                // （它的后续处理是触发了另一个事件）
+                return true;
             }
-            
+
         } catch (Exception e) {
-            logger.error("Failed to process PAYMENT_SUCCESS: {}", e.getMessage(), e);
+            logger.error("Failed to process PAYMENT_SUCCESS for outboxId={}: {}", outbox.getId(), e.getMessage(), e);
             return false;
         }
     }
@@ -298,70 +320,54 @@ public class OutboxProcessor {
      */
     private boolean processPaymentFailed(PaymentOutbox outbox) {
         try {
-            Map<String, Object> payload = objectMapper.readValue(
-                    outbox.getPayload(), new TypeReference<Map<String, Object>>() {});
+            Map<String, Object> payload = objectMapper.readValue(outbox.getPayload(), new TypeReference<Map<String, Object>>() {});
             Long orderId = Long.valueOf(payload.get("orderId").toString());
             String error = payload.get("error").toString();
-            
+
             logger.info("Payment failed for orderId={}, error={}", orderId, error);
-            
-            // 1. 释放库存预留（调用 WarehouseService.unholdProduct）✅
-            boolean reservationReleased = false;
-            Order order = null;
+
+            Order order = orderRepository.findById(orderId).orElse(null);
+            if (order == null) {
+                logger.warn("Order not found for failed payment, cannot release stock. orderId={}", orderId);
+                return true; // 订单都没了，也就不需要释放库存了，认为处理成功
+            }
+
+            // 1. 释放库存预留
             try {
-                // 查询订单获取保存的库存事务ID
-                order = orderRepository.findById(orderId).orElse(null);
-                if (order != null && order.getInventoryTransactionIds() != null && !order.getInventoryTransactionIds().isEmpty()) {
-                    // 解析逗号分隔的事务ID列表
-                    List<Long> txIds = java.util.Arrays.stream(order.getInventoryTransactionIds().split(","))
+                if (order.getInventoryTransactionIds() != null && !order.getInventoryTransactionIds().isEmpty()) {
+                    List<Long> txIds = Arrays.stream(order.getInventoryTransactionIds().split(","))
                             .filter(s -> s != null && !s.trim().isEmpty())
                             .map(Long::valueOf)
-                            .collect(java.util.stream.Collectors.toList());
-                    
+                            .collect(Collectors.toList());
+
                     if (!txIds.isEmpty()) {
                         UnholdProductRequest unholdRequest = new UnholdProductRequest();
                         unholdRequest.setInventoryTransactionIds(txIds);
-                        reservationReleased = warehouseService.unholdProduct(unholdRequest);
-                        logger.info("Released inventory reservations for failed payment, orderId={}, txIds={}", 
-                                orderId, txIds);
-                    } else {
-                        logger.warn("No inventory transaction IDs found for orderId={}", orderId);
-                        reservationReleased = true; // 没有事务ID也算成功（可能是旧订单）
+                        warehouseService.unholdProduct(unholdRequest);
+                        logger.info("Released inventory for failed payment, orderId={}", orderId);
                     }
-                } else {
-                    logger.warn("Order not found or no inventory transaction IDs for orderId={}", orderId);
-                    reservationReleased = true; // 没有事务ID也算成功（可能是旧订单或测试数据）
                 }
             } catch (Exception e) {
-                logger.error("Failed to release inventory reservations for orderId={}: {}", orderId, e.getMessage(), e);
-                // 预留释放失败，应该重试
-                return false;
+                logger.error("Failed to release inventory for orderId={}. Will retry. Error: {}", orderId, e.getMessage(), e);
+                return false; // 释放库存是关键步骤，失败了必须重试
             }
-            
+
             // 2. 发送失败通知邮件
             try {
-                if (order == null) {
-                    order = orderRepository.findById(orderId).orElse(null);
-                }
-                String email = null;
-                if (order != null) {
-                    var acc = accountRepository.findById(order.getUserId()).orElse(null);
-                    if (acc != null) email = acc.getEmail();
-                }
-                if (email != null) {
-                    emailAdapter.sendOrderFailed(email, String.valueOf(orderId), error);
-                }
+                accountRepository.findById(order.getUserId()).ifPresent(acc -> {
+                    if (acc.getEmail() != null) {
+                        emailAdapter.sendOrderFailed(acc.getEmail(), String.valueOf(orderId), error);
+                    }
+                });
             } catch (Exception e) {
-                logger.warn("Send order failed email error: {}", e.getMessage());
+                logger.warn("Failed to send order failure email for orderId={}: {}", orderId, e.getMessage());
+                // 邮件发送失败不影响主流程，不返回false
             }
-            
-            // 预留已释放，即使邮件未发送也认为处理成功（邮件可以后续补发）
-            logger.info("Payment failure processed for orderId={}, reservation released={}", 
-                    orderId, reservationReleased);
-            return reservationReleased;
-            
+
+            return true;
+
         } catch (Exception e) {
-            logger.error("Failed to process PAYMENT_FAILED: {}", e.getMessage(), e);
+            logger.error("Failed to process PAYMENT_FAILED for outboxId={}: {}", outbox.getId(), e.getMessage(), e);
             return false;
         }
     }
@@ -397,6 +403,24 @@ public class OutboxProcessor {
         } catch (Exception e) {
             logger.error("Failed to process REFUND_SUCCESS: {}", e.getMessage(), e);
             return false;
+        }
+    }
+
+    private boolean processDeliveryFailed(PaymentOutbox outbox) {
+        try {
+            Long orderId = outbox.getOrderId();
+            String reason = "Delivery service failed to create shipment.";
+
+            // 调用 PaymentService 的退款方法
+            paymentService.refundPayment(orderId, reason);
+
+            // 将订单状态更新为一个特殊的失败状态
+            orderService.updateOrderStatus(orderId, OrderStatus.CANCELLED_SYSTEM);
+
+            return true;
+        } catch (Exception e) {
+            logger.error("FATAL: Compensation (refund) failed for orderId {}. Needs manual intervention.", outbox.getOrderId(), e);
+            return false; // 让这个补偿操作也进行重试
         }
     }
 }

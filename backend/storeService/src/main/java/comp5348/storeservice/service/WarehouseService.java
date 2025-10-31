@@ -156,56 +156,60 @@ public class WarehouseService {
                 .orElse(false);
     }
 
-    public WarehouseDTO getAndUpdateAvailableWarehouse(long productId, int quantity) {
+    @Transactional // 确保加上注解
+    public WarehouseDTO getAndUpdateAvailableWarehouse(long productId, int quantity, Long orderId) { // 建议传入 orderId
         List<WarehouseProduct> availableProducts = warehouseProductRepository.findByProductIdAndQuantity(productId);
-        List<WarehouseDTO> warehouseDTOs = new ArrayList<>();
-        List<Long> inventoryTransactionIds = new ArrayList<>();
+
+        // --- 步骤1: 纯内存计算和检查 ---
+        int totalAvailable = availableProducts.stream().mapToInt(WarehouseProduct::getQuantity).sum();
+        if (totalAvailable < quantity) {
+            logger.warn("Insufficient stock for product: {}. Required: {}, Available: {}", productId, quantity, totalAvailable);
+            return null; // 库存不足，直接返回
+        }
+
         int remainingQuantity = quantity;
-        List<WarehouseProduct> updatedProducts = new ArrayList<>();
+        List<WarehouseProduct> productsToUpdate = new ArrayList<>();
+        List<InventoryTransaction> transactionsToCreate = new ArrayList<>();
+        List<WarehouseDTO> warehouseDTOs = new ArrayList<>(); // 用于返回
 
         for (WarehouseProduct wp : availableProducts) {
             if (remainingQuantity <= 0) break;
 
-            int availableQuantity = wp.getQuantity();
-            int quantityToTake = Math.min(availableQuantity, remainingQuantity);
+            int quantityToTake = Math.min(wp.getQuantity(), remainingQuantity);
 
-            WarehouseDTO dto = new WarehouseDTO();
-            dto.setId(wp.getWarehouse().getId());
-            dto.setName(wp.getWarehouse().getName());
-            dto.setLocation(wp.getWarehouse().getLocation());
-            warehouseDTOs.add(dto);
+            // 更新库存实体（仅在内存中）
+            wp.setQuantity(wp.getQuantity() - quantityToTake);
+            productsToUpdate.add(wp);
 
-            remainingQuantity -= quantityToTake;
-
-            WarehouseProduct updatedWp = new WarehouseProduct(wp);
-            updatedWp.setQuantity(availableQuantity - quantityToTake);
-            updatedProducts.add(updatedWp);
-
+            // 创建事务实体（仅在内存中）
             InventoryTransaction tx = new InventoryTransaction();
             tx.setProduct(wp.getProduct());
             tx.setWarehouse(wp.getWarehouse());
             tx.setQuantity(quantityToTake);
             tx.setType(InventoryTransactionType.HOLD);
             tx.setTransactionTime(LocalDateTime.now());
-            InventoryTransaction saved = inventoryTransactionRepository.save(tx);
-            inventoryTransactionIds.add(saved.getId());
+            // tx.setOrderId(orderId); // 关联到订单
+            transactionsToCreate.add(tx);
+
+            remainingQuantity -= quantityToTake;
+
+            // 准备返回的DTO
+            warehouseDTOs.add(new WarehouseDTO(wp.getWarehouse()));
         }
 
-        if (remainingQuantity > 0) {
-            logger.warn("insufficient stock for product: {}, remaining quantity needed: {}", productId, remainingQuantity);
-            return null;
-        }
+        // --- 步骤2: 统一数据库写入 ---
+        warehouseProductRepository.saveAll(productsToUpdate);
+        List<InventoryTransaction> savedTxs = inventoryTransactionRepository.saveAll(transactionsToCreate);
+        List<Long> inventoryTransactionIds = savedTxs.stream().map(InventoryTransaction::getId).collect(Collectors.toList());
 
-        for (WarehouseProduct wp : updatedProducts) {
-            warehouseProductRepository.save(wp);
-        }
-
-        WarehouseDTO resp = new WarehouseDTO();
-        resp.setWarehouses(warehouseDTOs);
-        resp.setInventoryTransactionIds(inventoryTransactionIds);
-        return resp;
+        // --- 步骤3: 准备并返回响应 ---
+        WarehouseDTO responseDTO = new WarehouseDTO();
+        responseDTO.setWarehouses(warehouseDTOs);
+        responseDTO.setInventoryTransactionIds(inventoryTransactionIds);
+        return responseDTO;
     }
 
+    @Transactional
     public boolean unholdProduct(UnholdProductRequest request) {
         List<Long> ids = request.getInventoryTransactionIds();
         if (ids == null || ids.isEmpty()) return false;

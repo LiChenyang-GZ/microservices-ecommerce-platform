@@ -36,13 +36,23 @@ public class Order {
     
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;
-    
-    @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    private List<OrderItem> orderItems = new ArrayList<>();
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "product_id", nullable = false)
+    private Product product; // 直接关联到具体商品
+
+    @Column(nullable = false)
+    private Integer quantity; // 购买数量
+
+    @Column(name = "unit_price", nullable = false, precision = 10, scale = 2)
+    private BigDecimal unitPrice;
 
     // 逗号分隔的库存事务ID列表（HOLD 记录），用于取消/失败时回滚
     @Column(name = "inventory_transaction_ids", length = 1000)
     private String inventoryTransactionIds;
+
+    @Column(name = "delivery_id", unique = true) // delivery_id 应该是唯一的
+    private Long deliveryId;
     
     @PrePersist
     protected void onCreate() {

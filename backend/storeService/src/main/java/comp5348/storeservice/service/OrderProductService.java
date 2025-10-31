@@ -66,7 +66,7 @@ public class OrderProductService {
         for (CreateOrderRequest.OrderItemRequest item : request.getOrderItems()) {
             comp5348.storeservice.model.Product p = productRepository.findById(item.getProductId())
                     .orElseThrow(() -> new RuntimeException("Product not found: " + item.getProductId()));
-            estimatedTotal = estimatedTotal.add(p.getPrice().multiply(java.math.BigDecimal.valueOf(item.getQty())));
+            estimatedTotal = estimatedTotal.add(p.getPrice().multiply(java.math.BigDecimal.valueOf(item.getQuantity())));
         }
 
         // 0.1 仅允许用户个人账户下单；若无账户或余额不足，则直接拒单

@@ -93,18 +93,25 @@ public class ProductService {
     /**
      * 創建新商品
      */
+    /**
+     * 創建新商品 (不处理库存)
+     */
     public ProductDTO createProduct(ProductDTO productDTO) {
         logger.info("Creating new product: {}", productDTO.getName());
-        
+
         Product product = new Product();
         product.setName(productDTO.getName());
         product.setPrice(productDTO.getPrice());
         product.setDescription(productDTO.getDescription());
-        product.setStockQuantity(productDTO.getStockQuantity());
-        
+
+        // 新创建的商品，库存默认为 0
+        // 如果你的数据库字段不允许为 null，并且有默认值0，这行可以省略
+        product.setStockQuantity(0);
+
         Product savedProduct = productRepository.save(product);
         logger.info("Product created successfully with id: {}", savedProduct.getId());
-        
+
+        // 注意：这里的 convertToDTO 可能会从 WarehouseService 获取库存，所以返回的 DTO 仍然会有库存信息
         return convertToDTO(savedProduct);
     }
     
@@ -113,18 +120,21 @@ public class ProductService {
      */
     public ProductDTO updateProduct(Long productId, ProductDTO productDTO) {
         logger.info("Updating product: {}", productId);
-        
+
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new RuntimeException("Product not found: " + productId));
-        
+
+        // 只更新商品目录信息
         product.setName(productDTO.getName());
         product.setPrice(productDTO.getPrice());
         product.setDescription(productDTO.getDescription());
-        product.setStockQuantity(productDTO.getStockQuantity());
-        
+
+        // --- 关键：不要在这里修改库存 ---
+        // 移除 product.setStockQuantity(productDTO.getStockQuantity());
+
         Product savedProduct = productRepository.save(product);
         logger.info("Product updated successfully");
-        
+
         return convertToDTO(savedProduct);
     }
     
