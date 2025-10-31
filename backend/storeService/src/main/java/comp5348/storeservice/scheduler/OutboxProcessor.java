@@ -170,7 +170,16 @@ public class OutboxProcessor {
                     break;
 
                 case DELIVERY_FAILED:
-                    success = processDeliveryFailed(outbox);
+                    // DELIVERY_FAILED 事件需要等待30秒后才处理
+                    boolean compensationTriggered = processDeliveryFailed(outbox);
+                    if (!compensationTriggered) {
+                        // 返回false表示还在等待期间（还没到30秒）
+                        // 不处理，也不增加重试次数，等待下次扫描
+                        logger.debug("DELIVERY_FAILED event for orderId {} still waiting, skipping this round.", outbox.getOrderId());
+                        return; // 直接返回，不更新outbox状态，下次定时任务会再次扫描
+                    }
+                    // 返回true表示已经触发补偿
+                    success = true;
                     break;
 
                 default:
@@ -431,7 +440,25 @@ public class OutboxProcessor {
 
     private boolean processDeliveryFailed(PaymentOutbox outbox) {
         Long orderId = outbox.getOrderId();
-        String reason = "Delivery service failed to create shipment.";
+        LocalDateTime createdAt = outbox.getCreatedAt();
+        LocalDateTime now = LocalDateTime.now();
+        
+        // 计算等待时间（秒）
+        long waitSeconds = java.time.Duration.between(createdAt, now).getSeconds();
+        long requiredWaitSeconds = 30; // 需要等待30秒
+        
+        if (waitSeconds < requiredWaitSeconds) {
+            // 还没到30秒，继续等待，不触发补偿
+            long remainingSeconds = requiredWaitSeconds - waitSeconds;
+            logger.info("DELIVERY_FAILED event for orderId {} is waiting. Created {}s ago, need to wait {}s more before compensation.", 
+                    orderId, waitSeconds, remainingSeconds);
+            return false; // 返回false表示不处理，下次再检查
+        }
+        
+        // 已经等待了30秒，触发补偿机制
+        logger.warn("DELIVERY_FAILED event for orderId {} has waited {}s. Triggering compensation (refund).", 
+                orderId, waitSeconds);
+        String reason = "Delivery service failed to create shipment after waiting 30 seconds.";
         return compensationService.compensateDeliveryFailed(orderId, reason);
     }
 }
