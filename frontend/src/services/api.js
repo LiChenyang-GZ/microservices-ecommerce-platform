@@ -26,6 +26,57 @@ api.interceptors.request.use(
   }
 );
 
+// 格式化错误消息的工具函数
+const formatErrorMessage = (error) => {
+  if (!error.response || !error.response.data) {
+    return error.message || '未知错误';
+  }
+
+  const { status, data } = error.response;
+  
+  // Bean Validation 错误 (400) - 提取字段错误
+  if (status === 400 && data.errors) {
+    const fieldErrors = data.errors
+      .map(err => {
+        const field = err.field || err.propertyPath || '';
+        const msg = err.message || err.defaultMessage || '';
+        return field ? `${field}: ${msg}` : msg;
+      })
+      .join('; ');
+    return fieldErrors || data.message || '请求参数验证失败';
+  }
+
+  // 400 错误 - 尝试提取 message
+  if (status === 400) {
+    if (data.message) return data.message;
+    if (data.error) return data.error;
+    return '请求参数错误，请检查输入';
+  }
+
+  // 401 未授权
+  if (status === 401) {
+    return '登录已过期，请重新登录';
+  }
+
+  // 403 禁止访问
+  if (status === 403) {
+    return data.message || '没有权限执行此操作';
+  }
+
+  // 404 未找到
+  if (status === 404) {
+    return data.message || '资源未找到';
+  }
+
+  // 500 服务器错误
+  if (status >= 500) {
+    return data.message || '服务器错误，请稍后重试';
+  }
+
+  // 其他错误
+  return data.message || data.error || `HTTP ${status}: 请求失败`;
+};
+
 // 响应拦截器
 api.interceptors.response.use(
   (response) => {
@@ -33,12 +84,28 @@ api.interceptors.response.use(
     return response;
   },
   (error) => {
-    console.error('响应错误:', error);
+    // 格式化错误消息
+    const errorMessage = formatErrorMessage(error);
+    
+    // 提取详细的错误信息用于控制台输出
+    const errorDetails = {
+      message: errorMessage,
+      status: error.response?.status,
+      data: error.response?.data,
+      url: error.config?.url,
+      method: error.config?.method?.toUpperCase()
+    };
+
+    console.error('【响应错误详情】', errorDetails);
+    
+    // 将格式化后的错误消息附加到 error 对象上，方便组件使用
+    error.formattedMessage = errorMessage;
+    error.errorDetails = errorDetails;
+
     // 统一处理错误
     if (error.response) {
       // 服务器返回了错误状态码
-      const { status, data } = error.response;
-      console.error(`HTTP ${status}:`, data);
+      const { status } = error.response;
       
       // 如果是 401 未授权，清除 token 并跳转到登录页
       if (status === 401) {
@@ -54,9 +121,11 @@ api.interceptors.response.use(
     } else if (error.request) {
       // 请求已发出但没有收到响应
       console.error('网络错误: 无法连接到服务器');
+      error.formattedMessage = '网络错误：无法连接到服务器，请检查网络连接';
     } else {
       // 其他错误
       console.error('请求配置错误:', error.message);
+      error.formattedMessage = error.message || '请求配置错误';
     }
     return Promise.reject(error);
   }
@@ -273,6 +342,7 @@ export const orderAPI = {
       const response = await api.get(`/store/orders/user/${userId}/with-payment`);
       return response.data;
     } catch (error) {
+      
       throw error;
     }
   },
@@ -303,10 +373,15 @@ export const checkoutAPI = {
     try {
       const response = await api.post('/store/orders/create-with-payment', {
         userId,
-        orderItems: items
+        orderItems: items.map(item => ({
+          productId: item.productId,
+          quantity: item.qty || item.quantity || 1
+        }))
       });
       return response.data; // OrderResponse
     } catch (error) {
+      // 错误已在拦截器中格式化，直接抛出即可
+      console.error('【下单失败】', error.errorDetails || error);
       throw error;
     }
   }
@@ -355,6 +430,8 @@ export const paymentAPI = {
       const response = await api.get(`/payments/order/${orderId}`);
       return response.data;
     } catch (error) {
+      // 错误已在拦截器中格式化，直接抛出即可
+      console.error('【查询支付状态失败】', error.errorDetails || error);
       throw error;
     }
   },
@@ -365,9 +442,12 @@ export const paymentAPI = {
       const response = await api.post(`/payments/${orderId}/refund`, { reason });
       return response.data;
     } catch (error) {
+      // 错误已在拦截器中格式化，直接抛出即可
+      console.error('【退款失败】', error.errorDetails || error);
       throw error;
     }
   }
+  
 };
 
 export default api;

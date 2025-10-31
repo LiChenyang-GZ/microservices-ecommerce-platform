@@ -61,7 +61,31 @@ export default function CheckoutPage() {
       }
     } catch (e) {
       console.error('下单失败:', e);
-      setError(e?.response?.data?.message || '下单失败，请稍后重试');
+      // 使用格式化后的错误消息，如果不存在则尝试从 response.data 提取
+      const errorMsg = e?.formattedMessage || 
+                       e?.response?.data?.message || 
+                       e?.message || 
+                       '下单失败，请稍后重试';
+      
+      // 如果是 400 错误，尝试显示详细的验证错误
+      if (e?.response?.status === 400 && e?.response?.data) {
+        const data = e.response.data;
+        if (data.errors && Array.isArray(data.errors)) {
+          // Bean Validation 错误 - 显示所有字段错误
+          const detailedErrors = data.errors.map(err => {
+            const field = err.field || err.propertyPath || '参数';
+            const msg = err.message || err.defaultMessage || '验证失败';
+            return `• ${field}: ${msg}`;
+          }).join('\n');
+          setError(`请求参数错误：\n${detailedErrors}`);
+        } else if (data.message) {
+          setError(data.message);
+        } else {
+          setError(errorMsg);
+        }
+      } else {
+        setError(errorMsg);
+      }
     } finally {
       setLoading(false);
     }
@@ -75,7 +99,12 @@ export default function CheckoutPage() {
 
       <h1>确认订单</h1>
 
-      {error && <div className="co-error">{error}</div>}
+      {error && (
+        <div className="co-error">
+          <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>⚠️ 错误信息：</div>
+          <div style={{ whiteSpace: 'pre-line', fontSize: '14px' }}>{error}</div>
+        </div>
+      )}
 
       {product ? (
         <div className="co-card">
@@ -106,7 +135,7 @@ export default function CheckoutPage() {
       <style>{`
         .co-container{max-width:720px;margin:0 auto;padding:24px}
         .co-back{background:none;border:none;color:#555;cursor:pointer;margin-bottom:12px}
-        .co-error{color:#b00020;background:#ffeaea;border:1px solid #ffb3b3;padding:12px;border-radius:8px;margin-bottom:12px}
+        .co-error{color:#b00020;background:#ffeaea;border:1px solid #ffb3b3;padding:12px;border-radius:8px;margin-bottom:12px;line-height:1.6}
         .co-card{background:#fff;border:1px solid #eee;border-radius:10px;padding:16px}
         .co-row{display:flex;justify-content:space-between;align-items:center;margin:10px 0}
         .co-name{font-weight:600}

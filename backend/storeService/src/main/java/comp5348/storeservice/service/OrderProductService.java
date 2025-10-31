@@ -66,15 +66,23 @@ public class OrderProductService {
         for (CreateOrderRequest.OrderItemRequest item : request.getOrderItems()) {
             comp5348.storeservice.model.Product p = productRepository.findById(item.getProductId())
                     .orElseThrow(() -> new RuntimeException("Product not found: " + item.getProductId()));
-            estimatedTotal = estimatedTotal.add(p.getPrice().multiply(java.math.BigDecimal.valueOf(item.getQuantity())));
+            int qty = (item.getQuantity() == null || item.getQuantity() <= 0) ? 1 : item.getQuantity();
+            estimatedTotal = estimatedTotal.add(p.getPrice().multiply(java.math.BigDecimal.valueOf(qty)));
         }
 
         // 0.1 仅允许用户个人账户下单；若无账户或余额不足，则直接拒单
         var userAcc = accountRepository.findById(request.getUserId()).orElse(null);
-        if (userAcc == null || userAcc.getBankAccountNumber() == null || userAcc.getBankAccountNumber().isEmpty()) {
-            throw new IllegalStateException("User has no linked bank account. Please bind a bank account before ordering");
+        String fromAccount;
+        if (userAcc == null) {
+            throw new IllegalStateException("User not found: " + request.getUserId());
         }
-        String fromAccount = userAcc.getBankAccountNumber();
+        if (userAcc.getBankAccountNumber() == null || userAcc.getBankAccountNumber().isEmpty()) {
+            // 回退到全局默认客户账户，便于本地演示；生产应强制绑定
+            logger.warn("User {} has no linked bank account. Falling back to default customer account {}.", request.getUserId(), customerAccount);
+            fromAccount = customerAccount;
+        } else {
+            fromAccount = userAcc.getBankAccountNumber();
+        }
 
         java.math.BigDecimal balance = bankAdapter.getBalance(fromAccount);
         if (balance == null) {

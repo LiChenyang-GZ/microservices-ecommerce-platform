@@ -53,6 +53,9 @@ public class OutboxProcessor {
 
     @Autowired
     private OutboxService outboxService;
+
+    @Autowired
+    private comp5348.storeservice.service.CompensationService compensationService;
     
     @Autowired
     private AccountRepository accountRepository;
@@ -128,7 +131,27 @@ public class OutboxProcessor {
         try {
             boolean success = false;
 
-            PaymentStatus eventType = PaymentStatus.valueOf(outbox.getEventType()); // 将字符串转换为Enum
+            // 兼容历史/异步消息中的事件名：如 PAYMENT_PENDING/PAYMENT_SUCCESS/REFUND_SUCCESS
+            String rawEventType = outbox.getEventType();
+            String normalized;
+            if (rawEventType == null) {
+                throw new IllegalArgumentException("Outbox eventType is null");
+            }
+            switch (rawEventType) {
+                case "PAYMENT_PENDING":
+                    normalized = "PENDING"; break;
+                case "PAYMENT_SUCCESS":
+                    normalized = "SUCCESS"; break;
+                case "PAYMENT_FAILED":
+                    normalized = "FAILED"; break;
+                case "REFUND_SUCCESS":
+                    normalized = "REFUNDED"; break;
+                default:
+                    // 去掉统一前缀以提高健壮性
+                    normalized = rawEventType.replaceFirst("^PAYMENT_", "");
+            }
+
+            PaymentStatus eventType = PaymentStatus.valueOf(normalized); // 将字符串转换为Enum
             switch (eventType) {
                 case PENDING:
                     success = processPaymentPending(outbox);
@@ -142,11 +165,11 @@ public class OutboxProcessor {
                     success = processPaymentFailed(outbox);
                     break;
 
-                case REFUNDED: // 假设 PaymentStatus 里有 REFUNDED
+                case REFUNDED:
                     success = processRefundSuccess(outbox);
                     break;
 
-                case DELIVERY_FAILED: // 假设 PaymentStatus/EventType 枚举中有这个
+                case DELIVERY_FAILED:
                     success = processDeliveryFailed(outbox);
                     break;
 
@@ -407,21 +430,9 @@ public class OutboxProcessor {
     }
 
     private boolean processDeliveryFailed(PaymentOutbox outbox) {
-        try {
-            Long orderId = outbox.getOrderId();
-            String reason = "Delivery service failed to create shipment.";
-
-            // 调用 PaymentService 的退款方法
-            paymentService.refundPayment(orderId, reason);
-
-            // 将订单状态更新为一个特殊的失败状态
-            orderService.updateOrderStatus(orderId, OrderStatus.CANCELLED_SYSTEM);
-
-            return true;
-        } catch (Exception e) {
-            logger.error("FATAL: Compensation (refund) failed for orderId {}. Needs manual intervention.", outbox.getOrderId(), e);
-            return false; // 让这个补偿操作也进行重试
-        }
+        Long orderId = outbox.getOrderId();
+        String reason = "Delivery service failed to create shipment.";
+        return compensationService.compensateDeliveryFailed(orderId, reason);
     }
 }
 

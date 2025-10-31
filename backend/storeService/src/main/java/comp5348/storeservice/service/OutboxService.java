@@ -1,9 +1,7 @@
 package comp5348.storeservice.service;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import comp5348.storeservice.model.OrderStatus;
 import comp5348.storeservice.model.PaymentOutbox;
 import comp5348.storeservice.model.PaymentStatus;
 import comp5348.storeservice.repository.PaymentOutboxRepository;
@@ -25,12 +23,6 @@ public class OutboxService {
     @Autowired
     private PaymentOutboxRepository outboxRepository;
 
-    @Autowired
-    private OrderService orderService;
-
-    @Autowired
-    private PaymentService paymentService;
-
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -47,7 +39,8 @@ public class OutboxService {
 
             PaymentOutbox outbox = new PaymentOutbox();
             outbox.setOrderId(orderId);
-            outbox.setEventType("PAYMENT_PENDING");
+            // 统一使用 PaymentStatus 枚举名，避免与处理器不一致
+            outbox.setEventType(PaymentStatus.PENDING.name());
             outbox.setPayload(objectMapper.writeValueAsString(payload));
             outbox.setStatus("PENDING");
             outbox.setRetryCount(0);
@@ -74,7 +67,8 @@ public class OutboxService {
 
             PaymentOutbox outbox = new PaymentOutbox();
             outbox.setOrderId(orderId);
-            outbox.setEventType("PAYMENT_SUCCESS");
+            // 统一使用 PaymentStatus 枚举名
+            outbox.setEventType(PaymentStatus.SUCCESS.name());
             outbox.setPayload(objectMapper.writeValueAsString(payload));
             outbox.setStatus("PENDING");
             outbox.setRetryCount(0);
@@ -101,7 +95,8 @@ public class OutboxService {
 
             PaymentOutbox outbox = new PaymentOutbox();
             outbox.setOrderId(orderId);
-            outbox.setEventType("PAYMENT_FAILED");
+            // 统一使用 PaymentStatus 枚举名
+            outbox.setEventType(PaymentStatus.FAILED.name());
             outbox.setPayload(objectMapper.writeValueAsString(payload));
             outbox.setStatus("PENDING");
             outbox.setRetryCount(0);
@@ -128,7 +123,8 @@ public class OutboxService {
 
             PaymentOutbox outbox = new PaymentOutbox();
             outbox.setOrderId(orderId);
-            outbox.setEventType("REFUND_SUCCESS");
+            // 统一使用 PaymentStatus 枚举名（而非 REFUND_SUCCESS 字符串）
+            outbox.setEventType(PaymentStatus.REFUNDED.name());
             outbox.setPayload(objectMapper.writeValueAsString(payload));
             outbox.setStatus("PENDING");
             outbox.setRetryCount(0);
@@ -157,32 +153,6 @@ public class OutboxService {
         outboxMessage.setPayload(objectMapper.writeValueAsString(payload));
 
         outboxRepository.save(outboxMessage);
-    }
-
-    private boolean processDeliveryFailed(PaymentOutbox outbox) {
-        try {
-            Long orderId = outbox.getOrderId();
-            Map<String, Object> payload = objectMapper.readValue(outbox.getPayload(), new TypeReference<>() {});
-            String reason = (String) payload.getOrDefault("reason", "Delivery creation failed.");
-
-            logger.warn("Processing DELIVERY_FAILED compensation for orderId: {}. Reason: {}", orderId, reason);
-
-            // 1. 调用 PaymentService 的退款方法
-            paymentService.refundPayment(orderId, "Auto-refund: " + reason);
-
-            // 2. 将订单状态更新为一个特殊的失败状态 (可选，但推荐)
-            // 你可能需要在 OrderStatus 中添加一个 CANCELLED_SYSTEM 状态
-            orderService.updateOrderStatus(orderId, OrderStatus.CANCELLED);
-
-            logger.info("Compensation (refund and cancellation) completed for orderId: {}", orderId);
-
-            return true; // 补偿流程成功
-
-        } catch (Exception e) {
-            logger.error("FATAL: Compensation (refund) for DELIVERY_FAILED event failed for orderId: {}. Needs manual intervention.",
-                    outbox.getOrderId(), e);
-            return false; // 让这个补偿操作也进行重试
-        }
     }
 }
 

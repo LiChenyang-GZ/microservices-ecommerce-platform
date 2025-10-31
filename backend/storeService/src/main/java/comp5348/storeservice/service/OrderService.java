@@ -284,13 +284,41 @@ public class OrderService {
 
         // 根据外部的 DeliveryStatus，“翻译”成我们内部的 OrderStatus
         // 这是“防腐层”的核心逻辑
-        OrderStatus newStatus = translateDeliveryStatus(notification.getStatus());
+        String incomingStatus = notification.getStatus();
+        OrderStatus newStatus = translateDeliveryStatus(incomingStatus);
 
         // 如果新状态不为空，并且与当前状态不同，则更新
         if (newStatus != null && order.getStatus() != newStatus) {
             order.setStatus(newStatus);
             orderRepository.save(order);
             logger.info("Order status updated to {} for orderId={}", newStatus, orderId);
+
+            // 如果是配送方上报的 LOST（我们映射为 CANCELLED），则触发退款
+            if ("LOST".equalsIgnoreCase(incomingStatus)) {
+                try {
+                    Optional<Payment> payOpt = paymentService.getPaymentByOrderId(orderId);
+                    if (payOpt.isPresent() && payOpt.get().getStatus() != PaymentStatus.REFUNDED) {
+                        paymentService.refundPayment(orderId, "自动退款：配送丢失");
+                        logger.info("Refund triggered for LOST delivery, orderId={}", orderId);
+                    } else {
+                        logger.info("Refund already done or payment missing for orderId={}, skip.", orderId);
+                    }
+                } catch (Exception e) {
+                    logger.error("Refund on LOST failed for orderId={}: {}", orderId, e.getMessage(), e);
+                }
+
+                // 发送取消订单（因丢失）通知邮件（与退款成功邮件互补）
+                try {
+                    accountRepository.findById(order.getUserId()).ifPresent(acc -> {
+                        String email = acc.getEmail();
+                        if (email != null && !email.isEmpty()) {
+                            emailAdapter.sendOrderCancelled(email, String.valueOf(orderId), "包裹在配送过程中丢失，系统已为您发起退款");
+                        }
+                    });
+                } catch (Exception mailEx) {
+                    logger.warn("Send order-cancelled email failed for orderId={}: {}", orderId, mailEx.getMessage());
+                }
+            }
 
             // 异步发送邮件通知用户
             sendEmailForStatusUpdate(order, newStatus);
@@ -312,8 +340,8 @@ public class OrderService {
             case "PICKED_UP" -> OrderStatus.SHIPPED;
             case "DELIVERING" -> OrderStatus.IN_TRANSIT;
             case "RECEIVED", "DELIVERED" -> OrderStatus.DELIVERED;
-            // LOST 和 CANCELLED 也可以在这里处理，比如都映射到 CANCELLED
-            case "CANCELLED" -> OrderStatus.CANCELLED;
+            // 将 LOST 与 CANCELLED 都映射到订单的 CANCELLED
+            case "CANCELLED", "LOST" -> OrderStatus.CANCELLED;
             default -> null; // 对于不关心的状态（如CREATED），我们不进行更新
         };
     }

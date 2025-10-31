@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import jakarta.validation.Valid;
 
 import java.util.List;
 
@@ -33,7 +34,7 @@ public class StoreController {
      * POST /api/store/orders/create-with-payment
      */
     @PostMapping("/orders/create-with-payment")
-    public ResponseEntity<OrderResponse> createOrderWithPayment(@RequestBody CreateOrderRequest request) {
+    public ResponseEntity<OrderResponse> createOrderWithPayment(@Valid @RequestBody CreateOrderRequest request) {
         logger.info("POST /api/store/orders/create-with-payment - Creating order with payment for user: {}", 
                    request.getUserId());
         

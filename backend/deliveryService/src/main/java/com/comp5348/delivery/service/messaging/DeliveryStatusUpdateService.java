@@ -33,7 +33,7 @@ public class DeliveryStatusUpdateService {
 
     // 模拟配送的常量
     private static final int BASE_WAIT_TIME_MS = 10000; // 基础等待时间：10秒
-    private static final double PACKAGE_LOSS_RATE = 0.05; // 5% 的丢包率
+    private static final double PACKAGE_LOSS_RATE = 1; // 100% 的丢包率
 
     @Autowired
     public DeliveryStatusUpdateService(DeliveryRepository deliveryRepository,
