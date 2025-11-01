@@ -307,16 +307,16 @@ public class OrderService {
                     logger.error("Refund on LOST failed for orderId={}: {}", orderId, e.getMessage(), e);
                 }
 
-                // Send order cancellation (due to loss) notification email (complementary to refund success email)
+                // Send order lost email notification (complementary to refund success email)
                 try {
                     accountRepository.findById(order.getUserId()).ifPresent(acc -> {
                         String email = acc.getEmail();
                         if (email != null && !email.isEmpty()) {
-                            emailAdapter.sendOrderCancelled(email, String.valueOf(orderId), "Package lost during delivery, system has initiated refund");
+                            emailAdapter.sendOrderLost(email, String.valueOf(orderId), "Package lost during delivery, system has initiated refund");
                         }
                     });
                 } catch (Exception mailEx) {
-                    logger.warn("Send order-cancelled email failed for orderId={}: {}", orderId, mailEx.getMessage());
+                    logger.warn("Failed to send order lost email for orderId={}: {}", orderId, mailEx.getMessage());
                 }
             }
 
@@ -356,14 +356,24 @@ public class OrderService {
                 if (email != null && !email.isEmpty()) {
                     switch (newStatus) {
                         case SHIPPED:
-                            // emailAdapter.sendOrderShipped(email, String.valueOf(order.getId()));
-                            logger.info("Pretending to send SHIPPED email to {}", email);
+                            // When status changes to SHIPPED, it means package was picked up
+                            if (order.getDeliveryId() != null) {
+                                emailAdapter.sendOrderPickedUp(email, String.valueOf(order.getId()), order.getDeliveryId());
+                            }
+                            break;
+                        case IN_TRANSIT:
+                            // When status changes to IN_TRANSIT, it means package is delivering
+                            if (order.getDeliveryId() != null) {
+                                emailAdapter.sendOrderDelivering(email, String.valueOf(order.getId()), order.getDeliveryId());
+                            }
                             break;
                         case DELIVERED:
-                            // emailAdapter.sendOrderDelivered(email, String.valueOf(order.getId()));
-                            logger.info("Pretending to send DELIVERED email to {}", email);
+                            // When status changes to DELIVERED, it means package was delivered
+                            if (order.getDeliveryId() != null) {
+                                emailAdapter.sendOrderDelivered(email, String.valueOf(order.getId()), order.getDeliveryId());
+                            }
                             break;
-                        // ... 可以为其他状态添加邮件通知
+                        // ... Can add email notifications for other statuses
                     }
                 }
             });
