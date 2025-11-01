@@ -31,14 +31,6 @@ const HomePage = () => {
       
       <div className="home-content">
         <div className="feature-cards">
-          <div className="feature-card" onClick={() => navigate('/orders')}>
-            <h3>💳 My Orders</h3>
-            <p>View orders and payment status</p>
-            <Button onClick={(e) => { e.stopPropagation(); navigate('/orders'); }}>
-              View Orders
-            </Button>
-          </div>
-          
           <div className="feature-card" onClick={() => navigate('/deliveries')}>
             <h3>📦 Delivery Tracking</h3>
             <p>View package delivery progress</p>
@@ -53,12 +45,6 @@ const HomePage = () => {
             <Button onClick={(e) => { e.stopPropagation(); navigate('/products'); }}>
               Shop Now
             </Button>
-          </div>
-          
-          <div className="feature-card">
-            <h3>⚙️ Account Settings</h3>
-            <p>Manage your personal information and preferences</p>
-            <Button disabled>Coming Soon</Button>
           </div>
         </div>
       </div>

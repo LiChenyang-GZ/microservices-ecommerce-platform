@@ -12,8 +12,6 @@ import DeliveryDetailPage from './pages/DeliveryDetailPage.jsx';
 import ProductCatalogPage from './pages/ProductCatalogPage.jsx';
 import ProductDetailPage from './pages/ProductDetailPage.jsx';
 import CheckoutPage from './pages/CheckoutPage.jsx';
-import MyOrdersPage from './pages/MyOrdersPage';
-import OrderDetailPage from './pages/OrderDetailPage';
 import './App.css';
 
 // Protected route component
@@ -85,16 +83,6 @@ function App() {
             <Route path="/delivery/:id" element={
               <ProtectedRoute>
                 <DeliveryDetailPage />
-              </ProtectedRoute>
-            } />
-            <Route path="/orders" element={
-              <ProtectedRoute>
-                <MyOrdersPage />
-              </ProtectedRoute>
-            } />
-            <Route path="/orders/:id" element={
-              <ProtectedRoute>
-                <OrderDetailPage />
               </ProtectedRoute>
             } />
           </Routes>
