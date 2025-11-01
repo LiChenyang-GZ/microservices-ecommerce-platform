@@ -9,9 +9,9 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Override
     public void addCorsMappings(CorsRegistry registry) {
-        // 这里的配置允许所有 /api/** 的路径被访问
+        // This configuration allows all /api/** paths to be accessed
         registry.addMapping("/api/**")
-                // 重要：和你的前端队友确认他们的开发服务器地址和端口！
+                // Important: Confirm your frontend teammate's development server address and port!
                 .allowedOrigins("http://localhost:3000")
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")

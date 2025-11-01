@@ -1,4 +1,4 @@
-/* 登录页面样式 */
+/* Login page styles */
 .login-container {
   height: 100vh;
   width: 100vw;
@@ -176,7 +176,7 @@
   text-decoration: underline;
 }
 
-/* 响应式设计 */
+/* Responsive design */
 @media (max-width: 768px) {
   .login-container {
     justify-content: center;
@@ -201,7 +201,7 @@
   }
 }
 
-/* 深色模式支持 */
+/* Dark mode support */
 @media (prefers-color-scheme: dark) {
   .login-card {
     background: #1a202c;

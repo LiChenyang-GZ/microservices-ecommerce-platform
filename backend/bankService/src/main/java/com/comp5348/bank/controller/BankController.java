@@ -15,7 +15,7 @@ public class BankController {
     private BankService bankService;
     
     /**
-     * 转账接口
+     * Transfer interface
      */
     @PostMapping("/transfer")
     public ResponseEntity<TransferResponse> transfer(@RequestBody TransferRequest request) {
@@ -29,7 +29,7 @@ public class BankController {
     }
     
     /**
-     * 退款接口
+     * Refund interface
      */
     @PostMapping("/refund")
     public ResponseEntity<RefundResponse> refund(@RequestBody RefundRequest request) {
@@ -43,7 +43,7 @@ public class BankController {
     }
     
     /**
-     * 查询余额接口
+     * Query balance interface
      */
     @GetMapping("/account/{accountNumber}/balance")
     public ResponseEntity<BalanceResponse> getBalance(@PathVariable String accountNumber) {
@@ -57,7 +57,7 @@ public class BankController {
     }
 
     /**
-     * 创建银行账户
+     * Create bank account
      */
     @PostMapping("/account")
     public ResponseEntity<BankAccountCreateResponse> createAccount(@RequestBody BankAccountCreateRequest request) {

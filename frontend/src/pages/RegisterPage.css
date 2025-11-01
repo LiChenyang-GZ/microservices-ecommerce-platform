@@ -1,4 +1,4 @@
-/* 注册页面样式 */
+/* Register page styles */
 .register-container {
   height: 100vh;
   width: 100vw;
@@ -176,7 +176,7 @@
   width: 100%;
 }
 
-/* 响应式设计 */
+/* Responsive design */
 @media (max-width: 768px) {
   .register-container {
     padding: 16px;
@@ -214,7 +214,7 @@
   }
 }
 
-/* 深色模式支持 */
+/* Dark mode support */
 @media (prefers-color-scheme: dark) {
   .register-card {
     background: rgba(26, 32, 44, 0.95);

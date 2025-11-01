@@ -323,7 +323,7 @@ public class OutboxProcessor {
                 return true;
             } else {
 //                logger.error("Delivery request failed: orderId={}, message={}", orderId, response.getMessage());
-//                // 如果配送创建失败，应该考虑触发一个补偿流程（比如退款）
+//                // If delivery creation fails, should consider triggering a compensation process (such as refund)
 //                return false;
                 logger.error("CRITICAL: Delivery creation failed permanently for orderId {}. Triggering compensation.", orderId);
 

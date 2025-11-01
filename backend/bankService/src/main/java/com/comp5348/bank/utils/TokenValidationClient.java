@@ -12,8 +12,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Token 验证客户端
- * 调用 storeService 的验证接口
+ * Token Validation Client
+ * Calls StoreService validation interface
  */
 @Component
 public class TokenValidationClient {
@@ -32,7 +32,7 @@ public class TokenValidationClient {
     }
     
     /**
-     * 验证 token
+     * Validate token
      */
     public TokenValidationResult validateToken(String token) {
         if (token == null || token.isEmpty()) {

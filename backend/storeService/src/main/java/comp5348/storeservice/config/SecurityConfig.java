@@ -20,14 +20,14 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
         http
             .csrf(csrf -> csrf.disable())
-            .cors(cors -> cors.disable())  // 禁用Spring Security的CORS，使用WebConfig的配置
+            .cors(cors -> cors.disable())  // Disable Spring Security CORS, use WebConfig configuration
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(authz -> authz
                 .requestMatchers("/api/user/login", "/api/user", "/api/user/activate", 
                     "/api/user/forgot-password", "/api/user/reset-password",
                     "/api/user/check-email", "/api/user/check-verified/**",
-                    "/api/user/validate-token").permitAll() // 允许其他服务调用验证接口
-                .anyRequest().permitAll() // 暂时允许所有请求，之后可以根据需要添加认证
+                    "/api/user/validate-token").permitAll() // Allow other services to call validation interface
+                .anyRequest().permitAll() // Temporarily allow all requests, can add authentication later as needed
             )
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         

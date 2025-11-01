@@ -19,25 +19,25 @@ public class JwtUtil {
     @Value("${jwt.secret:mySecretKey12345678901234567890123456789012345678901234567890}")
     private String secret;
 
-    @Value("${jwt.expiration:86400000}") // 默认24小时 (毫秒)
+    @Value("${jwt.expiration:86400000}") // Default 24 hours (milliseconds)
     private Long expiration;
 
     /**
-     * 获取签名密钥
+     * Get signing key
      */
     private SecretKey getSigningKey() {
         return Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
     }
 
     /**
-     * 从 token 中提取用户名（email）
+     * Extract username (email) from token
      */
     public String extractEmail(String token) {
         return extractClaim(token, Claims::getSubject);
     }
 
     /**
-     * 从 token 中提取用户ID
+     * Extract user ID from token
      */
     public Long extractUserId(String token) {
         Claims claims = extractAllClaims(token);
@@ -45,14 +45,14 @@ public class JwtUtil {
     }
 
     /**
-     * 从 token 中提取过期时间
+     * Extract expiration time from token
      */
     public Date extractExpiration(String token) {
         return extractClaim(token, Claims::getExpiration);
     }
 
     /**
-     * 提取指定的 claim
+     * Extract specified claim
      */
     public <T> T extractClaim(String token, Function<Claims, T> claimsResolver) {
         final Claims claims = extractAllClaims(token);
@@ -60,7 +60,7 @@ public class JwtUtil {
     }
 
     /**
-     * 从 token 中提取所有 claims
+     * Extract all claims from token
      */
     private Claims extractAllClaims(String token) {
         return Jwts.parser()
@@ -71,14 +71,14 @@ public class JwtUtil {
     }
 
     /**
-     * 检查 token 是否过期
+     * Check if token is expired
      */
     private Boolean isTokenExpired(String token) {
         return extractExpiration(token).before(new Date());
     }
 
     /**
-     * 生成 token
+     * Generate token
      */
     public String generateToken(Long userId, String email) {
         Map<String, Object> claims = new HashMap<>();
@@ -87,7 +87,7 @@ public class JwtUtil {
     }
 
     /**
-     * 创建 token
+     * Create token
      */
     private String createToken(Map<String, Object> claims, String subject) {
         return Jwts.builder()
@@ -100,7 +100,7 @@ public class JwtUtil {
     }
 
     /**
-     * 验证 token
+     * Validate token
      */
     public Boolean validateToken(String token, String email) {
         final String tokenEmail = extractEmail(token);
@@ -108,7 +108,7 @@ public class JwtUtil {
     }
 
     /**
-     * 验证 token（不需要 email）
+     * Validate token (email not required)
      */
     public Boolean validateToken(String token) {
         return !isTokenExpired(token);

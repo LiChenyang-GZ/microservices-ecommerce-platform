@@ -124,28 +124,28 @@ public class WarehouseController {
     @GetMapping("/available/{productId}/{quantity}")
     public ResponseEntity<WarehouseResponse> getAvailableWarehouse(@PathVariable long productId,
                                                                    @PathVariable int quantity) {
-        // 1. 调用 Service 方法
+        // 1. Call Service method
         WarehouseDTO serviceResponse = warehouseService.getAndUpdateAvailableWarehouse(productId, quantity, null);
 
-        // 2. 处理库存不足的情况 (service返回null)
+        // 2. Handle insufficient stock situation (service returns null)
         if (serviceResponse == null) {
-            // 创建一个表示“库存不足”的失败响应
+            // Create a failure response indicating "insufficient stock"
             WarehouseResponse failureResponse = new WarehouseResponse(
                     ResponseCode.W8.getMessage(), ResponseCode.W8.getResponseCode());
             return ResponseEntity.ok(failureResponse);
         }
 
-        // 3. 【核心修改】解包 Service 返回的数据，并构建最终的成功响应
+        // 3. [Core modification] Unpack data returned by Service and build final success response
 
-        // 创建一个空的、成功的 WarehouseResponse 对象
+        // Create an empty, successful WarehouseResponse object
         WarehouseResponse successResponse = new WarehouseResponse(
                 ResponseCode.W7.getMessage(), ResponseCode.W7.getResponseCode());
 
-        // 从 serviceResponse 中取出数据，填充到最终的 successResponse 中
-        successResponse.setWarehouses(serviceResponse.getWarehouses()); // 设置仓库列表
-        successResponse.setInventoryTransactionIds(serviceResponse.getInventoryTransactionIds()); // 设置【关键】的事务ID列表
+        // Extract data from serviceResponse and populate into final successResponse
+        successResponse.setWarehouses(serviceResponse.getWarehouses()); // Set warehouse list
+        successResponse.setInventoryTransactionIds(serviceResponse.getInventoryTransactionIds()); // Set [key] transaction ID list
 
-        // 4. 返回填充好数据的成功响应
+        // 4. Return success response with populated data
         return ResponseEntity.ok(successResponse);
     }
 

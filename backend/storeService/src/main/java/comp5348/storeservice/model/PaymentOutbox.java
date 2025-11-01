@@ -25,7 +25,7 @@ public class PaymentOutbox {
     private String eventType; // PAYMENT_PENDING, PAYMENT_SUCCESS, PAYMENT_FAILED
     
     @Column(columnDefinition = "TEXT")
-    private String payload; // JSON格式的数据
+    private String payload; // JSON formatted data
     
     @Column(nullable = false)
     private String status; // PENDING, PROCESSED, FAILED

@@ -23,25 +23,25 @@ public class Account {
     @Getter
     @Setter
     @Column(unique = true)
-    private String email; // 真实唯一登录标识
+    private String email; // Real unique login identifier
 
     @Getter
     @Setter
     @Column(unique = true)
-    private String username; // 用户名（唯一）
+    private String username; // Username (unique)
 
     @Getter
     @Setter
-    private Boolean emailVerified = false; // 邮箱是否已验证
+    private Boolean emailVerified = false; // Whether email is verified
 
     @Getter
     @Setter
-    private Boolean active = true; // 账户是否激活
+    private Boolean active = true; // Whether account is active
 
   @Getter
   @Setter
   @Column(unique = true)
-  private String bankAccountNumber; // 关联银行账户（激活时自动开户）
+  private String bankAccountNumber; // Associated bank account (automatically opened when activated)
 }
 
 

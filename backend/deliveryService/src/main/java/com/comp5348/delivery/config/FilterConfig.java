@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * 过滤器配置
+ * Filter configuration
  */
 @Configuration
 public class FilterConfig {
@@ -18,8 +18,8 @@ public class FilterConfig {
     public FilterRegistrationBean<TokenAuthenticationFilter> tokenFilterRegistration() {
         FilterRegistrationBean<TokenAuthenticationFilter> registration = new FilterRegistrationBean<>();
         registration.setFilter(tokenAuthenticationFilter);
-        registration.addUrlPatterns("/api/*"); // 只对 API 路径应用过滤器
-        registration.setOrder(1); // 设置过滤器顺序
+        registration.addUrlPatterns("/api/*"); // Only apply filter to API paths
+        registration.setOrder(1); // Set filter order
         return registration;
     }
 }

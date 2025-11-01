@@ -23,7 +23,7 @@ public class PaymentController {
     private PaymentService paymentService;
     
     /**
-     * 创建支付
+     * Create payment
      */
     @PostMapping
     public ResponseEntity<PaymentResponse> createPayment(@RequestBody PaymentRequest request) {
@@ -42,7 +42,7 @@ public class PaymentController {
     }
     
     /**
-     * 查询支付状态（根据orderId）
+     * Query payment status (by orderId)
      */
     @GetMapping("/order/{orderId}")
     public ResponseEntity<PaymentResponse> getPaymentByOrderId(@PathVariable Long orderId) {
@@ -58,7 +58,7 @@ public class PaymentController {
     }
     
     /**
-     * 查询支付状态（根据paymentId）
+     * Query payment status (by paymentId)
      */
     @GetMapping("/{paymentId}")
     public ResponseEntity<PaymentResponse> getPaymentById(@PathVariable Long paymentId) {
@@ -74,7 +74,7 @@ public class PaymentController {
     }
     
     /**
-     * 申请退款
+     * Request refund
      */
     @PostMapping("/{orderId}/refund")
     public ResponseEntity<PaymentResponse> refundPayment(@PathVariable Long orderId, @RequestBody(required = false) String reason) {

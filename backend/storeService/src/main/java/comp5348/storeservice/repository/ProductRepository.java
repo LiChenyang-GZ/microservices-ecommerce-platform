@@ -15,33 +15,33 @@ import java.util.Optional;
 public interface ProductRepository extends JpaRepository<Product, Long> {
 
     /**
-     * 查找所有有库存的商品 (用于向用户展示商品列表)
+     * Find all products with stock (for displaying product list to users)
      */
     @Query("SELECT p FROM Product p WHERE p.stockQuantity > 0")
     List<Product> findAvailableProducts();
 
     /**
-     * 根据ID查找一个商品，但前提是它必须有库存 (用于下单前的最终检查)
+     * Find a product by ID, but only if it has stock (for final check before placing order)
      */
     @Query("SELECT p FROM Product p WHERE p.id = :id AND p.stockQuantity > 0")
     Optional<Product> findAvailableById(@Param("id") Long id);
 
     /**
-     * 更新指定商品的库存数量
-     * 注意：这个方法不安全，高并发下会导致问题。
-     * 更好的方法是在Service层使用乐观锁。但为了简化，我们先定义它。
+     * Update stock quantity for specified product
+     * Note: This method is unsafe and may cause issues under high concurrency.
+     * A better approach is to use optimistic locking at the Service layer. But for simplicity, we define it first.
      */
     @Modifying
     @Query("UPDATE Product p SET p.stockQuantity = :quantity WHERE p.id = :productId")
     void updateStockQuantity(@Param("productId") Long productId, @Param("quantity") Integer quantity);
 
     /**
-     * 根據商品名稱查找商品
+     * Find products by product name
      */
     List<Product> findByNameContainingIgnoreCase(String name);
 
     /**
-     * 根據價格範圍查找商品
+     * Find products by price range
      */
     @Query("SELECT p FROM Product p WHERE p.price BETWEEN :minPrice AND :maxPrice")
     List<Product> findByPriceRange(@Param("minPrice") BigDecimal minPrice,

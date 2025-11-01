@@ -15,29 +15,29 @@ import java.util.Optional;
 public interface OrderRepository extends JpaRepository<Order, Long> {
     
     /**
-     * 根據用戶ID查找訂單
+     * Find orders by user ID
      */
     List<Order> findByUserId(Long userId);
     
     /**
-     * 根據訂單狀態查找訂單
+     * Find orders by order status
      */
     List<Order> findByStatus(OrderStatus status);
     
 //    /**
-//     * 根據用戶ID和訂單狀態查找訂單
+//     * Find orders by user ID and order status
 //     */
 //    List<Order> findByUserIdAndStatus(Long userId, OrderStatus status);
     
 //    /**
-//     * 根據創建時間範圍查找訂單
+//     * Find orders by creation time range
 //     */
 //    @Query("SELECT o FROM Order o WHERE o.createdAt BETWEEN :startDate AND :endDate")
 //    List<Order> findByCreatedAtBetween(@Param("startDate") LocalDateTime startDate,
 //                                       @Param("endDate") LocalDateTime endDate);
     
 //    /**
-//     * 根據用戶ID和時間範圍查找訂單
+//     * Find orders by user ID and time range
 //     */
 //    @Query("SELECT o FROM Order o WHERE o.userId = :userId AND o.createdAt BETWEEN :startDate AND :endDate")
 //    List<Order> findByUserIdAndCreatedAtBetween(@Param("userId") Long userId,
@@ -45,16 +45,16 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 //                                                @Param("endDate") LocalDateTime endDate);
     
 //    /**
-//     * 查找待付款的訂單
+//     * Find pending payment orders
 //     */
 //    @Query("SELECT o FROM Order o WHERE o.status = 'PENDING_PAYMENT'")
 //    List<Order> findPendingPaymentOrders();
 
     /**
-     * 根据订单ID查找订单，并同时加载关联的商品信息。
-     * 使用 LEFT JOIN FETCH 可以避免 N+1 查询问题，提升性能。
-     * @param orderId 订单ID
-     * @return 包含商品信息的订单Optional
+     * Find order by order ID and load associated product information at the same time.
+     * Using LEFT JOIN FETCH can avoid N+1 query problem and improve performance.
+     * @param orderId Order ID
+     * @return Order Optional containing product information
      */
     @Query("SELECT o FROM Order o LEFT JOIN FETCH o.product WHERE o.id = :orderId")
     Optional<Order> findByIdWithProduct(@Param("orderId") Long orderId);

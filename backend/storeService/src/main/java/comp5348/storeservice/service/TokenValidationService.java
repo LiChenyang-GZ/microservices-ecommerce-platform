@@ -6,8 +6,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * Token 验证服务
- * 提供统一的 token 验证功能，供其他服务调用
+ * Token Validation Service
+ * Provides unified token validation functionality for other services to call
  */
 @Service
 public class TokenValidationService {
@@ -16,13 +16,13 @@ public class TokenValidationService {
     private JwtUtil jwtUtil;
 
     /**
-     * 验证 token 是否有效
+     * Validate whether token is valid
      * @param token JWT token
-     * @return 验证结果，包含用户信息
+     * @return Validation result containing user information
      */
     public TokenValidationResponse validateToken(String token) {
         try {
-            // 验证 token 是否有效且未过期
+            // Validate whether token is valid and not expired
             if (token == null || token.isEmpty()) {
                 return TokenValidationResponse.failure("Token is null or empty");
             }
@@ -31,7 +31,7 @@ public class TokenValidationService {
                 return TokenValidationResponse.failure("Token is invalid or expired");
             }
 
-            // 提取用户信息
+            // Extract user information
             String email = jwtUtil.extractEmail(token);
             Long userId = jwtUtil.extractUserId(token);
 

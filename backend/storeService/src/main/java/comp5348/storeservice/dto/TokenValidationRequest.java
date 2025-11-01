@@ -5,7 +5,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Token 验证请求 DTO
+ * Token validation request DTO
  */
 @Data
 @NoArgsConstructor

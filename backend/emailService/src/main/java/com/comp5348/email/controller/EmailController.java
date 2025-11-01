@@ -14,20 +14,20 @@ public class EmailController {
     private EmailService emailService;
 
     /**
-     * 发送注册验证码
+     * Send registration verification code
      */
     @PostMapping("/send-verification")
     public ResponseEntity<?> sendVerificationCode(@RequestBody SendVerificationRequest request) {
         try {
             String code = emailService.sendRegistrationVerificationCode(request.email);
-            return ResponseEntity.ok(new SendVerificationResponse(true, "验证码已发送到您的邮箱"));
+            return ResponseEntity.ok(new SendVerificationResponse(true, "Verification code has been sent to your email"));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new SendVerificationResponse(false, "发送失败: " + e.getMessage()));
+            return ResponseEntity.badRequest().body(new SendVerificationResponse(false, "Sending failed: " + e.getMessage()));
         }
     }
 
     /**
-     * 发送配送状态更新通知
+     * Send delivery status update notification
      */
     @PostMapping("/send-delivery-update")
     public ResponseEntity<?> sendDeliveryUpdate(@RequestBody DeliveryUpdateRequest request) {
@@ -38,70 +38,70 @@ public class EmailController {
                     request.deliveryId,
                     request.status
             );
-            return ResponseEntity.ok(new SimpleResponse(true, "通知邮件已发送"));
+            return ResponseEntity.ok(new SimpleResponse(true, "Notification email has been sent"));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new SimpleResponse(false, "发送失败: " + e.getMessage()));
+            return ResponseEntity.badRequest().body(new SimpleResponse(false, "Sending failed: " + e.getMessage()));
         }
     }
 
     /**
-     * 发送订单取消通知
+     * Send order cancellation notification
      */
     @PostMapping("/send-order-cancelled")
     public ResponseEntity<?> sendOrderCancelled(@RequestBody OrderNotifyRequest request) {
         try {
             emailService.sendOrderCancelledEmail(request.email, request.orderId, request.reason);
-            return ResponseEntity.ok(new SimpleResponse(true, "取消邮件已发送"));
+            return ResponseEntity.ok(new SimpleResponse(true, "Cancellation email has been sent"));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new SimpleResponse(false, "发送失败: " + e.getMessage()));
+            return ResponseEntity.badRequest().body(new SimpleResponse(false, "Sending failed: " + e.getMessage()));
         }
     }
 
     /**
-     * 发送订单处理失败通知
+     * Send order processing failure notification
      */
     @PostMapping("/send-order-failed")
     public ResponseEntity<?> sendOrderFailed(@RequestBody OrderNotifyRequest request) {
         try {
             emailService.sendOrderFailedEmail(request.email, request.orderId, request.reason);
-            return ResponseEntity.ok(new SimpleResponse(true, "失败通知邮件已发送"));
+            return ResponseEntity.ok(new SimpleResponse(true, "Failure notification email has been sent"));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new SimpleResponse(false, "发送失败: " + e.getMessage()));
+            return ResponseEntity.badRequest().body(new SimpleResponse(false, "Sending failed: " + e.getMessage()));
         }
     }
 
     /**
-     * 发送退款成功通知
+     * Send refund success notification
      */
     @PostMapping("/send-refund-success")
     public ResponseEntity<?> sendRefundSuccess(@RequestBody RefundNotifyRequest request) {
         try {
             emailService.sendRefundSuccessEmail(request.email, request.orderId, request.refundTxnId);
-            return ResponseEntity.ok(new SimpleResponse(true, "退款成功邮件已发送"));
+            return ResponseEntity.ok(new SimpleResponse(true, "Refund success email has been sent"));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new SimpleResponse(false, "发送失败: " + e.getMessage()));
+            return ResponseEntity.badRequest().body(new SimpleResponse(false, "Sending failed: " + e.getMessage()));
         }
     }
 
     /**
-     * 验证验证码
+     * Verify verification code
      */
     @PostMapping("/verify-code")
     public ResponseEntity<?> verifyCode(@RequestBody VerifyCodeRequest request) {
         try {
             boolean isValid = emailService.verifyCode(request.email, request.code);
             if (isValid) {
-                return ResponseEntity.ok(new VerifyCodeResponse(true, "验证成功"));
+                return ResponseEntity.ok(new VerifyCodeResponse(true, "Verification successful"));
             } else {
-                return ResponseEntity.badRequest().body(new VerifyCodeResponse(false, "验证码无效或已过期"));
+                return ResponseEntity.badRequest().body(new VerifyCodeResponse(false, "Verification code is invalid or expired"));
             }
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new VerifyCodeResponse(false, "验证失败: " + e.getMessage()));
+            return ResponseEntity.badRequest().body(new VerifyCodeResponse(false, "Verification failed: " + e.getMessage()));
         }
     }
 
     /**
-     * 检查邮箱是否已验证
+     * Check if email is verified
      */
     @GetMapping("/check-verified/{email}")
     public ResponseEntity<?> checkEmailVerified(@PathVariable String email) {
@@ -114,36 +114,36 @@ public class EmailController {
     }
 
     /**
-     * 发送密码重置验证码
+     * Send password reset verification code
      */
     @PostMapping("/send-password-reset")
     public ResponseEntity<?> sendPasswordResetCode(@RequestBody SendPasswordResetRequest request) {
         try {
             String code = emailService.sendPasswordResetCode(request.email);
-            return ResponseEntity.ok(new SendPasswordResetResponse(true, "密码重置验证码已发送到您的邮箱"));
+            return ResponseEntity.ok(new SendPasswordResetResponse(true, "Password reset verification code has been sent to your email"));
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new SendPasswordResetResponse(false, "发送失败: " + e.getMessage()));
+            return ResponseEntity.badRequest().body(new SendPasswordResetResponse(false, "Sending failed: " + e.getMessage()));
         }
     }
 
     /**
-     * 验证密码重置验证码
+     * Verify password reset verification code
      */
     @PostMapping("/verify-password-reset")
     public ResponseEntity<?> verifyPasswordResetCode(@RequestBody VerifyPasswordResetRequest request) {
         try {
             boolean isValid = emailService.verifyPasswordResetCode(request.email, request.code);
             if (isValid) {
-                return ResponseEntity.ok(new VerifyPasswordResetResponse(true, "验证成功"));
+                return ResponseEntity.ok(new VerifyPasswordResetResponse(true, "Verification successful"));
             } else {
-                return ResponseEntity.badRequest().body(new VerifyPasswordResetResponse(false, "验证码无效或已过期"));
+                return ResponseEntity.badRequest().body(new VerifyPasswordResetResponse(false, "Verification code is invalid or expired"));
             }
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new VerifyPasswordResetResponse(false, "验证失败: " + e.getMessage()));
+            return ResponseEntity.badRequest().body(new VerifyPasswordResetResponse(false, "Verification failed: " + e.getMessage()));
         }
     }
 
-    // 请求和响应类
+    // Request and response classes
     public static class SendVerificationRequest {
         public String email;
     }

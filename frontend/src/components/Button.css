@@ -1,4 +1,4 @@
-/* 按钮组件样式 */
+/* Button component styles */
 .btn {
   border: none;
   border-radius: 8px;
@@ -13,7 +13,7 @@
   text-decoration: none;
 }
 
-/* 按钮尺寸 */
+/* Button sizes */
 .btn-small {
   padding: 8px 16px;
   font-size: 14px;
@@ -29,7 +29,7 @@
   font-size: 18px;
 }
 
-/* 按钮变体 */
+/* Button variants */
 .btn-primary {
   background: linear-gradient(135deg, #4a90e2 0%, #7b68ee 50%, #9370db 100%);
   color: white;
@@ -73,7 +73,7 @@
   box-shadow: 0 8px 25px rgba(56, 161, 105, 0.3);
 }
 
-/* 禁用状态 */
+/* Disabled state */
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;
@@ -81,7 +81,7 @@
   box-shadow: none !important;
 }
 
-/* 加载状态 */
+/* Loading state */
 .btn.loading {
   opacity: 0.8;
 }
@@ -100,7 +100,7 @@
   100% { transform: rotate(360deg); }
 }
 
-/* 深色模式支持 */
+/* Dark mode support */
 @media (prefers-color-scheme: dark) {
   .btn-secondary {
     background: #2d3748;

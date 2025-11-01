@@ -31,7 +31,7 @@ public class ProductResponse extends BaseResponse {
         super(message, responseCode);
     }
 
-    // 静态工厂方法，用于向后兼容现有代码
+    // Static factory methods for backward compatibility with existing code
     public static ProductResponse success(List<ProductDTO> products, String message) {
         ProductResponse response = new ProductResponse(products, message, "SUCCESS");
         return response;

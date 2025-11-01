@@ -26,7 +26,7 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         
         String path = request.getRequestURI();
-        // 跳过不需要认证的端点
+        // Skip endpoints that don't require authentication
         if (path.startsWith("/actuator")) {
             filterChain.doFilter(request, response);
             return;

@@ -37,7 +37,7 @@ public class DeliveryAdapter {
     }
     
     /**
-     * 创建配送请求 - 带重试机制
+     * Create delivery request - with retry mechanism
      */
     public DeliveryResponseDTO createDelivery(DeliveryRequestDTO request) {
         logger.info("Calling Delivery service API: orderId={}", request.getOrderId());
@@ -91,7 +91,7 @@ public class DeliveryAdapter {
     }
 
     /**
-     * 取消配送（按订单ID，仅 CREATED 可取消）
+     * Cancel delivery (by order ID, only CREATED can be cancelled)
      */
     public boolean cancelByOrderId(String orderId) {
         String url = deliveryServiceUrl + "/api/deliveries/cancel-by-order/" + orderId;

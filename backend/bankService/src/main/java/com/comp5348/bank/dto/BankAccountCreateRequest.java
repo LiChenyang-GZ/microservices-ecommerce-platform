@@ -5,7 +5,7 @@ import java.math.BigDecimal;
 
 @Data
 public class BankAccountCreateRequest {
-    private String ownerEmail; // 或者 ownerName
+    private String ownerEmail; // or ownerName
     private BigDecimal initialBalance;
 }
 

@@ -29,18 +29,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         String email = null;
         String jwt = null;
 
-        // 从 Authorization header 中提取 token
+        // Extract token from Authorization header
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             jwt = authHeader.substring(7);
             try {
                 email = jwtUtil.extractEmail(jwt);
             } catch (Exception e) {
-                // Token 无效，继续执行但不设置认证信息
-                logger.error("JWT token 解析失败: " + e.getMessage());
+                // Token invalid, continue execution but don't set authentication info
+                logger.error("JWT token parsing failed: " + e.getMessage());
             }
         }
 
-        // 如果 email 不为空且当前没有认证信息，设置认证上下文
+        // If email is not null and currently no authentication info, set authentication context
         if (email != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             if (jwtUtil.validateToken(jwt)) {
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(

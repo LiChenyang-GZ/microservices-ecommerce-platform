@@ -26,7 +26,7 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         
         String path = request.getRequestURI();
-        // 跳过不需要认证的端点（注册验证码等公开接口）
+        // Skip endpoints that don't require authentication (registration verification code and other public interfaces)
         if (path.startsWith("/api/email/send-verification") || 
             path.startsWith("/api/email/verify-code") ||
             path.startsWith("/api/email/send-password-reset") ||

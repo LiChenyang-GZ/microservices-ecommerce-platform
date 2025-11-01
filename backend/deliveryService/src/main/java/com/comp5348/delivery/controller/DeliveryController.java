@@ -11,37 +11,37 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
-@RestController // 告诉Spring这是一个处理RESTful API的控制器
-@RequestMapping("/api/deliveries") // 定义这个控制器下所有API的URL前缀
+@RestController // Tells Spring this is a RESTful API controller
+@RequestMapping("/api/deliveries") // Defines URL prefix for all APIs under this controller
 @CrossOrigin(origins = "http://localhost:3000", allowCredentials = "true")
 public class DeliveryController {
 
     private final DeliveryService deliveryService;
 
-    // 通过构造函数注入Service
+    // Inject Service through constructor
     @Autowired
     public DeliveryController(DeliveryService deliveryService) {
         this.deliveryService = deliveryService;
     }
 
     /**
-     * 创建配送任务的API端点
-     * @param request 包含配送信息的JSON请求体
-     * @return 包含已创建任务信息的响应
+     * API endpoint to create delivery task
+     * @param request JSON request body containing delivery information
+     * @return Response containing created task information
      */
-    @PostMapping("/create") // 响应POST请求，URL为 /api/deliveries/create
+    @PostMapping("/create") // Responds to POST request, URL is /api/deliveries/create
     public ResponseEntity<DeliveryOrderDTO> createDelivery(
-            @RequestBody DeliveryRequest request // @RequestBody告诉Spring将请求的JSON内容自动转换成DeliveryRequest对象
+            @RequestBody DeliveryRequest request // @RequestBody tells Spring to automatically convert JSON content to DeliveryRequest object
     ) {
-        // 调用Service层来处理业务逻辑
+        // Call Service layer to handle business logic
         DeliveryOrderDTO createdOrder = deliveryService.createDelivery(request);
 
-        // 返回一个HTTP 201 Created响应，并在响应体中包含创建好的订单信息
+        // Return HTTP 201 Created response with created order information in response body
         return ResponseEntity.status(HttpStatus.CREATED).body(createdOrder);
     }
 
     /**
-     * 批量创建配送任务的API端点。
+     * API endpoint to create delivery tasks in batch
      */
     @PostMapping("/create/batch")
     public ResponseEntity<List<DeliveryOrderDTO>> createDeliveryBatch(@RequestBody List<DeliveryRequest> requests) {
@@ -50,13 +50,13 @@ public class DeliveryController {
     }
 
     /**
-     * 根据ID获取单个配送任务的API端点（只能获取自己的订单）
+     * API endpoint to get single delivery task by ID (can only get own orders)
      */
     @GetMapping("/{deliveryId}")
     public ResponseEntity<?> getDeliveryOrder(
             @PathVariable Long deliveryId,
             HttpServletRequest request) {
-        // 从过滤器设置的请求属性中获取用户邮箱
+        // Get user email from request attribute set by filter
         String userEmail = (String) request.getAttribute("userEmail");
         
         if (userEmail == null) {
@@ -68,18 +68,18 @@ public class DeliveryController {
         if (deliveryOrder != null) {
             return ResponseEntity.ok(deliveryOrder);
         } else {
-            // 返回 404 或 403，根据业务需求。这里返回 404 避免泄露订单是否存在
+            // Return 404 or 403 based on business needs. Here returns 404 to avoid leaking whether order exists
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body("Delivery order not found or you don't have permission to access it");
         }
     }
 
     /**
-     * 获取当前登录用户的所有配送任务（不再需要传入 email 参数）
+     * Get all delivery tasks for currently logged in user (no longer requires email parameter)
      */
     @GetMapping("/me")
     public ResponseEntity<?> getMyDeliveryOrders(HttpServletRequest request) {
-        // 从过滤器设置的请求属性中获取用户邮箱
+        // Get user email from request attribute set by filter
         String userEmail = (String) request.getAttribute("userEmail");
         
         if (userEmail == null) {
@@ -92,7 +92,7 @@ public class DeliveryController {
     }
 
     /**
-     * 内部调用：按订单ID取消配送（仅 CREATED 可取消）
+     * Internal call: Cancel delivery by order ID (only CREATED can be cancelled)
      */
     @PostMapping("/cancel-by-order/{orderId}")
     public ResponseEntity<?> cancelByOrderId(@PathVariable String orderId) {
@@ -103,15 +103,15 @@ public class DeliveryController {
     }
 
     /**
-     * 兼容旧的 API 端点（已废弃，保留用于向后兼容）
-     * @deprecated 请使用 GET /api/deliveries/me
+     * Compatible with old API endpoint (deprecated, kept for backward compatibility)
+     * @deprecated Please use GET /api/deliveries/me
      */
     @Deprecated
     @GetMapping("/all/{email}")
     public ResponseEntity<?> getAllDeliveryOrders(
             @PathVariable String email,
             HttpServletRequest request) {
-        // 从过滤器设置的请求属性中获取用户邮箱
+        // Get user email from request attribute set by filter
         String userEmail = (String) request.getAttribute("userEmail");
         
         if (userEmail == null) {
@@ -119,7 +119,7 @@ public class DeliveryController {
                     .body("Unauthorized: Please login first");
         }
         
-        // 验证：只能查询自己的订单
+        // Verify: can only query own orders
         if (!userEmail.equals(email)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body("Forbidden: You can only view your own delivery orders");
@@ -130,13 +130,13 @@ public class DeliveryController {
     }
 
     /**
-     * 取消配送任务（只能取消自己的订单）
+     * Cancel delivery task (can only cancel own orders)
      */
     @PostMapping("/{deliveryId}/cancel")
     public ResponseEntity<String> cancelDelivery(
             @PathVariable Long deliveryId,
             HttpServletRequest request) {
-        // 从过滤器设置的请求属性中获取用户邮箱
+        // Get user email from request attribute set by filter
         String userEmail = (String) request.getAttribute("userEmail");
         
         if (userEmail == null) {

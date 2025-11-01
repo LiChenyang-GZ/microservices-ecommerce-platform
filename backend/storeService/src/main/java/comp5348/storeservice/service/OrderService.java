@@ -36,7 +36,7 @@ public class OrderService {
     private AccountRepository accountRepository;
 
     @Autowired
-    private PaymentOutboxRepository paymentOutboxRepository; // 【修改点 1】注入 Repository
+    private PaymentOutboxRepository paymentOutboxRepository; // [Modification Point 1] Inject Repository
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -53,7 +53,7 @@ public class OrderService {
     private WarehouseService warehouseService;
 
     /**
-     * 獲取所有訂單列表
+     * Get all orders list
      */
     public List<OrderDTO> getAllOrders() {
         logger.info("Fetching all orders");
@@ -63,7 +63,7 @@ public class OrderService {
     }
 
     /**
-     * 根据用户ID获获取订单列表
+     * Get orders list by user ID
      */
     public List<OrderDTO> getOrdersByUserId(Long userId) {
         logger.info("Fetching orders for user: {}", userId);
@@ -207,7 +207,7 @@ public class OrderService {
             throw new RuntimeException("Cannot cancel order with status: " + order.getStatus());
         }
 
-        // 尝试取消配送
+        // Try to cancel delivery
         try {
             boolean cancelled = deliveryAdapter.cancelByOrderId(String.valueOf(order.getId()));
             if (!cancelled) {
@@ -217,7 +217,7 @@ public class OrderService {
             logger.warn("Cancel delivery failed, proceeding with order cancellation. Reason: {}", e.getMessage());
         }
 
-        // 回滚库存
+        // Rollback inventory
         try {
             if (order.getInventoryTransactionIds() != null && !order.getInventoryTransactionIds().isEmpty()) {
                 List<Long> txIds = Arrays.stream(order.getInventoryTransactionIds().split(","))
@@ -273,7 +273,7 @@ public class OrderService {
 //            orderId = Long.parseLong(notification.getOrderId());
 //        } catch (NumberFormatException e) {
 //            logger.error("Invalid orderId format in delivery notification: {}", notification.getOrderId());
-//            return; // 或者抛出异常
+//            return; // or throw exception
 //        }
 
         Order order = orderRepository.findByDeliveryId(notification.getDeliveryId())
@@ -383,7 +383,7 @@ public class OrderService {
     }
 
     /**
-     * 转换实体为 DTO (适配单商品模型)
+     * Convert entity to DTO (adapted for single product model)
      */
     private OrderDTO convertToDTO(Order order) {
         OrderDTO dto = new OrderDTO();
@@ -395,11 +395,11 @@ public class OrderService {
         dto.setCreatedAt(order.getCreatedAt());
         dto.setUpdatedAt(order.getUpdatedAt());
 
-        // --- 填充新增的商品信息 ---
+        // --- Populate new product information ---
         dto.setQuantity(order.getQuantity());
         dto.setUnitPrice(order.getUnitPrice());
 
-        // 安全地从关联的 Product 实体中获取 ID 和 Name
+        // Safely get ID and Name from associated Product entity
         if (order.getProduct() != null) {
             dto.setProductId(order.getProduct().getId());
             dto.setProductName(order.getProduct().getName());

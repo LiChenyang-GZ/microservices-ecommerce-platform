@@ -1,4 +1,4 @@
-/* 输入框组件样式 */
+/* Input component styles */
 .input-group {
   display: flex;
   flex-direction: column;
@@ -58,7 +58,7 @@
   margin-top: 4px;
 }
 
-/* 深色模式支持 */
+/* Dark mode support */
 @media (prefers-color-scheme: dark) {
   .input-label {
     color: #e2e8f0;

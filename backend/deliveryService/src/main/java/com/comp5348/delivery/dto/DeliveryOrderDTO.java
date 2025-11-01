@@ -21,7 +21,7 @@ public class DeliveryOrderDTO {
     private int quantity;
     private LocalDateTime creationTime;
 
-    // 一个方便的构造函数，用于从Entity转换到DTO
+    // Convenient constructor to convert from Entity to DTO
     public DeliveryOrderDTO(Delivery delivery) {
         this.id = delivery.getId();
         this.orderId = delivery.getOrderId();

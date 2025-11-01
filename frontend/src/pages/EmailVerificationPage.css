@@ -1,4 +1,4 @@
-/* 邮箱验证页面样式 */
+/* Email verification page styles */
 .email-verification-page {
   min-height: 100vh;
   display: flex;
@@ -112,7 +112,7 @@
   color: #5a67d8;
 }
 
-/* 响应式设计 */
+/* Responsive design */
 @media (max-width: 640px) {
   .verification-container {
     padding: 30px 20px;
@@ -130,7 +130,7 @@
   }
 }
 
-/* 深色模式支持 */
+/* Dark mode support */
 @media (prefers-color-scheme: dark) {
   .verification-container {
     background: rgba(45, 55, 72, 0.95);

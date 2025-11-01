@@ -5,8 +5,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * UserDTO 用于在前后端之间传输用户数据。
- * 这个类不直接暴露数据库模型中的敏感字段（比如密码）。
+ * UserDTO used for transferring user data between frontend and backend.
+ * This class does not directly expose sensitive fields from the database model (such as passwords).
  */
 @Data
 @AllArgsConstructor

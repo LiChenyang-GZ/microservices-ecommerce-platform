@@ -194,7 +194,7 @@ public class AccountService {
                 return false;
             }
 
-            // 更新密码
+            // Update password
             Optional<Account> accountOpt = accountRepository.findByEmail(email);
             if (accountOpt.isPresent()) {
                 Account account = accountOpt.get();
@@ -205,12 +205,12 @@ public class AccountService {
             }
             return false;
         } catch (Exception e) {
-            System.err.println("重置密码失败: " + e.getMessage());
+            System.err.println("Password reset failed: " + e.getMessage());
             return false;
         }
     }
 
-    // 内部类用于API调用
+    // Inner class for API calls
     private static class PasswordResetRequest {
         public String email;
         

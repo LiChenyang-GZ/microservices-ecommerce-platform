@@ -12,8 +12,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * Token 验证客户端
- * 调用 storeService 的验证接口
+ * Token Validation Client
+ * Calls StoreService validation interface
  */
 @Component
 public class TokenValidationClient {
@@ -32,9 +32,9 @@ public class TokenValidationClient {
     }
     
     /**
-     * 验证 token
+     * Validate token
      * @param token JWT token
-     * @return 验证结果，包含 userId 和 email
+     * @return Validation result containing userId and email
      */
     public TokenValidationResult validateToken(String token) {
         if (token == null || token.isEmpty()) {
@@ -44,17 +44,17 @@ public class TokenValidationClient {
         try {
             String url = storeServiceUrl + "/api/user/validate-token";
             
-            // 构建请求体
+            // Build request body
             Map<String, String> requestBody = new HashMap<>();
             requestBody.put("token", token);
             
-            // 设置请求头
+            // Set request headers
             HttpHeaders headers = new HttpHeaders();
             headers.setContentType(MediaType.APPLICATION_JSON);
             
             HttpEntity<Map<String, String>> request = new HttpEntity<>(requestBody, headers);
             
-            // 调用验证接口
+            // Call validation interface
             ResponseEntity<TokenValidationResult> response = restTemplate.exchange(
                 url,
                 HttpMethod.POST,
@@ -81,7 +81,7 @@ public class TokenValidationClient {
     }
     
     /**
-     * Token 验证结果
+     * Token validation result
      */
     public static class TokenValidationResult {
         private boolean valid;

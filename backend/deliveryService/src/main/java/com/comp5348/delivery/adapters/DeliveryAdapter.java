@@ -1,20 +1,20 @@
 package com.comp5348.delivery.adapters;
 
 /**
- * 这是与外部物流服务(如 DeliveryCo)交互的统一接口。
- * 无论我们将来使用模拟的实现(Mock)还是真实的API调用实现，
- * 它们都必须遵守这个接口定义的规范。
+ * Unified interface for interacting with external delivery services (e.g., DeliveryCo).
+ * Whether we use a mock implementation or a real API call implementation in the future,
+ * they must all comply with the specifications defined by this interface.
  */
 public interface DeliveryAdapter {
 
     /**
-     * 向物流服务商发起一个配送请求。
+     * Initiate a delivery request to the delivery service provider.
      *
-     * @param orderId 需要配送的订单ID
-     * @return 由物流服务商返回的唯一追踪号 (Carrier Reference)
+     * @param orderId Order ID that needs to be delivered
+     * @return Unique tracking number (Carrier Reference) returned by the delivery service provider
      */
     String requestDelivery(String orderId);
 
-    // 将来如果还有其他与物流相关的操作，比如“取消配送请求”，也可以在这里定义
+    // If there are other delivery-related operations in the future, such as "cancel delivery request", they can also be defined here
     // void cancelDelivery(String carrierRef);
 }

@@ -167,7 +167,7 @@
   color: #333;
 }
 
-/* 订单卡片主体 */
+/* Order card body */
 .order-card-body {
   display: flex;
   justify-content: space-between;
@@ -196,7 +196,7 @@
   color: #667eea;
 }
 
-/* 订单错误信息 */
+/* Order error message */
 .order-error {
   margin-top: 1rem;
   padding: 0.8rem;

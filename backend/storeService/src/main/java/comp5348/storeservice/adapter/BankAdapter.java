@@ -39,7 +39,7 @@ public class BankAdapter {
     }
 
     /**
-     * 查询账户余额
+     * Query account balance
      */
     public java.math.BigDecimal getBalance(String accountNumber) {
         String url = bankServiceUrl + "/api/bank/account/" + accountNumber + "/balance";
@@ -58,7 +58,7 @@ public class BankAdapter {
     }
     
     /**
-     * 转账接口 - 带重试机制
+     * Transfer interface - with retry mechanism
      */
     public BankTransferResponse transfer(BankTransferRequest request) {
         logger.info("Calling Bank transfer API: ref={}", request.getTransactionRef());
@@ -100,7 +100,7 @@ public class BankAdapter {
     }
     
     /**
-     * 退款接口 - 带重试机制
+     * Refund interface - with retry mechanism
      */
     public BankRefundResponse refund(BankRefundRequest request) {
         logger.info("Calling Bank refund API: transactionId={}", request.getTransactionId());
@@ -142,8 +142,8 @@ public class BankAdapter {
     }
 
     /**
-     * 为用户创建银行账户，返回账户号
-     * 预期银行服务端点: POST /api/bank/account  body:{"ownerEmail":"...","initialBalance":10000}
+     * Create bank account for user, returns account number
+     * Expected bank service endpoint: POST /api/bank/account  body:{"ownerEmail":"...","initialBalance":10000}
      */
     public String createCustomerAccount(String ownerEmail, java.math.BigDecimal initialBalance) {
         String url = bankServiceUrl + "/api/bank/account";

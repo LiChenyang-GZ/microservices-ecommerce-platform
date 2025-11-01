@@ -21,11 +21,11 @@ public class EmailOutbox {
 
     @Getter
     @Setter
-    private String template; // 邮件模板名，如 "order_picked_up_notice"
+    private String template; // Email template name, e.g. "order_picked_up_notice"
 
     @Getter
     @Setter
-    private String payload; // 邮件内容（可以是JSON）
+    private String payload; // Email content (can be JSON)
 
     @Getter
     @Setter
@@ -55,7 +55,7 @@ public class EmailOutbox {
         return LocalDateTime.now().isAfter(expireAt);
     }
 
-    // 构造函数
+    // Constructors
     public EmailOutbox() {}
 
     public EmailOutbox(String email, String code, String verificationType) {
@@ -63,7 +63,7 @@ public class EmailOutbox {
         this.code = code;
         this.verificationType = verificationType;
         this.status = "PENDING";
-        this.expireAt = LocalDateTime.now().plusMinutes(5); // 5分钟过期
+        this.expireAt = LocalDateTime.now().plusMinutes(5); // Expires in 5 minutes
         this.retryCount = 0;
     }
 }

@@ -27,7 +27,7 @@ public class BankService {
     private TransactionRepository transactionRepository;
     
     /**
-     * 转账 - 支持幂等性
+     * Transfer - supports idempotency
      */
     @Transactional
     public TransferResponse transfer(TransferRequest request) {
@@ -35,7 +35,7 @@ public class BankService {
                 request.getFromAccount(), request.getToAccount(), request.getAmount(), request.getTransactionRef());
         
         try {
-            // 幂等性检查：如果交易已存在，返回之前的结果
+            // Idempotency check: if transaction already exists, return previous result
             Optional<Transaction> existingTxn = transactionRepository.findByTransactionRef(request.getTransactionRef());
             if (existingTxn.isPresent()) {
                 Transaction txn = existingTxn.get();
@@ -48,12 +48,12 @@ public class BankService {
                 }
             }
             
-            // 验证金额
+            // Validate amount
             if (request.getAmount().compareTo(BigDecimal.ZERO) <= 0) {
                 return createFailedTransaction(request, "Amount must be positive");
             }
             
-            // 查找账户
+            // Find accounts
             Optional<BankAccount> fromAccountOpt = accountRepository.findByAccountNumber(request.getFromAccount());
             Optional<BankAccount> toAccountOpt = accountRepository.findByAccountNumber(request.getToAccount());
             
@@ -68,19 +68,19 @@ public class BankService {
             BankAccount fromAccount = fromAccountOpt.get();
             BankAccount toAccount = toAccountOpt.get();
             
-            // 检查余额
+            // Check balance
             if (fromAccount.getBalance().compareTo(request.getAmount()) < 0) {
                 return createFailedTransaction(request, "Insufficient balance. Available: " + fromAccount.getBalance());
             }
             
-            // 执行转账
+            // Execute transfer
             fromAccount.setBalance(fromAccount.getBalance().subtract(request.getAmount()));
             toAccount.setBalance(toAccount.getBalance().add(request.getAmount()));
             
             accountRepository.save(fromAccount);
             accountRepository.save(toAccount);
             
-            // 创建成功的交易记录
+            // Create successful transaction record
             Transaction transaction = new Transaction();
             transaction.setFromAccount(request.getFromAccount());
             transaction.setToAccount(request.getToAccount());
@@ -103,14 +103,14 @@ public class BankService {
     }
     
     /**
-     * 退款
+     * Refund
      */
     @Transactional
     public RefundResponse refund(RefundRequest request) {
         logger.info("Processing refund: transactionId={}, reason={}", request.getTransactionId(), request.getReason());
         
         try {
-            // 查找原交易
+            // Find original transaction
             Optional<Transaction> originalTxnOpt = transactionRepository.findById(Long.parseLong(request.getTransactionId()));
             
             if (!originalTxnOpt.isPresent()) {
@@ -123,7 +123,7 @@ public class BankService {
                 return new RefundResponse(false, null, "Can only refund successful transactions");
             }
             
-            // 反向转账
+            // Reverse transfer
             Optional<BankAccount> fromAccountOpt = accountRepository.findByAccountNumber(originalTxn.getToAccount());
             Optional<BankAccount> toAccountOpt = accountRepository.findByAccountNumber(originalTxn.getFromAccount());
             
@@ -134,19 +134,19 @@ public class BankService {
             BankAccount fromAccount = fromAccountOpt.get();
             BankAccount toAccount = toAccountOpt.get();
             
-            // 检查余额（从接收方退款）
+            // Check balance (refund from receiver)
             if (fromAccount.getBalance().compareTo(originalTxn.getAmount()) < 0) {
                 return new RefundResponse(false, null, "Insufficient balance for refund. Available: " + fromAccount.getBalance());
             }
             
-            // 执行退款
+            // Execute refund
             fromAccount.setBalance(fromAccount.getBalance().subtract(originalTxn.getAmount()));
             toAccount.setBalance(toAccount.getBalance().add(originalTxn.getAmount()));
             
             accountRepository.save(fromAccount);
             accountRepository.save(toAccount);
             
-            // 创建退款交易记录
+            // Create refund transaction record
             Transaction refundTxn = new Transaction();
             refundTxn.setFromAccount(originalTxn.getToAccount());
             refundTxn.setToAccount(originalTxn.getFromAccount());
@@ -170,7 +170,7 @@ public class BankService {
     }
     
     /**
-     * 查询账户余额
+     * Query account balance
      */
     public BalanceResponse getBalance(String accountNumber) {
         logger.info("Querying balance for account: {}", accountNumber);
@@ -186,7 +186,7 @@ public class BankService {
     }
 
     /**
-     * 创建银行账户
+     * Create bank account
      */
     @Transactional
     public BankAccountCreateResponse createAccount(BankAccountCreateRequest req) {
@@ -208,7 +208,7 @@ public class BankService {
     }
     
     /**
-     * 创建失败的交易记录
+     * Create failed transaction record
      */
     private TransferResponse createFailedTransaction(TransferRequest request, String errorMessage) {
         try {
