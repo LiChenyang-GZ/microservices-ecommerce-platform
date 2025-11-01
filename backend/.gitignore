@@ -33,7 +33,6 @@ hs_err_pid*
 # ======================================
 # Logs and reports
 # ======================================
-*.log
 *.lock
 *.tmp
 *.pid
@@ -42,7 +41,6 @@ hs_err_pid*
 *.cache
 *.probe
 *.html
-*.xml
 *.csv
 *.gz
 *.zip
