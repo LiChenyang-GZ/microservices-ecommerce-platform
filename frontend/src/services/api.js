@@ -1,40 +1,40 @@
 import axios from 'axios';
 
-// 创建axios实例
+// Create axios instance
 const api = axios.create({
-  baseURL: 'http://localhost:8082/api', // 后端服务地址
-  timeout: 10000, // 请求超时时间
+  baseURL: 'http://localhost:8082/api', // Backend service address
+  timeout: 10000, // Request timeout
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// 请求拦截器
+// Request interceptor
 api.interceptors.request.use(
   (config) => {
-    // 从 localStorage 获取 token 并添加到请求头
+    // Get token from localStorage and add to request header
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    console.log('发送请求:', config);
+    console.log('Sending request:', config);
     return config;
   },
   (error) => {
-    console.error('请求错误:', error);
+    console.error('Request error:', error);
     return Promise.reject(error);
   }
 );
 
-// 格式化错误消息的工具函数
+// Utility function to format error messages
 const formatErrorMessage = (error) => {
   if (!error.response || !error.response.data) {
-    return error.message || '未知错误';
+    return error.message || 'Unknown error';
   }
 
   const { status, data } = error.response;
   
-  // Bean Validation 错误 (400) - 提取字段错误
+  // Bean Validation error (400) - extract field errors
   if (status === 400 && data.errors) {
     const fieldErrors = data.errors
       .map(err => {
@@ -43,51 +43,51 @@ const formatErrorMessage = (error) => {
         return field ? `${field}: ${msg}` : msg;
       })
       .join('; ');
-    return fieldErrors || data.message || '请求参数验证失败';
+    return fieldErrors || data.message || 'Request parameter validation failed';
   }
 
-  // 400 错误 - 尝试提取 message
+  // 400 error - try to extract message
   if (status === 400) {
     if (data.message) return data.message;
     if (data.error) return data.error;
-    return '请求参数错误，请检查输入';
+    return 'Request parameter error, please check input';
   }
 
-  // 401 未授权
+  // 401 Unauthorized
   if (status === 401) {
-    return '登录已过期，请重新登录';
+    return 'Login expired, please login again';
   }
 
-  // 403 禁止访问
+  // 403 Forbidden
   if (status === 403) {
-    return data.message || '没有权限执行此操作';
+    return data.message || 'No permission to perform this operation';
   }
 
-  // 404 未找到
+  // 404 Not Found
   if (status === 404) {
-    return data.message || '资源未找到';
+    return data.message || 'Resource not found';
   }
 
-  // 500 服务器错误
+  // 500 Server Error
   if (status >= 500) {
-    return data.message || '服务器错误，请稍后重试';
+    return data.message || 'Server error, please try again later';
   }
 
-  // 其他错误
-  return data.message || data.error || `HTTP ${status}: 请求失败`;
+  // Other errors
+  return data.message || data.error || `HTTP ${status}: Request failed`;
 };
 
-// 响应拦截器
+// Response interceptor
 api.interceptors.response.use(
   (response) => {
-    console.log('收到响应:', response);
+    console.log('Received response:', response);
     return response;
   },
   (error) => {
-    // 格式化错误消息
+    // Format error message
     const errorMessage = formatErrorMessage(error);
     
-    // 提取详细的错误信息用于控制台输出
+    // Extract detailed error information for console output
     const errorDetails = {
       message: errorMessage,
       status: error.response?.status,
@@ -96,44 +96,44 @@ api.interceptors.response.use(
       method: error.config?.method?.toUpperCase()
     };
 
-    console.error('【响应错误详情】', errorDetails);
+    console.error('[Response Error Details]', errorDetails);
     
-    // 将格式化后的错误消息附加到 error 对象上，方便组件使用
+    // Attach formatted error message to error object for easy component use
     error.formattedMessage = errorMessage;
     error.errorDetails = errorDetails;
 
-    // 统一处理错误
+    // Unified error handling
     if (error.response) {
-      // 服务器返回了错误状态码
+      // Server returned error status code
       const { status } = error.response;
       
-      // 如果是 401 未授权，清除 token 并跳转到登录页
+      // If 401 Unauthorized, clear token and redirect to login page
       if (status === 401) {
         localStorage.removeItem('token');
         localStorage.removeItem('userEmail');
         localStorage.removeItem('userId');
         localStorage.removeItem('isLoggedIn');
-        // 可以在这里触发登出操作
+        // Can trigger logout operation here
         if (window.location.pathname !== '/login') {
           window.location.href = '/login';
         }
       }
     } else if (error.request) {
-      // 请求已发出但没有收到响应
-      console.error('网络错误: 无法连接到服务器');
-      error.formattedMessage = '网络错误：无法连接到服务器，请检查网络连接';
+      // Request was sent but no response received
+      console.error('Network error: Unable to connect to server');
+      error.formattedMessage = 'Network error: Unable to connect to server, please check network connection';
     } else {
-      // 其他错误
-      console.error('请求配置错误:', error.message);
-      error.formattedMessage = error.message || '请求配置错误';
+      // Other errors
+      console.error('Request configuration error:', error.message);
+      error.formattedMessage = error.message || 'Request configuration error';
     }
     return Promise.reject(error);
   }
 );
 
-// 用户相关API
+// User related API
 export const userAPI = {
-  // 创建账户
+  // Create account
   createAccount: async (accountData) => {
     try {
       const response = await api.post('/user', accountData);
@@ -143,7 +143,7 @@ export const userAPI = {
     }
   },
   
-  // 用户登录
+  // User login
   login: async (credentials) => {
     try {
       const response = await api.post('/user/login', credentials);
@@ -153,7 +153,7 @@ export const userAPI = {
     }
   },
 
-  // 激活账户
+  // Activate account
   activateAccount: async (email) => {
     try {
       const response = await api.post('/user/activate', { email });
@@ -163,7 +163,7 @@ export const userAPI = {
     }
   },
 
-  // 检查邮箱是否已验证
+  // Check if email is verified
   checkEmailVerified: async (email) => {
     try {
       const response = await api.get(`/user/check-verified/${email}`);
@@ -173,7 +173,7 @@ export const userAPI = {
     }
   },
 
-  // 发送忘记密码邮件
+  // Send forgot password email
   forgotPassword: async (email) => {
     try {
       const response = await api.post('/user/forgot-password', { email });
@@ -183,7 +183,7 @@ export const userAPI = {
     }
   },
 
-  // 重置密码
+  // Reset password
   resetPassword: async (email, code, newPassword) => {
     try {
       const response = await api.post('/user/reset-password', { 
@@ -198,9 +198,9 @@ export const userAPI = {
   }
 };
 
-// 邮件服务API - 使用单独的axios实例
+// Email service API - using separate axios instance
 const emailApi = axios.create({
-  baseURL: 'http://localhost:8083/api', // 邮件服务地址
+  baseURL: 'http://localhost:8083/api', // Email service address
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
@@ -208,7 +208,7 @@ const emailApi = axios.create({
 });
 
 export const emailAPI = {
-  // 发送验证码
+  // Send verification code
   sendVerificationCode: async (email) => {
     try {
       const response = await emailApi.post('/email/send-verification', { email });
@@ -218,7 +218,7 @@ export const emailAPI = {
     }
   },
 
-  // 验证验证码
+  // Verify code
   verifyCode: async (email, code) => {
     try {
       const response = await emailApi.post('/email/verify-code', { email, code });
@@ -228,7 +228,7 @@ export const emailAPI = {
     }
   },
 
-  // 检查邮箱是否已验证
+  // Check if email is verified
   checkEmailVerified: async (email) => {
     try {
       const response = await emailApi.get(`/email/check-verified/${email}`);
@@ -239,44 +239,44 @@ export const emailAPI = {
   }
 };
 
-// 创建一个新的axios实例，专门用于连接你的DeliveryCo服务
+// Create a new axios instance specifically for connecting to your DeliveryCo service
 const deliveryApi = axios.create({
-    baseURL: 'http://localhost:8081/api', // 你的DeliveryCo后端地址
+    baseURL: 'http://localhost:8081/api', // Your DeliveryCo backend address
     timeout: 10000,
     headers: { 'Content-Type': 'application/json' },
 });
 
-// 让deliveryApi也使用同样的请求拦截器来附加token
+// Make deliveryApi also use the same request interceptor to attach token
 deliveryApi.interceptors.request.use(
   (config) => {
-    // 从 localStorage 获取 token 并添加到请求头
+    // Get token from localStorage and add to request header
     const token = localStorage.getItem('token');
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    console.log('Delivery API 请求:', config.url, 'Token:', token ? '已设置' : '未找到');
+    console.log('Delivery API request:', config.url, 'Token:', token ? 'Set' : 'Not found');
     return config;
   },
   (error) => {
-    console.error('Delivery API 请求错误:', error);
+    console.error('Delivery API request error:', error);
     return Promise.reject(error);
   }
 );
 
-// 让deliveryApi也使用同样的响应拦截器来处理错误
+// Make deliveryApi also use the same response interceptor to handle errors
 deliveryApi.interceptors.response.use(
   (response) => {
-    console.log('Delivery API 响应:', response.config.url, response.status);
+    console.log('Delivery API response:', response.config.url, response.status);
     return response;
   },
   (error) => {
-    console.error('Delivery API 响应错误:', error.config?.url, error.response?.status, error.response?.data);
-    // 统一处理错误
+    console.error('Delivery API response error:', error.config?.url, error.response?.status, error.response?.data);
+    // Unified error handling
     if (error.response) {
       const { status, data } = error.response;
       console.error(`Delivery API HTTP ${status}:`, data);
       
-      // 如果是 401 未授权，清除 token 并跳转到登录页
+      // If 401 Unauthorized, clear token and redirect to login page
       if (status === 401) {
         localStorage.removeItem('token');
         localStorage.removeItem('userEmail');
@@ -287,19 +287,19 @@ deliveryApi.interceptors.response.use(
         }
       }
     } else if (error.request) {
-      console.error('Delivery API 网络错误: 无法连接到服务器');
+      console.error('Delivery API network error: Unable to connect to server');
     } else {
-      console.error('Delivery API 请求配置错误:', error.message);
+      console.error('Delivery API request configuration error:', error.message);
     }
     return Promise.reject(error);
   }
 );
 
 
-// 导出你的DeliveryCo服务相关API
+// Export your DeliveryCo service related API
 export const deliveryAPI = {
   /**
-   * 获取当前登录用户的所有配送任务
+   * Get all delivery tasks for the currently logged in user
    * @returns Promise
    */
   getMyDeliveries: () => {
@@ -307,8 +307,8 @@ export const deliveryAPI = {
   },
   
   /**
-   * 根据邮箱获取所有配送任务（已废弃，请使用 getMyDeliveries）
-   * @deprecated 请使用 getMyDeliveries()，不再需要传入 email 参数
+   * Get all delivery tasks by email (deprecated, please use getMyDeliveries)
+   * @deprecated Please use getMyDeliveries(), email parameter is no longer needed
    * @param {string} email
    * @returns Promise
    */
@@ -317,7 +317,7 @@ export const deliveryAPI = {
   },
 
   /**
-   * 根据ID获取单个配送任务
+   * Get a single delivery task by ID
    * @param {string|number} id
    * @returns Promise
    */
@@ -326,7 +326,7 @@ export const deliveryAPI = {
   },
 
   /**
-   * 根据ID取消一个配送任务
+   * Cancel a delivery task by ID
    * @param {string|number} id
    * @returns Promise
    */
@@ -334,9 +334,9 @@ export const deliveryAPI = {
     return deliveryApi.post(`/deliveries/${id}/cancel`);
   },
 }
-// 订单相关API
+// Order related API
 export const orderAPI = {
-  // 获取用户订单（含支付信息）
+  // Get user orders (including payment information)
   getUserOrdersWithPayment: async (userId) => {
     try {
       const response = await api.get(`/store/orders/user/${userId}/with-payment`);
@@ -347,7 +347,7 @@ export const orderAPI = {
     }
   },
 
-  // 获取单个订单详情（含支付信息）
+  // Get single order details (including payment information)
   getOrderWithPayment: async (orderId) => {
     try {
       const response = await api.get(`/store/orders/${orderId}/with-payment`);
@@ -357,7 +357,7 @@ export const orderAPI = {
     }
   },
 
-  // 取消订单（统一入口：回退库存 + 如已扣款则退款 + 邮件）
+  // Cancel order (unified entry: rollback inventory + refund if payment deducted + email)
   cancelOrder: async (orderId) => {
     try {
       const response = await api.post(`/store/orders/${orderId}/cancel`);
@@ -366,7 +366,7 @@ export const orderAPI = {
   }
 };
 
-// 结算/下单（整合下单+支付）
+// Checkout/Order creation (integrated order + payment)
 export const checkoutAPI = {
   createOrderWithPayment: async ({ userId, items }) => {
     // items: [{ productId, qty }]
@@ -380,16 +380,16 @@ export const checkoutAPI = {
       });
       return response.data; // OrderResponse
     } catch (error) {
-      // 错误已在拦截器中格式化，直接抛出即可
-      console.error('【下单失败】', error.errorDetails || error);
+      // Error already formatted in interceptor, just throw it
+      console.error('[Order Creation Failed]', error.errorDetails || error);
       throw error;
     }
   }
 };
 
-// 商品服务API（直接使用默认 api 实例，指向 http://localhost:8082/api）
+// Product service API (using default api instance, pointing to http://localhost:8082/api)
 export const productAPI = {
-  // 获取全部商品
+  // Get all products
   getAll: async () => {
     try {
       const res = await api.get('/products');
@@ -397,7 +397,7 @@ export const productAPI = {
     } catch (e) { throw e; }
   },
 
-  // 仅获取有库存的商品
+  // Get only products with stock
   getAvailable: async () => {
     try {
       const res = await api.get('/products/available');
@@ -405,7 +405,7 @@ export const productAPI = {
     } catch (e) { throw e; }
   },
 
-  // 根据ID获取
+  // Get by ID
   getById: async (id) => {
     try {
       const res = await api.get(`/products/${id}`);
@@ -413,7 +413,7 @@ export const productAPI = {
     } catch (e) { throw e; }
   },
 
-  // 按名称搜索
+  // Search by name
   searchByName: async (name) => {
     try {
       const res = await api.get('/products/search', { params: { name } });
@@ -422,28 +422,28 @@ export const productAPI = {
   },
 };
 
-// 支付相关API
+// Payment related API
 export const paymentAPI = {
-  // 根据订单ID查询支付状态
+  // Query payment status by order ID
   getPaymentByOrderId: async (orderId) => {
     try {
       const response = await api.get(`/payments/order/${orderId}`);
       return response.data;
     } catch (error) {
-      // 错误已在拦截器中格式化，直接抛出即可
-      console.error('【查询支付状态失败】', error.errorDetails || error);
+      // Error already formatted in interceptor, just throw it
+      console.error('[Query Payment Status Failed]', error.errorDetails || error);
       throw error;
     }
   },
 
-  // 申请退款
+  // Apply for refund
   refundPayment: async (orderId, reason = 'Customer requested refund') => {
     try {
       const response = await api.post(`/payments/${orderId}/refund`, { reason });
       return response.data;
     } catch (error) {
-      // 错误已在拦截器中格式化，直接抛出即可
-      console.error('【退款失败】', error.errorDetails || error);
+      // Error already formatted in interceptor, just throw it
+      console.error('[Refund Failed]', error.errorDetails || error);
       throw error;
     }
   }

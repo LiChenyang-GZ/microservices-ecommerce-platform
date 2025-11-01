@@ -25,7 +25,7 @@ public class ProductController {
     private ProductService productService;
     
     /**
-     * 獲取所有商品列表
+     * Get all product list
      * GET /api/products
      */
     @GetMapping
@@ -43,7 +43,7 @@ public class ProductController {
     }
     
     /**
-     * 獲取有庫存的商品列表
+     * Get products with stock
      * GET /api/products/available
      */
     @GetMapping("/available")
@@ -61,7 +61,7 @@ public class ProductController {
     }
     
     /**
-     * 根據ID獲取商品
+     * Get product by ID
      * GET /api/products/{id}
      */
     @GetMapping("/{id}")
@@ -83,7 +83,7 @@ public class ProductController {
     }
     
     /**
-     * 根據名稱搜索商品
+     * Search products by name
      * GET /api/products/search?name={name}
      */
     @GetMapping("/search")
@@ -101,7 +101,7 @@ public class ProductController {
     }
     
     /**
-     * 根據價格範圍搜索商品
+     * Search products by price range
      * GET /api/products/search/price?minPrice={minPrice}&maxPrice={maxPrice}
      */
     @GetMapping("/search/price")
@@ -122,7 +122,7 @@ public class ProductController {
     }
     
     /**
-     * 創建新商品
+     * Create new product
      * POST /api/products
      */
     @PostMapping
@@ -140,7 +140,7 @@ public class ProductController {
     }
     
     /**
-     * 更新商品資訊
+     * Update product information
      * PUT /api/products/{id}
      */
     @PutMapping("/{id}")
@@ -160,7 +160,7 @@ public class ProductController {
     
 
     /**
-     * 分配商品到多個倉庫
+     * Assign product to multiple warehouses
      * POST /api/products/{productId}/assign
      */
     @PostMapping("/{productId}/assign")

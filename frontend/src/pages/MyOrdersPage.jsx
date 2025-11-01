@@ -10,7 +10,7 @@ const MyOrdersPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // TODO: 从AuthContext获取userId，目前使用硬编码测试
+  // TODO: Get userId from AuthContext, currently using hardcoded value for testing
   const userId = 1;
 
   useEffect(() => {
@@ -25,7 +25,7 @@ const MyOrdersPage = () => {
       setOrders(data);
     } catch (err) {
       console.error('Failed to fetch orders:', err);
-      setError('无法加载订单列表，请稍后重试');
+      setError('Unable to load order list, please try again later');
     } finally {
       setLoading(false);
     }
@@ -51,21 +51,21 @@ const MyOrdersPage = () => {
 
   const getStatusText = (status) => {
     const statusTextMap = {
-      'PENDING': '待处理',
-      'SUCCESS': '成功',
-      'PAID': '已支付',
-      'FAILED': '失败',
-      'REFUNDED': '已退款',
-      'PLACED': '已下单',
-      'PROCESSING': '处理中',
-      'CANCELLED': '已取消'
+      'PENDING': 'Pending',
+      'SUCCESS': 'Success',
+      'PAID': 'Paid',
+      'FAILED': 'Failed',
+      'REFUNDED': 'Refunded',
+      'PLACED': 'Placed',
+      'PROCESSING': 'Processing',
+      'CANCELLED': 'Cancelled'
     };
     return statusTextMap[status] || status;
   };
 
   const formatDate = (dateString) => {
     const date = new Date(dateString);
-    return date.toLocaleDateString('zh-CN', {
+    return date.toLocaleDateString('en-US', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',
@@ -79,7 +79,7 @@ const MyOrdersPage = () => {
       <div className="orders-container">
         <div className="loading-spinner">
           <div className="spinner"></div>
-          <p>加载订单中...</p>
+          <p>Loading orders...</p>
         </div>
       </div>
     );
@@ -88,23 +88,23 @@ const MyOrdersPage = () => {
   return (
     <div className="orders-container">
       <div className="orders-header">
-        <h1>我的订单</h1>
+        <h1>My Orders</h1>
         <Button onClick={() => navigate('/')} variant="secondary">
-          返回首页
+          Back to Home
         </Button>
       </div>
 
       {error && (
         <div className="error-message">
           <p>{error}</p>
-          <Button onClick={fetchOrders}>重试</Button>
+          <Button onClick={fetchOrders}>Retry</Button>
         </div>
       )}
 
       {!error && orders.length === 0 && (
         <div className="empty-state">
-          <p>您还没有任何订单</p>
-          <Button onClick={() => navigate('/')}>去购物</Button>
+          <p>You don't have any orders yet</p>
+          <Button onClick={() => navigate('/')}>Go Shopping</Button>
         </div>
       )}
 
@@ -120,7 +120,7 @@ const MyOrdersPage = () => {
               >
                 <div className="order-card-header">
                   <div className="order-info">
-                    <h3>订单 #{order.id}</h3>
+                    <h3>Order #{order.id}</h3>
                     <span className="order-date">{formatDate(order.createdAt)}</span>
                   </div>
                   <div className="order-badges">
@@ -137,10 +137,10 @@ const MyOrdersPage = () => {
 
                 <div className="order-card-body">
                   <div className="order-items">
-                    <p>商品数量: {order.orderItems?.length || 0} 件</p>
+                    <p>Product Count: {order.orderItems?.length || 0} items</p>
                   </div>
                   <div className="order-amount">
-                    <span className="amount-label">总金额:</span>
+                    <span className="amount-label">Total Amount:</span>
                     <span className="amount-value">¥{order.totalAmount}</span>
                   </div>
                 </div>

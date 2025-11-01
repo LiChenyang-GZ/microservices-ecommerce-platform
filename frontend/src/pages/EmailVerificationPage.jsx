@@ -17,7 +17,7 @@ const EmailVerificationPage = () => {
   const [countdown, setCountdown] = useState(0);
 
   useEffect(() => {
-    // 从路由状态或localStorage获取邮箱
+    // Get email from route state or localStorage
     const emailFromState = location.state?.email;
     const emailFromStorage = localStorage.getItem('pendingEmail');
     
@@ -27,7 +27,7 @@ const EmailVerificationPage = () => {
     } else if (emailFromStorage) {
       setEmail(emailFromStorage);
     } else {
-      // 如果没有邮箱信息，重定向到注册页面
+      // If no email information, redirect to register page
       navigate('/register');
     }
   }, [location.state, navigate]);
@@ -47,39 +47,39 @@ const EmailVerificationPage = () => {
     setSuccess('');
 
     try {
-      // 验证验证码
+      // Verify verification code
       const verifyResponse = await emailAPI.verifyCode(email, verificationCode);
       
       if (verifyResponse.success) {
-        // 验证成功，激活账户
+        // Verification successful, activate account
         const activateResponse = await userAPI.activateAccount(email);
         
         if (activateResponse.success) {
-          setSuccess('邮箱验证成功！账户已激活，请登录。');
-          // 清除pending email
+          setSuccess('Email verification successful! Account activated, please login.');
+          // Clear pending email
           localStorage.removeItem('pendingEmail');
           
-          // 2秒后跳转到登录页面
+          // Redirect to login page after 2 seconds
           setTimeout(() => {
             navigate('/login', { 
               state: { 
-                message: '邮箱验证成功，请登录',
+                message: 'Email verification successful, please login',
                 email: email 
               }
             });
           }, 2000);
         } else {
-          setError('账户激活失败，请重试');
+          setError('Account activation failed, please try again');
         }
       } else {
-        setError(verifyResponse.message || '验证码无效或已过期');
+        setError(verifyResponse.message || 'Verification code invalid or expired');
       }
     } catch (error) {
-      console.error('验证失败:', error);
+      console.error('Verification failed:', error);
       if (error.response?.data?.message) {
         setError(error.response.data.message);
       } else {
-        setError('验证失败，请重试');
+        setError('Verification failed, please try again');
       }
     } finally {
       setIsLoading(false);
@@ -94,17 +94,17 @@ const EmailVerificationPage = () => {
     try {
       const response = await emailAPI.sendVerificationCode(email);
       if (response.success) {
-        setSuccess('验证码已重新发送到您的邮箱');
-        setCountdown(60); // 60秒倒计时
+        setSuccess('Verification code has been resent to your email');
+        setCountdown(60); // 60 second countdown
       } else {
-        setError(response.message || '发送失败');
+        setError(response.message || 'Failed to send');
       }
     } catch (error) {
-      console.error('重发验证码失败:', error);
+      console.error('Failed to resend verification code:', error);
       if (error.response?.data?.message) {
         setError(error.response.data.message);
       } else {
-        setError('重发验证码失败，请重试');
+        setError('Failed to resend verification code, please try again');
       }
     } finally {
       setIsResending(false);
@@ -113,7 +113,7 @@ const EmailVerificationPage = () => {
 
   const handleChange = (e) => {
     const { value } = e.target;
-    // 只允许输入数字，最多6位
+    // Only allow numbers, maximum 6 digits
     const numericValue = value.replace(/\D/g, '').slice(0, 6);
     setVerificationCode(numericValue);
     
@@ -126,9 +126,9 @@ const EmailVerificationPage = () => {
     <div className="email-verification-page">
       <div className="verification-container">
         <div className="verification-header">
-          <h1>邮箱验证</h1>
-          <p>我们已向 <strong>{email}</strong> 发送了验证码</p>
-          <p>请输入6位数字验证码完成注册</p>
+          <h1>Email Verification</h1>
+          <p>We have sent a verification code to <strong>{email}</strong></p>
+          <p>Please enter the 6-digit verification code to complete registration</p>
         </div>
 
         <form onSubmit={handleVerify} className="verification-form">
@@ -136,10 +136,10 @@ const EmailVerificationPage = () => {
             <Input
               type="text"
               name="verificationCode"
-              label="验证码"
+              label="Verification Code"
               value={verificationCode}
               onChange={handleChange}
-              placeholder="请输入6位验证码"
+              placeholder="Enter 6-digit verification code"
               error={error}
               disabled={isLoading}
               required
@@ -160,7 +160,7 @@ const EmailVerificationPage = () => {
               disabled={isLoading || verificationCode.length !== 6}
               loading={isLoading}
             >
-              {isLoading ? '验证中...' : '验证邮箱'}
+              {isLoading ? 'Verifying...' : 'Verify Email'}
             </Button>
 
             <Button
@@ -170,19 +170,19 @@ const EmailVerificationPage = () => {
               disabled={isResending || countdown > 0}
               loading={isResending}
             >
-              {countdown > 0 ? `重新发送 (${countdown}s)` : '重新发送验证码'}
+              {countdown > 0 ? `Resend (${countdown}s)` : 'Resend Verification Code'}
             </Button>
           </div>
         </form>
 
         <div className="verification-footer">
-          <p>没有收到验证码？请检查垃圾邮件文件夹</p>
+          <p>Didn't receive the code? Please check your spam folder</p>
           <button 
             type="button" 
             className="back-to-register"
             onClick={() => navigate('/register')}
           >
-            返回注册页面
+            Back to Register
           </button>
         </div>
       </div>

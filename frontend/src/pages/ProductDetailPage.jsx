@@ -19,8 +19,8 @@ export default function ProductDetailPage() {
         const data = await productAPI.getById(id);
         setProduct(data);
       } catch (e) {
-        console.error('加载商品详情失败:', e);
-        setError(e?.response?.data?.message || '加载失败，请稍后再试');
+        console.error('Failed to load product details:', e);
+        setError(e?.response?.data?.message || 'Failed to load, please try again later');
       } finally {
         setLoading(false);
       }
@@ -34,26 +34,26 @@ export default function ProductDetailPage() {
     navigate('/checkout', { state: { productId: product.id, qty: count } });
   };
 
-  if (loading) return <div className="pd-container">正在加载...</div>;
+  if (loading) return <div className="pd-container">Loading...</div>;
   if (error) return <div className="pd-container pd-error">{error}</div>;
-  if (!product) return <div className="pd-container">未找到该商品</div>;
+  if (!product) return <div className="pd-container">Product not found</div>;
 
   const inStock = (product.stockQuantity || 0) > 0;
 
   return (
     <div className="pd-container">
-      <button className="pd-back" onClick={() => navigate('/products')}>← 返回列表</button>
+      <button className="pd-back" onClick={() => navigate('/products')}>← Back to List</button>
       <div className="pd-card">
         <div className="pd-main">
           <h1 className="pd-title">{product.name}</h1>
           <div className="pd-meta">
             <span className="pd-price">¥ {Number(product.price || 0).toFixed(2)}</span>
-            <span className={`pd-stock ${inStock ? 'in' : 'out'}`}>{inStock ? `有货（${product.stockQuantity}）` : '缺货'}</span>
+            <span className={`pd-stock ${inStock ? 'in' : 'out'}`}>{inStock ? `In Stock (${product.stockQuantity})` : 'Out of Stock'}</span>
           </div>
-          <p className="pd-desc">{product.description || '暂无描述'}</p>
+          <p className="pd-desc">{product.description || 'No description'}</p>
           <div className="pd-actions">
             <label className="pd-qty">
-              数量：
+              Quantity:
               <input
                 type="number"
                 min={1}
@@ -63,7 +63,7 @@ export default function ProductDetailPage() {
               />
             </label>
             <button className="pd-btn" disabled={!inStock} onClick={goCheckout}>
-              {inStock ? '去结算' : '缺货'}
+              {inStock ? 'Checkout' : 'Out of Stock'}
             </button>
           </div>
         </div>

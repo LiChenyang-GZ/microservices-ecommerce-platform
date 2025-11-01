@@ -7,7 +7,7 @@ import EmailVerificationPage from './pages/EmailVerificationPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
 import HomePage from './pages/HomePage';
-import DeliveryListPage from './pages/DeliveryListPage.jsx';     // <-- 导入你的页面
+import DeliveryListPage from './pages/DeliveryListPage.jsx';     // <-- Import your page
 import DeliveryDetailPage from './pages/DeliveryDetailPage.jsx';
 import ProductCatalogPage from './pages/ProductCatalogPage.jsx';
 import ProductDetailPage from './pages/ProductDetailPage.jsx';
@@ -16,23 +16,23 @@ import MyOrdersPage from './pages/MyOrdersPage';
 import OrderDetailPage from './pages/OrderDetailPage';
 import './App.css';
 
-// 受保护的路由组件
+// Protected route component
 const ProtectedRoute = ({ children }) => {
   const { isLoggedIn, isLoading } = useAuth();
   
   if (isLoading) {
-    return <div className="loading">正在加载...</div>;
+    return <div className="loading">Loading...</div>;
   }
   
   return isLoggedIn ? children : <Navigate to="/login" replace />;
 };
 
-// 公开路由组件（已登录用户重定向到首页）
+// Public route component (redirect logged in users to home page)
 const PublicRoute = ({ children }) => {
   const { isLoggedIn, isLoading } = useAuth();
   
   if (isLoading) {
-    return <div className="loading">正在加载...</div>;
+    return <div className="loading">Loading...</div>;
   }
   
   return isLoggedIn ? <Navigate to="/" replace /> : children;

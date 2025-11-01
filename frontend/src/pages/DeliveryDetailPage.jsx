@@ -8,7 +8,7 @@ function DeliveryDetailPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [isCancelling, setIsCancelling] = useState(false);
     const [error, setError] = useState('');
-    const { id } = useParams(); // 从URL中获取ID，例如 /delivery/1
+    const { id } = useParams(); // Get ID from URL, e.g., /delivery/1
     const navigate = useNavigate();
     const { isLoggedIn, isLoading: authLoading } = useAuth();
 
@@ -19,14 +19,14 @@ function DeliveryDetailPage() {
             setDelivery(response.data);
             setError('');
         } catch (err) {
-            console.error('获取订单详情失败:', err);
+            console.error('Failed to fetch order details:', err);
             if (err.response?.status === 401) {
-                setError('请先登录');
+                setError('Please login first');
                 navigate('/login');
             } else if (err.response?.status === 404) {
-                setError('订单不存在或您无权访问此订单');
+                setError('Order not found or you do not have permission to access this order');
             } else {
-                setError('无法加载订单详情，请稍后再试。');
+                setError('Unable to load order details, please try again later.');
             }
         } finally {
             setIsLoading(false);
@@ -41,7 +41,7 @@ function DeliveryDetailPage() {
         if (isLoggedIn) fetchDelivery();
     }, [isLoggedIn, authLoading, fetchDelivery, navigate]);
 
-    // 降低竞态：对于非终态，2秒轮询一次刷新状态；终态或取消中则停止
+    // Reduce race condition: poll every 2 seconds to refresh status for non-terminal states; stop for terminal states or while cancelling
     useEffect(() => {
         const terminal = ['RECEIVED', 'LOST', 'CANCELLED'];
         if (!delivery || terminal.includes(delivery?.deliveryStatus) || isCancelling) return;
@@ -50,33 +50,33 @@ function DeliveryDetailPage() {
     }, [delivery, isCancelling, fetchDelivery]);
 
     const handleCancel = async () => {
-        if (window.confirm('您确定要取消这个配送任务吗？')) {
+        if (window.confirm('Are you sure you want to cancel this delivery task?')) {
             try {
                 setIsCancelling(true);
-                // 优先通过 StoreService 统一取消（按 orderId），确保回退库存与退款
+                // Prioritize unified cancellation through StoreService (by orderId) to ensure inventory rollback and refund
                 if (delivery?.orderId) {
                     await orderAPI.cancelOrder(delivery.orderId);
                 } else {
-                    // 回退到旧行为：仅取消配送（可能无法回退库存/退款）
+                    // Fallback to old behavior: only cancel delivery (may not rollback inventory/refund)
                     await deliveryAPI.cancelDeliveryById(id);
                 }
-                alert('订单已成功取消（已联动库存/退款处理，如适用）！');
-                navigate('/deliveries'); // 取消成功后返回列表页
+                alert('Order successfully cancelled (inventory/refund processed, if applicable)!');
+                navigate('/deliveries'); // Return to list page after successful cancellation
             } catch (err) {
-                console.error('取消失败:', err);
-                let errorMessage = '取消失败';
+                console.error('Cancellation failed:', err);
+                let errorMessage = 'Cancellation failed';
                 if (err.response?.status === 401) {
-                    errorMessage = '请先登录';
+                    errorMessage = 'Please login first';
                     navigate('/login');
                 } else if (err.response?.status === 404 || err.response?.status === 403) {
-                    errorMessage = '订单不存在或您无权取消此订单';
+                    errorMessage = 'Order not found or you do not have permission to cancel this order';
                 } else if (err.response?.data) {
                     errorMessage = typeof err.response.data === 'string' 
                         ? err.response.data 
-                        : err.response.data.message || '该订单可能已无法取消';
+                        : err.response.data.message || 'This order may no longer be cancellable';
                 }
                 alert(errorMessage);
-                // 失败时重新拉取最新状态，防止本地显示与服务端不一致
+                // Re-fetch latest status on failure to prevent local display inconsistency with server
                 try { await fetchDelivery(); } catch (e) { /* ignore */ }
             }
             finally { setIsCancelling(false); }
@@ -84,7 +84,7 @@ function DeliveryDetailPage() {
     };
 
     if (isLoading) {
-        return <div>正在加载详情...</div>;
+        return <div>Loading details...</div>;
     }
 
     if (error) {
@@ -92,29 +92,29 @@ function DeliveryDetailPage() {
     }
 
     if (!delivery) {
-        return <div>未找到该订单。</div>;
+        return <div>Order not found.</div>;
     }
 
-    // 只有在特定状态下才允许取消
-    // 仅在 CREATED 时允许取消，避免前端仍显示可取消但后端已进入取件导致报错
+    // Only allow cancellation in specific states
+    // Only allow cancellation when CREATED to avoid errors when frontend shows cancellable but backend has already entered pickup
     const canCancel = delivery.deliveryStatus === 'CREATED';
 
     return (
         <div className="container">
-            <button onClick={() => navigate('/deliveries')} className="btn-back">← 返回列表</button>
-            <h1>订单详情</h1>
+            <button onClick={() => navigate('/deliveries')} className="btn-back">← Back to List</button>
+            <h1>Order Details</h1>
             <div className="delivery-details">
-                <p><strong>商品:</strong> {delivery.productName}</p>
-                <p><strong>数量:</strong> {delivery.quantity}</p>
-                <p><strong>收货地址:</strong> {delivery.toAddress}</p>
-                <p><strong>发货仓库:</strong> {delivery.fromAddress.join(', ')}</p>
-                <p><strong>创建时间:</strong> {new Date(delivery.creationTime).toLocaleString()}</p>
-                <p><strong>当前状态:</strong> <span className={`status status-${delivery.deliveryStatus}`}>{delivery.deliveryStatus}</span></p>
+                <p><strong>Product:</strong> {delivery.productName}</p>
+                <p><strong>Quantity:</strong> {delivery.quantity}</p>
+                <p><strong>Delivery Address:</strong> {delivery.toAddress}</p>
+                <p><strong>Warehouse:</strong> {delivery.fromAddress.join(', ')}</p>
+                <p><strong>Created At:</strong> {new Date(delivery.creationTime).toLocaleString()}</p>
+                <p><strong>Current Status:</strong> <span className={`status status-${delivery.deliveryStatus}`}>{delivery.deliveryStatus}</span></p>
             </div>
 
             {canCancel && (
                 <button onClick={handleCancel} className="btn btn-danger" disabled={isCancelling}>
-                    取消订单
+                    Cancel Order
                 </button>
             )}
         </div>

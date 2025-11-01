@@ -156,53 +156,53 @@ public class WarehouseService {
                 .orElse(false);
     }
 
-    @Transactional // 确保加上注解
-    public WarehouseDTO getAndUpdateAvailableWarehouse(long productId, int quantity, Long orderId) { // 建议传入 orderId
+    @Transactional // Ensure annotation is present
+    public WarehouseDTO getAndUpdateAvailableWarehouse(long productId, int quantity, Long orderId) { // Suggest passing orderId
         List<WarehouseProduct> availableProducts = warehouseProductRepository.findByProductIdAndQuantity(productId);
 
-        // --- 步骤1: 纯内存计算和检查 ---
+        // --- Step 1: Pure in-memory calculation and check ---
         int totalAvailable = availableProducts.stream().mapToInt(WarehouseProduct::getQuantity).sum();
         if (totalAvailable < quantity) {
             logger.warn("Insufficient stock for product: {}. Required: {}, Available: {}", productId, quantity, totalAvailable);
-            return null; // 库存不足，直接返回
+            return null; // Insufficient stock, return directly
         }
 
         int remainingQuantity = quantity;
         List<WarehouseProduct> productsToUpdate = new ArrayList<>();
         List<InventoryTransaction> transactionsToCreate = new ArrayList<>();
-        List<WarehouseDTO> warehouseDTOs = new ArrayList<>(); // 用于返回
+        List<WarehouseDTO> warehouseDTOs = new ArrayList<>(); // Used for return
 
         for (WarehouseProduct wp : availableProducts) {
             if (remainingQuantity <= 0) break;
 
             int quantityToTake = Math.min(wp.getQuantity(), remainingQuantity);
 
-            // 更新库存实体（仅在内存中）
+            // Update inventory entity (only in memory)
             wp.setQuantity(wp.getQuantity() - quantityToTake);
             productsToUpdate.add(wp);
 
-            // 创建事务实体（仅在内存中）
+            // Create transaction entity (only in memory)
             InventoryTransaction tx = new InventoryTransaction();
             tx.setProduct(wp.getProduct());
             tx.setWarehouse(wp.getWarehouse());
             tx.setQuantity(quantityToTake);
             tx.setType(InventoryTransactionType.HOLD);
             tx.setTransactionTime(LocalDateTime.now());
-            // tx.setOrderId(orderId); // 关联到订单
+            // tx.setOrderId(orderId); // Link to order
             transactionsToCreate.add(tx);
 
             remainingQuantity -= quantityToTake;
 
-            // 准备返回的DTO
+            // Prepare return DTO
             warehouseDTOs.add(new WarehouseDTO(wp.getWarehouse()));
         }
 
-        // --- 步骤2: 统一数据库写入 ---
+        // --- Step 2: Unified database write ---
         warehouseProductRepository.saveAll(productsToUpdate);
         List<InventoryTransaction> savedTxs = inventoryTransactionRepository.saveAll(transactionsToCreate);
         List<Long> inventoryTransactionIds = savedTxs.stream().map(InventoryTransaction::getId).collect(Collectors.toList());
 
-        // --- 步骤3: 准备并返回响应 ---
+        // --- Step 3: Prepare and return response ---
         WarehouseDTO responseDTO = new WarehouseDTO();
         responseDTO.setWarehouses(warehouseDTOs);
         responseDTO.setInventoryTransactionIds(inventoryTransactionIds);

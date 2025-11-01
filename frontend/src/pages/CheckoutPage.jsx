@@ -31,8 +31,8 @@ export default function CheckoutPage() {
         const p = await productAPI.getById(productId);
         setProduct(p);
       } catch (e) {
-        console.error('加载商品失败:', e);
-        setError(e?.response?.data?.message || '加载商品失败');
+        console.error('Failed to load product:', e);
+        setError(e?.response?.data?.message || 'Failed to load product');
       }
     };
     load();
@@ -54,30 +54,30 @@ export default function CheckoutPage() {
         items: [{ productId: product.id, qty: Number(qty || 1) }]
       });
       if (resp?.success) {
-        alert('下单成功！');
+        alert('Order created successfully!');
         navigate('/');
       } else {
-        setError(resp?.message || '下单失败');
+        setError(resp?.message || 'Order creation failed');
       }
     } catch (e) {
-      console.error('下单失败:', e);
-      // 使用格式化后的错误消息，如果不存在则尝试从 response.data 提取
+      console.error('Order creation failed:', e);
+      // Use formatted error message, if not exists try to extract from response.data
       const errorMsg = e?.formattedMessage || 
                        e?.response?.data?.message || 
                        e?.message || 
-                       '下单失败，请稍后重试';
+                       'Order creation failed, please try again later';
       
-      // 如果是 400 错误，尝试显示详细的验证错误
+      // If 400 error, try to display detailed validation errors
       if (e?.response?.status === 400 && e?.response?.data) {
         const data = e.response.data;
         if (data.errors && Array.isArray(data.errors)) {
-          // Bean Validation 错误 - 显示所有字段错误
+          // Bean Validation error - display all field errors
           const detailedErrors = data.errors.map(err => {
-            const field = err.field || err.propertyPath || '参数';
-            const msg = err.message || err.defaultMessage || '验证失败';
+            const field = err.field || err.propertyPath || 'Parameter';
+            const msg = err.message || err.defaultMessage || 'Validation failed';
             return `• ${field}: ${msg}`;
           }).join('\n');
-          setError(`请求参数错误：\n${detailedErrors}`);
+          setError(`Request parameter error:\n${detailedErrors}`);
         } else if (data.message) {
           setError(data.message);
         } else {
@@ -95,13 +95,13 @@ export default function CheckoutPage() {
 
   return (
     <div className="co-container">
-      <button className="co-back" onClick={() => navigate(-1)}>← 返回</button>
+      <button className="co-back" onClick={() => navigate(-1)}>← Back</button>
 
-      <h1>确认订单</h1>
+      <h1>Confirm Order</h1>
 
       {error && (
         <div className="co-error">
-          <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>⚠️ 错误信息：</div>
+          <div style={{ fontWeight: 'bold', marginBottom: '8px' }}>⚠️ Error Message:</div>
           <div style={{ whiteSpace: 'pre-line', fontSize: '14px' }}>{error}</div>
         </div>
       )}
@@ -114,22 +114,22 @@ export default function CheckoutPage() {
           </div>
           <div className="co-row">
             <label>
-              数量：
+              Quantity:
               <input type="number" min={1} max={product.stockQuantity || 1} value={qty}
                      onChange={(e)=>setQty(e.target.value)} />
             </label>
           </div>
           <div className="co-row co-total">
-            总计：<strong>¥ {total}</strong>
+            Total: <strong>¥ {total}</strong>
           </div>
           <div className="co-actions">
             <button className="co-btn" disabled={loading || (product.stockQuantity||0)<=0} onClick={submitOrder}>
-              {loading ? '提交中...' : '提交订单并支付'}
+              {loading ? 'Submitting...' : 'Submit Order and Pay'}
             </button>
           </div>
         </div>
       ) : (
-        <div>正在加载...</div>
+        <div>Loading...</div>
       )}
 
       <style>{`

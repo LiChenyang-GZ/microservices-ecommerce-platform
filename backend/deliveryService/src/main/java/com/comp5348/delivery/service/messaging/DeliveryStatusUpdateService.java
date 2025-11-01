@@ -29,11 +29,12 @@ public class DeliveryStatusUpdateService {
     private final DeliveryRepository deliveryRepository;
     private final RabbitTemplate rabbitTemplate;
     private final PlatformTransactionManager transactionManager;
-    private final Random random = new Random(); // 用于生成随机数
+    private final com.comp5348.delivery.adapters.EmailAdapter emailAdapter;
+    private final Random random = new Random(); // Used to generate random numbers
 
-    // 模拟配送的常量
-    private static final int BASE_WAIT_TIME_MS = 10000; // 基础等待时间：10秒
-    private static final double PACKAGE_LOSS_RATE = 0.01; // 100% 的丢包率
+    // Constants for simulating delivery
+    private static final int BASE_WAIT_TIME_MS = 10000; // Base wait time: 10 seconds
+    private static final double PACKAGE_LOSS_RATE = 0.05; // 5% package loss rate
 
     @Autowired
     public DeliveryStatusUpdateService(DeliveryRepository deliveryRepository,
@@ -46,40 +47,40 @@ public class DeliveryStatusUpdateService {
         this.emailAdapter = emailAdapter;
     }
 
-    // @RabbitListener注解告诉Spring：请一直监听这个队列，一旦有消息进来，就调用这个方法！
+    // @RabbitListener tells Spring to keep listening to this queue, and call this method when a message arrives!
     @RabbitListener(queues = RabbitMQConfig.DELIVERY_QUEUE_NAME)
-//    @Transactional // 保证每次处理消息时，数据库操作是原子的
+//    @Transactional // Ensures atomicity of database operations for each message processing
     public void processDelivery(Long deliveryId) {
         TransactionStatus status = transactionManager.getTransaction(new DefaultTransactionDefinition());
         try{
-            logger.info("【消息消费者】收到新任务，开始处理配送ID: {}", deliveryId);
+            logger.info("[Message Consumer] Received new task, processing delivery ID: {}", deliveryId);
 
-            // 1. 根据ID从数据库中获取完整的配送信息
-            // orElse(null) 表示如果找不到，就返回null
+            // 1. Get complete delivery information from database by ID
+            // orElse(null) means return null if not found
             Delivery delivery = deliveryRepository.findById(deliveryId).orElse(null);
 
             if (delivery == null) {
-                logger.warn("【警告】在数据库中未找到ID为 {} 的配送任务，消息将被丢弃。", deliveryId);
-                transactionManager.commit(status); // 提交事务并返回
-                return; // 结束处理
+                logger.warn("[Warning] Delivery task with ID {} not found in database, message will be discarded.", deliveryId);
+                transactionManager.commit(status); // Commit transaction and return
+                return; // End processing
             }
 
             if (!shouldContinueProcessing(delivery)) {
-                logger.info("配送任务 {} 已是终态 ({})，无需处理。", deliveryId, delivery.getDeliveryStatus());
-                transactionManager.commit(status); // 提交事务并返回
+                logger.info("Delivery task {} is already in final state ({}), no need to process.", deliveryId, delivery.getDeliveryStatus());
+                transactionManager.commit(status); // Commit transaction and return
                 return;
             }
 
-            // 2. 模拟真实世界中的运输延迟
+            // 2. Simulate real-world shipping delay
             try {
-                // 固定每个状态变化间隔为 10 秒
+                // Fixed interval of 10 seconds for each state change
                 Thread.sleep(BASE_WAIT_TIME_MS);
             } catch (InterruptedException e) {
-                Thread.currentThread().interrupt(); // 重新设置中断状态
-                logger.error("线程在等待时被中断", e);
+                Thread.currentThread().interrupt(); // Reset interrupt status
+                logger.error("Thread interrupted while waiting", e);
             }
 
-            // 2.5 在延迟期间，订单可能被取消。这里重新从数据库读取最新状态，若已达终态则停止推进
+            // 2.5 During the delay, order may be cancelled. Re-read latest state from database, stop if already in final state
             delivery = deliveryRepository.findById(deliveryId).orElse(null);
             if (delivery == null) {
                 transactionManager.commit(status);
@@ -87,68 +88,66 @@ public class DeliveryStatusUpdateService {
             }
             if (!shouldContinueProcessing(delivery)) {
                 transactionManager.commit(status);
-                logger.info("配送任务 {} 在等待期间已变为终态 ({}), 停止推进。", deliveryId, delivery.getDeliveryStatus());
+                logger.info("Delivery task {} changed to final state ({}) during wait, stopping progression.", deliveryId, delivery.getDeliveryStatus());
                 return;
             }
 
-            // 3. 模拟包裹丢失的可能性
+            // 3. Simulate possibility of package loss
             if (random.nextDouble() < PACKAGE_LOSS_RATE) {
-                logger.warn("【模拟丢包】配送ID: {} 的包裹不幸丢失！", deliveryId);
+                logger.warn("[Simulated Package Loss] Package for delivery ID {} was unfortunately lost!", deliveryId);
                 delivery.setDeliveryStatus(DeliveryStatus.LOST);
             } else {
-                // 4. 如果没丢，就推进到下一个状态
+                // 4. If not lost, advance to next state
                 updateDeliveryStatus(delivery);
             }
 
-            // 5. 将更新后的状态保存回数据库
+            // 5. Save updated state back to database
             delivery.setUpdateTime(LocalDateTime.now());
-            Delivery savedDelivery = deliveryRepository.saveAndFlush(delivery); // saveAndFlush会立即写入数据库
-            transactionManager.commit(status); // !! 在这里手动提交事务 !!
-            logger.info("配送ID: {} 的状态已更新为 -> {}，并保存至数据库。", deliveryId, delivery.getDeliveryStatus());
+            Delivery savedDelivery = deliveryRepository.saveAndFlush(delivery); // saveAndFlush writes to database immediately
+            transactionManager.commit(status); // !! Manually commit transaction here !!
+            logger.info("Delivery ID: {} status updated to -> {}, and saved to database.", deliveryId, delivery.getDeliveryStatus());
 
-            // 在成功持久化后再发送通知邮件，避免并发取消导致的误发
+            // Send notification email after successful persistence to avoid false notifications due to concurrent cancellation
             try {
                 DeliveryStatus s = savedDelivery.getDeliveryStatus();
                 if (s == DeliveryStatus.PICKED_UP || s == DeliveryStatus.DELIVERING || s == DeliveryStatus.RECEIVED) {
                     emailAdapter.sendDeliveryUpdate(savedDelivery.getEmail(), savedDelivery.getOrderId(), savedDelivery.getId(), s.name());
                 }
             } catch (Exception mailEx) {
-                logger.warn("发送配送状态邮件失败: {}", mailEx.getMessage());
+                logger.warn("Failed to send delivery status email: {}", mailEx.getMessage());
             }
 
-            // 6. 检查 notificationUrl 是否存在，如果存在就发送Webhook通知
+            // 6. Check if notificationUrl exists, if exists send Webhook notification
             if (savedDelivery.getNotificationUrl() != null && !savedDelivery.getNotificationUrl().isEmpty()) {
                 NotificationRequest payload = new NotificationRequest(savedDelivery.getId(), savedDelivery.getDeliveryStatus());
                 NotificationMessage message = new NotificationMessage(payload, savedDelivery.getNotificationUrl());
 
                 rabbitTemplate.convertAndSend(RabbitMQConfig.NOTIFICATION_QUEUE_NAME, message);
-                logger.info("已为配送ID: {} 创建Webhook通知任务，并发送到队列: {}", savedDelivery.getId(), RabbitMQConfig.NOTIFICATION_QUEUE_NAME);
+                logger.info("Created Webhook notification task for delivery ID: {}, sent to queue: {}", savedDelivery.getId(), RabbitMQConfig.NOTIFICATION_QUEUE_NAME);
             }
 
-            // 7. 关键一步：判断是否需要继续处理
-            // 如果状态还不是最终状态（送达或丢失），就把任务ID再扔回队列，等待下一次处理
+            // 7. Critical step: Determine if processing should continue
+            // If status is not yet final (delivered or lost), put task ID back into queue for next processing
             if (shouldContinueProcessing(savedDelivery)) {
                 rabbitTemplate.convertAndSend(RabbitMQConfig.DELIVERY_QUEUE_NAME, savedDelivery.getId());
-                logger.info("配送ID: {} 未完成，重新入队。", savedDelivery.getId());
+                logger.info("Delivery ID: {} not completed, re-queued.", savedDelivery.getId());
             } else {
-                logger.info("【处理完成】配送ID: {} 已达终态。", savedDelivery.getId());
+                logger.info("[Processing Complete] Delivery ID: {} has reached final state.", savedDelivery.getId());
             }
-        } catch (ObjectOptimisticLockingFailureException e) { // <-- 在方法的末尾添加 catch
-            // 这就是我们优雅的处理方式！
-            logger.warn("【乐观锁冲突】处理配送ID: {} 时发生冲突。这很可能是因为它已被其他操作（如取消）更新。" +
-                    "本次消息将被安全地丢弃。", deliveryId);
+        } catch (ObjectOptimisticLockingFailureException e) { // <-- Add catch at end of method
+            // This is our elegant handling!
+            logger.warn("[Optimistic Lock Conflict] Conflict occurred while processing delivery ID: {}. This is likely because it has been updated by another operation (e.g., cancellation). " +
+                    "This message will be safely discarded.", deliveryId);
             if (!status.isCompleted()) {
-                transactionManager.rollback(status); // 回滚事务
+                transactionManager.rollback(status); // Rollback transaction
             }
         }
 
     }
 
     /**
-     * 这是一个私有辅助方法，用于根据当前状态更新到下一个状态
+     * Private helper method to update from current state to next state
      */
-    private final com.comp5348.delivery.adapters.EmailAdapter emailAdapter;
-
     private void updateDeliveryStatus(Delivery delivery) {
         DeliveryStatus currentStatus = delivery.getDeliveryStatus();
         switch (currentStatus) {
@@ -162,13 +161,13 @@ public class DeliveryStatusUpdateService {
                 delivery.setDeliveryStatus(DeliveryStatus.RECEIVED);
                 break;
             default:
-                logger.info("配送ID: {} 状态为 {}，无需更新。", delivery.getId(), currentStatus);
+                logger.info("Delivery ID: {} status is {}, no update needed.", delivery.getId(), currentStatus);
                 break;
         }
     }
 
     /**
-     * 判断是否应继续处理该配送任务
+     * Determine if this delivery task should continue processing
      */
     private boolean shouldContinueProcessing(Delivery delivery) {
         DeliveryStatus status = delivery.getDeliveryStatus();

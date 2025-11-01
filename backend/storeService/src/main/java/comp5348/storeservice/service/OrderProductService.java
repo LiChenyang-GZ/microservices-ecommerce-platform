@@ -18,8 +18,8 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
- * 整合的訂單與商品管理服務
- * 整合了商品管理、訂單管理和支付功能
+ * Integrated Order and Product Management Service
+ * Integrates product management, order management, and payment functionality
  */
 @Service
 @Transactional
@@ -55,13 +55,13 @@ public class OrderProductService {
     private comp5348.storeservice.repository.AccountRepository accountRepository;
     
     /**
-     * 創建訂單並處理支付
-     * 這是整合的核心方法，處理從商品選擇到支付完成的整個流程
+     * Create order and process payment
+     * This is the core method of integration, handling the entire flow from product selection to payment completion
      */
     public OrderDTO createOrderWithPayment(CreateOrderRequest request) {
         logger.info("Creating order with payment for user: {}", request.getUserId());
         
-        // 0. 预估总价
+        // 0. Estimate total price
         java.math.BigDecimal estimatedTotal = java.math.BigDecimal.ZERO;
         for (CreateOrderRequest.OrderItemRequest item : request.getOrderItems()) {
             comp5348.storeservice.model.Product p = productRepository.findById(item.getProductId())
@@ -70,14 +70,14 @@ public class OrderProductService {
             estimatedTotal = estimatedTotal.add(p.getPrice().multiply(java.math.BigDecimal.valueOf(qty)));
         }
 
-        // 0.1 仅允许用户个人账户下单；若无账户或余额不足，则直接拒单
+        // 0.1 Only allow user personal accounts to place orders; if no account or insufficient balance, reject directly
         var userAcc = accountRepository.findById(request.getUserId()).orElse(null);
         String fromAccount;
         if (userAcc == null) {
             throw new IllegalStateException("User not found: " + request.getUserId());
         }
         if (userAcc.getBankAccountNumber() == null || userAcc.getBankAccountNumber().isEmpty()) {
-            // 回退到全局默认客户账户，便于本地演示；生产应强制绑定
+            // Fall back to global default customer account for local testing; production should require binding
             logger.warn("User {} has no linked bank account. Falling back to default customer account {}.", request.getUserId(), customerAccount);
             fromAccount = customerAccount;
         } else {
@@ -92,13 +92,13 @@ public class OrderProductService {
             throw new IllegalArgumentException("Insufficient balance. Available: " + balance + ", Required: " + estimatedTotal);
         }
 
-        // 1. 創建訂單
+        // 1. Create order
         OrderDTO order = orderService.createOrder(request);
         
-        // 2. 更新訂單狀態為待付款
+        // 2. Update order status to pending payment
         orderService.updateOrderStatus(order.getId(), OrderStatus.PENDING_PAYMENT);
         
-        // 3. 創建支付記錄
+        // 3. Create payment record
         try {
             PaymentRequest paymentRequest = new PaymentRequest();
             paymentRequest.setOrderId(order.getId());
@@ -109,7 +109,7 @@ public class OrderProductService {
             
         } catch (Exception e) {
             logger.error("Failed to create payment for order {}: {}", order.getId(), e.getMessage());
-            // 如果支付創建失敗，取消訂單
+            // If payment creation fails, cancel order
             orderService.cancelOrder(order.getId());
             throw new RuntimeException("Failed to create payment: " + e.getMessage());
         }
@@ -118,15 +118,15 @@ public class OrderProductService {
     }
     
     /**
-     * 處理支付成功後的訂單狀態更新
+     * Handle order status update after successful payment
      */
     public OrderDTO processPaymentSuccess(Long orderId) {
         logger.info("Processing payment success for order: {}", orderId);
         
-        // 1. 更新訂單狀態為已付款
+        // 1. Update order status to paid
         OrderDTO order = orderService.updateOrderStatus(orderId, OrderStatus.PAID);
         
-        // 2. 更新訂單狀態為處理中
+        // 2. Update order status to processing
         order = orderService.updateOrderStatus(orderId, OrderStatus.PROCESSING);
         
         logger.info("Order {} status updated to PROCESSING after successful payment", orderId);
@@ -135,12 +135,12 @@ public class OrderProductService {
     }
     
     /**
-     * 處理支付失敗後的訂單狀態更新
+     * Handle order status update after payment failure
      */
     public OrderDTO processPaymentFailure(Long orderId) {
         logger.info("Processing payment failure for order: {}", orderId);
         
-        // 取消訂單
+        // Cancel order
         OrderDTO order = orderService.cancelOrder(orderId);
         
         logger.info("Order {} cancelled due to payment failure", orderId);
@@ -149,7 +149,7 @@ public class OrderProductService {
     }
     
     /**
-     * 獲取訂單的完整資訊（包含支付狀態）
+     * Get complete order information (including payment status)
      */
     public OrderWithPaymentDTO getOrderWithPaymentInfo(Long orderId) {
         logger.info("Getting order with payment info for order: {}", orderId);
@@ -157,7 +157,7 @@ public class OrderProductService {
         OrderDTO order = orderService.getOrderById(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
         
-        // 獲取支付資訊
+        // Get payment information
         Optional<Payment> payment = paymentService.getPaymentByOrderId(orderId);
         
         OrderWithPaymentDTO orderWithPayment = new OrderWithPaymentDTO();
@@ -168,7 +168,7 @@ public class OrderProductService {
     }
     
     /**
-     * 獲取用戶的訂單列表（包含支付狀態）
+     * Get user's order list (including payment status)
      */
     public List<OrderWithPaymentDTO> getUserOrdersWithPaymentInfo(Long userId) {
         logger.info("Getting user orders with payment info for user: {}", userId);
@@ -187,12 +187,12 @@ public class OrderProductService {
     }
     
     /**
-     * 取消訂單並處理退款
+     * Cancel order and process refund
      */
     public OrderDTO cancelOrderWithRefund(Long orderId, String reason) {
         logger.info("Cancelling order with refund for order: {}, reason: {}", orderId, reason);
         
-        // 1. 檢查訂單狀態
+        // 1. Check order status
         OrderDTO order = orderService.getOrderById(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
         
@@ -200,10 +200,10 @@ public class OrderProductService {
             throw new RuntimeException("Order is already cancelled");
         }
         
-        // 2. 取消訂單
+        // 2. Cancel order
         order = orderService.cancelOrder(orderId);
         
-        // 3. 如果已付款，處理退款
+        // 3. If paid, process refund
         Optional<Payment> payment = paymentService.getPaymentByOrderId(orderId);
         if (payment.isPresent() && payment.get().getStatus() == PaymentStatus.SUCCESS) {
             try {
@@ -219,7 +219,7 @@ public class OrderProductService {
     }
     
     /**
-     * 獲取商品庫存資訊（使用多仓聚合库存）
+     * Get product stock information (using multi-warehouse aggregated inventory)
      */
     public ProductStockDTO getProductStockInfo(Long productId) {
         logger.info("Getting product stock info for product: {}", productId);
@@ -227,7 +227,7 @@ public class OrderProductService {
         ProductDTO product = productService.getProductById(productId)
                 .orElseThrow(() -> new RuntimeException("Product not found: " + productId));
         
-        // 使用多仓聚合库存
+        // Use multi-warehouse aggregated inventory
         int totalQuantity = warehouseService.getProductQuantity(productId);
         
         ProductStockDTO stockInfo = new ProductStockDTO();

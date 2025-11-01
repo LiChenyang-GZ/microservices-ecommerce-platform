@@ -14,9 +14,9 @@ import java.util.HashMap;
 import java.util.Map;
 
 /**
- * 获取并缓存来自 StoreService 的服务间 JWT。
- * - 启用条件：配置了 store.auth.email 与 store.auth.password
- * - 过期策略：简单地按固定时长缓存（默认 12h），或根据响应中的 expiresIn（如存在）设置
+ * Get and cache inter-service JWT from StoreService.
+ * - Enable condition: store.auth.email and store.auth.password are configured
+ * - Expiration strategy: Simple fixed-duration cache (default 12h), or set based on expiresIn in response (if present)
  */
 @Component
 public class StoreTokenProvider {
@@ -34,7 +34,7 @@ public class StoreTokenProvider {
     @Value("${store.auth.password:}")
     private String password;
 
-    // 缓存
+    // Cache
     private volatile String cachedToken;
     private volatile long expireAtEpochMs = 0L;
 
@@ -47,8 +47,8 @@ public class StoreTokenProvider {
             logger.warn("StoreTokenProvider disabled: missing store.auth.email/password.");
             return null;
         }
-        long now = Instant.now().toEpochMilli();
-        // 提前 60 秒刷新
+            long now = Instant.now().toEpochMilli();
+            // Refresh 60 seconds early
         if (cachedToken == null || now + 60_000 >= expireAtEpochMs) {
             synchronized (this) {
                 if (cachedToken == null || now + 60_000 >= expireAtEpochMs) {
@@ -79,10 +79,10 @@ public class StoreTokenProvider {
             Map<String, Object> resp = restTemplate.postForObject(authUrl, new HttpEntity<>(body, headers), Map.class);
             if (resp != null) {
                 Object tokenObj = resp.get("token");
-                if (tokenObj == null) tokenObj = resp.get("data"); // 兼容有些返回把 token 放 data
+                if (tokenObj == null) tokenObj = resp.get("data"); // Compatible with some responses that put token in data
                 if (tokenObj != null) {
                     this.cachedToken = String.valueOf(tokenObj);
-                    // 过期时间优先使用返回字段，否则默认 12 小时
+                    // Expiration time prefers returned field, otherwise defaults to 12 hours
                     long now = Instant.now().toEpochMilli();
                     Object exp = resp.get("expiresIn");
                     if (exp instanceof Number) {

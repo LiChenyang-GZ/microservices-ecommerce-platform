@@ -18,7 +18,7 @@ public class CompensationService {
     private OrderService orderService;
 
     /**
-     * 处理配送创建失败的补偿：退款 + 将订单置为系统取消
+     * Handle compensation for delivery creation failure: refund + set order to system cancelled
      */
     public boolean compensateDeliveryFailed(Long orderId, String reason) {
         try {

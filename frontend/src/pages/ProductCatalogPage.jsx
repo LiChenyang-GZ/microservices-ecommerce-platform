@@ -9,11 +9,11 @@ function ProductCard({ product, onClick }) {
       <div className="product-card__header">
         <h3 className="product-card__title">{product.name}</h3>
         <span className={`product-card__stock ${product.stockQuantity > 0 ? 'in' : 'out'}`}>
-          {product.stockQuantity > 0 ? '有货' : '缺货'}
+          {product.stockQuantity > 0 ? 'In Stock' : 'Out of Stock'}
         </span>
       </div>
       <div className="product-card__body">
-        <p className="product-card__desc">{product.description || '暂无描述'}</p>
+        <p className="product-card__desc">{product.description || 'No description'}</p>
       </div>
       <div className="product-card__footer">
         <span className="product-card__price">¥ {Number(product.price || 0).toFixed(2)}</span>
@@ -38,8 +38,8 @@ export default function ProductCatalogPage() {
       const list = onlyAvailable ? await productAPI.getAvailable() : await productAPI.getAll();
       setProducts(Array.isArray(list) ? list : []);
     } catch (e) {
-      console.error('加载商品失败:', e);
-      setError(e?.response?.data?.message || '加载商品失败，请稍后再试');
+      console.error('Failed to load products:', e);
+      setError(e?.response?.data?.message || 'Failed to load products, please try again later');
     } finally {
       setLoading(false);
     }
@@ -64,12 +64,12 @@ export default function ProductCatalogPage() {
     <div className="catalog-container">
       <BackButton fallback="/" />
       <div className="catalog-toolbar">
-        <h1>商品目录</h1>
+        <h1>Product Catalog</h1>
         <div className="catalog-actions">
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="搜索名称/描述/SKU"
+            placeholder="Search name/description/SKU"
             className="catalog-search"
           />
           <label className="catalog-switch">
@@ -78,18 +78,18 @@ export default function ProductCatalogPage() {
               checked={onlyAvailable}
               onChange={() => setOnlyAvailable(v => !v)}
             />
-            <span>仅看有库存</span>
+            <span>Only show in stock</span>
           </label>
         </div>
       </div>
 
-      {loading && <div className="catalog-hint">正在加载商品...</div>}
+      {loading && <div className="catalog-hint">Loading products...</div>}
       {!loading && error && <div className="catalog-error">{error}</div>}
 
       {!loading && !error && (
         <div className="catalog-grid">
           {filtered.length === 0 ? (
-            <div className="catalog-empty">未找到符合条件的商品</div>
+            <div className="catalog-empty">No matching products found</div>
           ) : (
             filtered.map(p => (
               <ProductCard key={p.id} product={p} onClick={() => navigate(`/products/${p.id}`)} />

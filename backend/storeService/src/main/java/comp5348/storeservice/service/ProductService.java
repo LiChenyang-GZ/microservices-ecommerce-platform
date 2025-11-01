@@ -40,7 +40,7 @@ public class ProductService {
     private WarehouseService warehouseService;
     
     /**
-     * 獲取所有商品列表
+     * Get all product list
      */
     public List<ProductDTO> getAllProducts() {
         logger.info("Fetching all products");
@@ -50,11 +50,11 @@ public class ProductService {
     }
     
     /**
-     * 獲取有庫存的商品列表
+     * Get products with stock list
      */
     public List<ProductDTO> getAvailableProducts() {
         logger.info("Fetching available products");
-        // 基于仓库聚合库存筛选（替代 Product.stockQuantity）
+        // Filter based on warehouse aggregated inventory (replacing Product.stockQuantity)
         return productRepository.findAll().stream()
                 .map(this::convertToDTO)
                 .filter(dto -> dto.getStockQuantity() != null && dto.getStockQuantity() > 0)
@@ -62,7 +62,7 @@ public class ProductService {
     }
     
     /**
-     * 根據ID獲取商品
+     * Get product by ID
      */
     public Optional<ProductDTO> getProductById(Long productId) {
         logger.info("Fetching product by id: {}", productId);
@@ -71,7 +71,7 @@ public class ProductService {
     }
     
     /**
-     * 根據名稱搜索商品
+     * Search products by name
      */
     public List<ProductDTO> searchProductsByName(String name) {
         logger.info("Searching products by name: {}", name);
@@ -81,7 +81,7 @@ public class ProductService {
     }
     
     /**
-     * 根據價格範圍搜索商品
+     * Search products by price range
      */
     public List<ProductDTO> searchProductsByPriceRange(BigDecimal minPrice, BigDecimal maxPrice) {
         logger.info("Searching products by price range: {} - {}", minPrice, maxPrice);
@@ -91,10 +91,7 @@ public class ProductService {
     }
     
     /**
-     * 創建新商品
-     */
-    /**
-     * 創建新商品 (不处理库存)
+     * Create new product (does not handle inventory)
      */
     public ProductDTO createProduct(ProductDTO productDTO) {
         logger.info("Creating new product: {}", productDTO.getName());
@@ -104,19 +101,19 @@ public class ProductService {
         product.setPrice(productDTO.getPrice());
         product.setDescription(productDTO.getDescription());
 
-        // 新创建的商品，库存默认为 0
-        // 如果你的数据库字段不允许为 null，并且有默认值0，这行可以省略
+        // Newly created products have default stock of 0
+        // If your database field does not allow null and has default value 0, this line can be omitted
         product.setStockQuantity(0);
 
         Product savedProduct = productRepository.save(product);
         logger.info("Product created successfully with id: {}", savedProduct.getId());
 
-        // 注意：这里的 convertToDTO 可能会从 WarehouseService 获取库存，所以返回的 DTO 仍然会有库存信息
+        // Note: convertToDTO here may get inventory from WarehouseService, so the returned DTO will still have inventory information
         return convertToDTO(savedProduct);
     }
     
     /**
-     * 更新商品資訊
+     * Update product information
      */
     public ProductDTO updateProduct(Long productId, ProductDTO productDTO) {
         logger.info("Updating product: {}", productId);
@@ -124,13 +121,13 @@ public class ProductService {
         Product product = productRepository.findById(productId)
                 .orElseThrow(() -> new RuntimeException("Product not found: " + productId));
 
-        // 只更新商品目录信息
+        // Only update product catalog information
         product.setName(productDTO.getName());
         product.setPrice(productDTO.getPrice());
         product.setDescription(productDTO.getDescription());
 
-        // --- 关键：不要在这里修改库存 ---
-        // 移除 product.setStockQuantity(productDTO.getStockQuantity());
+        // --- Key: Do not modify inventory here ---
+        // Removed product.setStockQuantity(productDTO.getStockQuantity());
 
         Product savedProduct = productRepository.save(product);
         logger.info("Product updated successfully");
@@ -141,7 +138,7 @@ public class ProductService {
     
 
     /**
-     * 將商品分配到多個倉庫
+     * Assign product to multiple warehouses
      */
     @Transactional(isolation = Isolation.REPEATABLE_READ)
     public Boolean assignProductToWarehouses(Long productId, AssignProductRequest request) {
@@ -191,7 +188,7 @@ public class ProductService {
     }
     
     /**
-     * 轉換實體為DTO（使用多仓聚合库存）
+     * Convert entity to DTO (using multi-warehouse aggregated inventory)
      */
     private ProductDTO convertToDTO(Product product) {
         ProductDTO dto = new ProductDTO();
@@ -199,7 +196,7 @@ public class ProductService {
         dto.setName(product.getName());
         dto.setPrice(product.getPrice());
         dto.setDescription(product.getDescription());
-        // 使用多仓聚合库存替代Product表的stockQuantity
+        // Use multi-warehouse aggregated inventory to replace Product table's stockQuantity
         int totalQuantity = warehouseService.getProductQuantity(product.getId());
         dto.setStockQuantity(totalQuantity);
         dto.setCreatedAt(product.getCreatedAt());

@@ -14,8 +14,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 
 /**
- * Token 认证过滤器
- * 拦截请求并验证 token
+ * Token Authentication Filter
+ * Intercept requests and validate token
  */
 @Component
 public class TokenAuthenticationFilter extends OncePerRequestFilter {
@@ -29,25 +29,25 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         
-        // 跳过 OPTIONS 请求（CORS 预检请求，由 CorsFilter 处理）
+        // Skip OPTIONS requests (CORS preflight requests, handled by CorsFilter)
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
             filterChain.doFilter(request, response);
             return;
         }
         
-        // 跳过公开访问的端点
+        // Skip publicly accessible endpoints
         String path = request.getRequestURI();
         if (path.startsWith("/api/deliveries/create") || 
             path.startsWith("/api/deliveries/webhook") ||
-            // 内部调用：按订单ID取消配送（由 StoreService 调用），允许无 token
+            // Internal call: cancel delivery by order ID (called by StoreService), allow without token
             path.startsWith("/api/deliveries/cancel-by-order") ||
             path.startsWith("/actuator")) {
             filterChain.doFilter(request, response);
             return;
         }
         
-        // 查询和取消端点需要认证
-        // 从请求头中提取 token
+        // Query and cancel endpoints require authentication
+        // Extract token from request header
         String authHeader = request.getHeader("Authorization");
         String token = null;
         
@@ -55,7 +55,7 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
             token = authHeader.substring(7);
         }
         
-        // 如果没有 token，返回 401
+        // If no token, return 401
         if (token == null || token.isEmpty()) {
             logger.warn("No token provided for request: {}", path);
             response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
@@ -64,7 +64,7 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
         
-        // 验证 token
+        // Validate token
         TokenValidationClient.TokenValidationResult result = tokenValidationClient.validateToken(token);
         
         if (!result.isValid()) {
@@ -75,7 +75,7 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
         
-        // 将用户信息添加到请求属性中，供 Controller 使用
+        // Add user information to request attributes for Controller use
         request.setAttribute("userId", result.getUserId());
         request.setAttribute("userEmail", result.getEmail());
         

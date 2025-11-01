@@ -21,7 +21,7 @@ public class DeliveryWebhookController {
     private OrderService orderService;
 
     /**
-     * 接收来自 DeliveryService 的状态更新通知
+     * Receive status update notification from DeliveryService
      */
     @PostMapping
     public ResponseEntity<Void> receiveDeliveryUpdate(@RequestBody DeliveryNotificationDTO notification) {
@@ -29,15 +29,15 @@ public class DeliveryWebhookController {
                 notification.getDeliveryId(), notification.getStatus());
 
         try {
-            // 将通知转发给 OrderService 进行处理
+            // Forward notification to OrderService for processing
             orderService.handleDeliveryUpdate(notification);
 
-            // 返回 200 OK 表示我们已成功接收并处理
+            // Return 200 OK to indicate we successfully received and processed
             return ResponseEntity.ok().build();
 
         } catch (Exception e) {
-            // 如果在处理过程中发生错误（比如找不到订单），记录错误并返回一个服务器错误码
-            // 这会让 DeliveryService 知道它的通知可能没有被成功处理，可能会触发重试
+            // If an error occurs during processing (e.g., order not found), log error and return server error code
+            // This will let DeliveryService know its notification may not have been processed successfully, may trigger retry
             logger.error("Error processing delivery notification for orderId={}: {}",
                     notification.getDeliveryId(), e.getMessage(), e);
             return ResponseEntity.internalServerError().build();

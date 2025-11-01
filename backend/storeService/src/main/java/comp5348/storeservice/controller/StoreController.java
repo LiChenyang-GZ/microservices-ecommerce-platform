@@ -30,7 +30,7 @@ public class StoreController {
     private OrderService orderService;
     
     /**
-     * 創建訂單並處理支付
+     * Create order and process payment
      * POST /api/store/orders/create-with-payment
      */
     @PostMapping("/orders/create-with-payment")
@@ -49,7 +49,7 @@ public class StoreController {
     }
     
     /**
-     * 獲取訂單的完整資訊（包含支付狀態）
+     * Get complete order information (including payment status)
      * GET /api/store/orders/{id}/with-payment
      */
     @GetMapping("/orders/{id}/with-payment")
@@ -66,7 +66,7 @@ public class StoreController {
     }
     
     /**
-     * 獲取用戶的訂單列表（包含支付狀態）
+     * Get user's order list (including payment status)
      * GET /api/store/orders/user/{userId}/with-payment
      */
     @GetMapping("/orders/user/{userId}/with-payment")
@@ -83,7 +83,7 @@ public class StoreController {
     }
     
     /**
-     * 取消訂單並處理退款
+     * Cancel order and process refund
      * PUT /api/store/orders/{id}/cancel-with-refund
      */
     @PutMapping("/orders/{id}/cancel-with-refund")
@@ -103,7 +103,7 @@ public class StoreController {
     }
     
     /**
-     * 獲取商品庫存資訊
+     * Get product stock information
      * GET /api/store/products/{id}/stock
      */
     @GetMapping("/products/{id}/stock")
@@ -122,7 +122,7 @@ public class StoreController {
     
     
     /**
-     * 處理支付成功
+     * Process payment success
      * POST /api/store/orders/{id}/payment-success
      */
     @PostMapping("/orders/{id}/payment-success")
@@ -140,7 +140,7 @@ public class StoreController {
     }
 
     /**
-     * 取消订单（仅在配送未取件前允许）
+     * Cancel order (only allowed before delivery pickup)
      * POST /api/store/orders/{id}/cancel
      */
     @PostMapping("/orders/{id}/cancel")
@@ -157,7 +157,7 @@ public class StoreController {
     }
     
     /**
-     * 處理支付失敗
+     * Process payment failure
      * POST /api/store/orders/{id}/payment-failure
      */
     @PostMapping("/orders/{id}/payment-failure")

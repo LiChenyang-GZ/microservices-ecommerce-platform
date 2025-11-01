@@ -15,16 +15,16 @@ const HomePage = () => {
   return (
     <div className="home-container">
       <div className="home-header">
-        <h1 className="home-title">欢迎来到我们的平台</h1>
+        <h1 className="home-title">Welcome to Our Platform</h1>
         <div className="user-info">
-          <p className="welcome-text">你好, {userEmail}!</p>
+          <p className="welcome-text">Hello, {userEmail}!</p>
           <Button 
             onClick={handleLogout}
             variant="secondary"
             size="medium"
             className="logout-button"
           >
-            登出
+            Logout
           </Button>
         </div>
       </div>
@@ -32,33 +32,33 @@ const HomePage = () => {
       <div className="home-content">
         <div className="feature-cards">
           <div className="feature-card" onClick={() => navigate('/orders')}>
-            <h3>💳 我的订单</h3>
-            <p>查看订单和付款状态</p>
+            <h3>💳 My Orders</h3>
+            <p>View orders and payment status</p>
             <Button onClick={(e) => { e.stopPropagation(); navigate('/orders'); }}>
-              查看订单
+              View Orders
             </Button>
           </div>
           
           <div className="feature-card" onClick={() => navigate('/deliveries')}>
-            <h3>📦 配送追踪</h3>
-            <p>查看包裹配送进度</p>
+            <h3>📦 Delivery Tracking</h3>
+            <p>View package delivery progress</p>
             <Button onClick={(e) => { e.stopPropagation(); navigate('/deliveries'); }}>
-              查看配送
+              View Deliveries
             </Button>
           </div>
           
           <div className="feature-card" onClick={() => navigate('/products')}>
-            <h3>🛍️ 商品目录</h3>
-            <p>浏览商品并下单购买</p>
+            <h3>🛍️ Product Catalog</h3>
+            <p>Browse products and place orders</p>
             <Button onClick={(e) => { e.stopPropagation(); navigate('/products'); }}>
-              去选购
+              Shop Now
             </Button>
           </div>
           
           <div className="feature-card">
-            <h3>⚙️ 账户设置</h3>
-            <p>管理您的个人信息和偏好</p>
-            <Button disabled>即将推出</Button>
+            <h3>⚙️ Account Settings</h3>
+            <p>Manage your personal information and preferences</p>
+            <Button disabled>Coming Soon</Button>
           </div>
         </div>
       </div>

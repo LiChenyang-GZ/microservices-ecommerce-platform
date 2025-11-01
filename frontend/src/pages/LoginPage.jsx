@@ -22,7 +22,7 @@ const LoginPage = () => {
       ...prev,
       [name]: value
     }));
-    // 清除对应字段的错误
+    // Clear error for corresponding field
     if (errors[name]) {
       setErrors(prev => ({
         ...prev,
@@ -58,59 +58,59 @@ const LoginPage = () => {
     setIsLoading(true);
     
     try {
-      // 准备发送给后端的数据
+      // Prepare data to send to backend
       const loginData = {
         email: formData.email,
         password: formData.password
       };
       
-      console.log('正在登录:', loginData);
+      console.log('Logging in:', loginData);
       
-      // 调用后端API进行登录
+      // Call backend API for login
       const response = await userAPI.login(loginData);
       
-      console.log('登录成功:', response);
+      console.log('Login successful:', response);
       
-      // 处理成功响应
+      // Handle successful response
       if (response.success && response.token) {
-        // 使用认证上下文更新登录状态，保存 token 和用户信息
+        // Use auth context to update login status, save token and user info
         login(response.email, response.token, response.userId);
         
-        alert('登录成功！欢迎回来！');
+        alert('Login successful! Welcome back!');
         
-        // 重定向到首页
+        // Redirect to home page
         navigate('/');
       } else {
-        throw new Error(response.message || '登录失败');
+        throw new Error(response.message || 'Login failed');
       }
       
     } catch (error) {
-      console.error('登录失败:', error);
+      console.error('Login failed:', error);
       
-      // 处理不同类型的错误
-      let errorMessage = '登录失败，请重试';
+      // Handle different types of errors
+      let errorMessage = 'Login failed, please try again';
       
       if (error.response) {
-        // 服务器返回的错误
+        // Server returned error
         const { status, data } = error.response;
         if (status === 401) {
-          // 尝试从响应数据中获取错误信息
-          errorMessage = (data && data.message) ? data.message : '邮箱或密码错误，请检查后重试';
+          // Try to get error message from response data
+          errorMessage = (data && data.message) ? data.message : 'Email or password incorrect, please check and try again';
         } else if (status === 400) {
-          errorMessage = '请检查输入的信息是否正确';
+          errorMessage = 'Please check if the entered information is correct';
         } else if (status === 500) {
-          errorMessage = '服务器错误，请稍后重试';
+          errorMessage = 'Server error, please try again later';
         }
         
-        // 如果有具体的错误信息，使用它
+        // If there's a specific error message, use it
         if (data && data.message) {
           errorMessage = data.message;
         } else if (data && typeof data === 'string') {
           errorMessage = data;
         }
       } else if (error.request) {
-        // 网络错误
-        errorMessage = '无法连接到服务器，请检查网络连接';
+        // Network error
+        errorMessage = 'Unable to connect to server, please check network connection';
       }
       
       alert(errorMessage);

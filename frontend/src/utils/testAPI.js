@@ -1,12 +1,12 @@
-// 测试前后端连接的简单脚本
-// 这个文件可以用来测试API连接是否正常工作
+// Simple script to test frontend-backend connection
+// This file can be used to test if API connections are working properly
 
 import { userAPI } from '../services/api';
 
-// 测试数据
+// Test data
 const testAccountData = {
-  firstName: '测试',
-  lastName: '用户',
+  firstName: 'Test',
+  lastName: 'User',
   email: 'test@example.com',
   password: 'TestPassword123'
 };
@@ -16,80 +16,80 @@ const testLoginData = {
   password: 'TestPassword123'
 };
 
-// 测试创建账户
+// Test account creation
 export const testCreateAccount = async () => {
-  console.log('开始测试创建账户API...');
+  console.log('Starting test for create account API...');
   
   try {
     const response = await userAPI.createAccount(testAccountData);
-    console.log('✅ 创建账户API测试成功！');
-    console.log('响应数据:', response);
+    console.log('✅ Create account API test successful!');
+    console.log('Response data:', response);
     return true;
   } catch (error) {
-    console.error('❌ 创建账户API测试失败:', error);
+    console.error('❌ Create account API test failed:', error);
     
     if (error.response) {
-      console.error('服务器响应:', error.response.status, error.response.data);
+      console.error('Server response:', error.response.status, error.response.data);
     } else if (error.request) {
-      console.error('网络错误: 无法连接到后端服务器');
-      console.error('请确保后端服务正在运行在 http://localhost:8082');
+      console.error('Network error: Unable to connect to backend server');
+      console.error('Please ensure backend service is running on http://localhost:8082');
     }
     
     return false;
   }
 };
 
-// 测试登录
+// Test login
 export const testLogin = async () => {
-  console.log('开始测试登录API...');
+  console.log('Starting test for login API...');
   
   try {
     const response = await userAPI.login(testLoginData);
-    console.log('✅ 登录API测试成功！');
-    console.log('响应数据:', response);
+    console.log('✅ Login API test successful!');
+    console.log('Response data:', response);
     return true;
   } catch (error) {
-    console.error('❌ 登录API测试失败:', error);
+    console.error('❌ Login API test failed:', error);
     
     if (error.response) {
-      console.error('服务器响应:', error.response.status, error.response.data);
+      console.error('Server response:', error.response.status, error.response.data);
     } else if (error.request) {
-      console.error('网络错误: 无法连接到后端服务器');
-      console.error('请确保后端服务正在运行在 http://localhost:8082');
+      console.error('Network error: Unable to connect to backend server');
+      console.error('Please ensure backend service is running on http://localhost:8082');
     }
     
     return false;
   }
 };
 
-// 完整测试流程
+// Complete test flow
 export const testFullFlow = async () => {
-  console.log('开始完整测试流程...');
+  console.log('Starting complete test flow...');
   
-  // 1. 先创建账户
+  // 1. First create account
   const createSuccess = await testCreateAccount();
   if (!createSuccess) {
-    console.log('创建账户失败，跳过登录测试');
+    console.log('Account creation failed, skipping login test');
     return false;
   }
   
-  // 等待一下
+  // Wait a bit
   await new Promise(resolve => setTimeout(resolve, 1000));
   
-  // 2. 测试登录
+  // 2. Test login
   const loginSuccess = await testLogin();
   
   if (createSuccess && loginSuccess) {
-    console.log('🎉 完整测试流程成功！');
+    console.log('🎉 Complete test flow successful!');
     return true;
   } else {
-    console.log('❌ 完整测试流程失败');
+    console.log('❌ Complete test flow failed');
     return false;
   }
 };
 
-// 在开发环境中自动运行测试（可选）
+// Auto-run tests in development environment (optional)
 if (process.env.NODE_ENV === 'development') {
-  // 可以取消注释下面的行来自动测试
+  // You can uncomment the line below to auto-test
   // testFullFlow();
 }

@@ -42,11 +42,11 @@ public class StoreDataInitializer implements CommandLineRunner {
         logger.info("Initializing default products (iPhone13~iPhone17) if absent...");
 
         List<SeedItem> seeds = Arrays.asList(
-                new SeedItem("iPhone 13", new BigDecimal("6999.00"), "A15 仿生芯片，双摄系统", 20),
-                new SeedItem("iPhone 14", new BigDecimal("7999.00"), "更强续航，车祸检测", 20),
-                new SeedItem("iPhone 15", new BigDecimal("8999.00"), "A16，USB‑C，灵动岛", 20),
-                new SeedItem("iPhone 16", new BigDecimal("9999.00"), "更强 AI 体验，拍照升级", 20),
-                new SeedItem("iPhone 17", new BigDecimal("10999.00"), "新一代芯片与影像系统（示例数据）", 20)
+                new SeedItem("iPhone 13", new BigDecimal("6999.00"), "A15 Bionic chip, dual camera system", 20),
+                new SeedItem("iPhone 14", new BigDecimal("7999.00"), "Longer battery life, crash detection", 20),
+                new SeedItem("iPhone 15", new BigDecimal("8999.00"), "A16 chip, USB-C, Dynamic Island", 20),
+                new SeedItem("iPhone 16", new BigDecimal("9999.00"), "Enhanced AI experience, camera upgrade", 20),
+                new SeedItem("iPhone 17", new BigDecimal("10999.00"), "Next-generation chip and imaging system (sample data)", 20)
         );
 
         for (SeedItem s : seeds) {
@@ -57,7 +57,7 @@ public class StoreDataInitializer implements CommandLineRunner {
                 p.setName(s.name);
                 p.setPrice(s.price);
                 p.setDescription(s.desc);
-                // 不再使用产品表库存，置 0 以避免误导
+                // No longer using product table stock, set to 0 to avoid confusion
                 p.setStockQuantity(0);
                 productRepository.save(p);
                 logger.info("Created product: {}", s.name);
@@ -66,7 +66,7 @@ public class StoreDataInitializer implements CommandLineRunner {
             }
         }
 
-        // 初始化默认用户: username: customer, password: COMP5348
+        // Initialize default user: username: customer, password: COMP5348
         final String defaultEmail = "customer@example.com";
         if (!accountRepository.findByEmail(defaultEmail).isPresent()) {
             Account a = new Account();
@@ -83,20 +83,21 @@ public class StoreDataInitializer implements CommandLineRunner {
             logger.info("Default demo user exists: {}", defaultEmail);
         }
 
-        // 初始化三个仓库，每个仓库都有 iPhone13-17，但数量不同
+        // Initialize three warehouses, each product has total inventory of 10, distributed across warehouses
+        // Some warehouses have the product, some don't (won't overwrite existing data)
         logger.info("Initializing warehouses with products...");
         initializeWarehouses();
     }
 
     private void initializeWarehouses() {
-        // 定义三个仓库
+        // Define three warehouses
         List<WarehouseInfo> warehouses = Arrays.asList(
-            new WarehouseInfo("主仓库", "北京市朝阳区仓库1号", new int[]{50, 40, 30, 20, 10}),  // iPhone 13-17 的数量
-            new WarehouseInfo("上海仓库", "上海市浦东新区仓库2号", new int[]{30, 25, 20, 15, 10}),
-            new WarehouseInfo("广州仓库", "广州市天河区仓库3号", new int[]{20, 15, 10, 10, 5})
+            new WarehouseInfo("Main Warehouse", "Warehouse 1, Chaoyang District, Beijing"),
+            new WarehouseInfo("Shanghai Warehouse", "Warehouse 2, Pudong New Area, Shanghai"),
+            new WarehouseInfo("Guangzhou Warehouse", "Warehouse 3, Tianhe District, Guangzhou")
         );
 
-        // 获取所有iPhone商品（按名称顺序）
+        // Get all iPhone products (in name order)
         List<String> iphoneNames = Arrays.asList("iPhone 13", "iPhone 14", "iPhone 15", "iPhone 16", "iPhone 17");
         List<Long> productIds = iphoneNames.stream()
                 .map(name -> productRepository.findByNameContainingIgnoreCase(name).stream()
@@ -112,11 +113,30 @@ public class StoreDataInitializer implements CommandLineRunner {
             return;
         }
 
-        // 创建仓库并分配商品
-        for (int i = 0; i < warehouses.size(); i++) {
-            WarehouseInfo whInfo = warehouses.get(i);
+        // Each product has total inventory of 10, distributed across different warehouses
+        // Define inventory distribution for each product in different warehouses (index: Main, Shanghai, Guangzhou)
+        // Some warehouses have the product, some don't (0 means the warehouse doesn't have the product)
+        int[][] productDistribution = {
+            {4, 6, 0},  // iPhone 13: Main 4, Shanghai 6, Guangzhou 0 (total 10)
+            {3, 0, 7},  // iPhone 14: Main 3, Shanghai 0, Guangzhou 7 (total 10)
+            {2, 3, 5},  // iPhone 15: Main 2, Shanghai 3, Guangzhou 5 (total 10)
+            {10, 0, 0}, // iPhone 16: Main 10, Shanghai 0, Guangzhou 0 (total 10)
+            {6, 4, 0}   // iPhone 17: Main 6, Shanghai 4, Guangzhou 0 (total 10)
+        };
+
+        // Ensure all products have total inventory of 10
+        for (int i = 0; i < productDistribution.length; i++) {
+            int total = Arrays.stream(productDistribution[i]).sum();
+            if (total != 10) {
+                logger.warn("Product {} total inventory is {}, expected 10. Adjusting...", iphoneNames.get(i), total);
+            }
+        }
+
+        // Create warehouses and assign products
+        for (int warehouseIndex = 0; warehouseIndex < warehouses.size(); warehouseIndex++) {
+            WarehouseInfo whInfo = warehouses.get(warehouseIndex);
             
-            // 检查仓库是否已存在
+            // Check if warehouse already exists
             Optional<Warehouse> existingWarehouse = warehouseRepository.findAll().stream()
                     .filter(w -> w.getName().equals(whInfo.name))
                     .findFirst();
@@ -126,7 +146,7 @@ public class StoreDataInitializer implements CommandLineRunner {
                 warehouse = existingWarehouse.get();
                 logger.info("Warehouse already exists: {}", whInfo.name);
             } else {
-                // 创建新仓库
+                // Create new warehouse
                 warehouse = new Warehouse();
                 warehouse.setName(whInfo.name);
                 warehouse.setLocation(whInfo.location);
@@ -135,39 +155,42 @@ public class StoreDataInitializer implements CommandLineRunner {
                 logger.info("Created warehouse: {} at {}", whInfo.name, whInfo.location);
             }
 
-            // 为每个商品分配到该仓库
-            for (int j = 0; j < productIds.size() && j < whInfo.quantities.length; j++) {
-                // 使用已初始化实体，避免懒加载跨会话
-                final Long pid = productIds.get(j);
+            // Assign each product to this warehouse (only products with quantity > 0)
+            for (int productIndex = 0; productIndex < productIds.size(); productIndex++) {
+                final Long pid = productIds.get(productIndex);
                 Product product = productRepository.findById(pid)
                         .orElseThrow(() -> new IllegalStateException("Product not found by id: " + pid));
-                int quantity = whInfo.quantities[j];
+                
+                // Get the inventory quantity of this product in this warehouse
+                int quantity = productDistribution[productIndex][warehouseIndex];
 
-                // 检查该商品是否已在该仓库
+                // If this warehouse doesn't have this product (quantity is 0), skip
+                if (quantity == 0) {
+                    continue;
+                }
+
+                // Check if this product already exists in this warehouse (if exists, skip, don't overwrite)
                 Optional<WarehouseProduct> existing = warehouseProductRepository
                         .findByWarehouseIdAndProductId(warehouse.getId(), product.getId());
 
-                WarehouseProduct warehouseProduct;
                 if (existing.isPresent()) {
-                    // 更新数量
-                    warehouseProduct = existing.get();
-                    warehouseProduct.setQuantity(quantity);
-                    warehouseProduct.setModifyTime(LocalDateTime.now());
-                    logger.info("Updated {} in {}: quantity = {}", product.getName(), whInfo.name, quantity);
+                    // If exists, skip (don't overwrite)
+                    logger.info("WarehouseProduct already exists for {} in {}, skipped (not overwriting)", 
+                            product.getName(), whInfo.name);
                 } else {
-                    // 创建新的 WarehouseProduct
-                    warehouseProduct = new WarehouseProduct();
+                    // Create new WarehouseProduct
+                    WarehouseProduct warehouseProduct = new WarehouseProduct();
                     warehouseProduct.setWarehouse(warehouse);
                     warehouseProduct.setProduct(product);
                     warehouseProduct.setQuantity(quantity);
                     warehouseProduct.setModifyTime(LocalDateTime.now());
+                    warehouseProductRepository.save(warehouseProduct);
                     logger.info("Assigned {} to {}: quantity = {}", product.getName(), whInfo.name, quantity);
                 }
-                warehouseProductRepository.save(warehouseProduct);
             }
         }
 
-        logger.info("Warehouse initialization completed!");
+        logger.info("Warehouse initialization completed! Each product has total inventory of 10, distributed across warehouses.");
     }
 
     private static class SeedItem {
@@ -180,12 +203,10 @@ public class StoreDataInitializer implements CommandLineRunner {
     private static class WarehouseInfo {
         final String name;
         final String location;
-        final int[] quantities; // iPhone 13, 14, 15, 16, 17 的数量
 
-        WarehouseInfo(String name, String location, int[] quantities) {
+        WarehouseInfo(String name, String location) {
             this.name = name;
             this.location = location;
-            this.quantities = quantities;
         }
     }
 }

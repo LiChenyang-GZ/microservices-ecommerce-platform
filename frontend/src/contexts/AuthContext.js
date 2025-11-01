@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
-// 创建认证上下文
+// Create authentication context
 const AuthContext = createContext();
 
-// 认证提供者组件
+// Authentication provider component
 export const AuthProvider = ({ children }) => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userEmail, setUserEmail] = useState('');
@@ -11,7 +11,7 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 初始化时检查localStorage中的登录状态
+  // Check login status in localStorage on initialization
   useEffect(() => {
     const checkAuthStatus = () => {
       const savedToken = localStorage.getItem('token');
@@ -30,7 +30,7 @@ export const AuthProvider = ({ children }) => {
     checkAuthStatus();
   }, []);
 
-  // 登录函数
+  // Login function
   const login = (email, token, userId) => {
     setIsLoggedIn(true);
     setUserEmail(email);
@@ -42,7 +42,7 @@ export const AuthProvider = ({ children }) => {
     localStorage.setItem('isLoggedIn', 'true');
   };
 
-  // 登出函数
+  // Logout function
   const logout = () => {
     setIsLoggedIn(false);
     setUserEmail('');
@@ -71,11 +71,11 @@ export const AuthProvider = ({ children }) => {
   );
 };
 
-// 自定义Hook来使用认证上下文
+// Custom hook to use authentication context
 export const useAuth = () => {
   const context = useContext(AuthContext);
   if (!context) {
-    throw new Error('useAuth必须在AuthProvider内部使用');
+    throw new Error('useAuth must be used within AuthProvider');
   }
   return context;
 };

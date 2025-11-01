@@ -25,7 +25,7 @@ public class Delivery {
     @Version
     private int version;
 
-    private String orderId; // 关联的订单ID
+    private String orderId; // Associated order ID
 
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
@@ -56,7 +56,7 @@ public class Delivery {
     @Column(nullable = false)
     private LocalDateTime updateTime;
 
-    @Column(nullable = true) // Notification URL可以是可选的，所以设为nullable = true更安全
+    @Column(nullable = true) // Notification URL can be optional, so nullable = true is safer
     private String notificationUrl;
 
     public Delivery(DeliveryRequest requestEntity) {

@@ -31,7 +31,7 @@ public class AccountController {
     }
 
     /**
-     * 创建账户（需要邮箱验证）
+     * Create account (requires email verification)
      */
     @PostMapping
     public ResponseEntity<?> createAccount(@RequestBody CreateAccountRequest request) {
@@ -39,51 +39,51 @@ public class AccountController {
             AccountDTO accountDTO = accountService.createAccount(
                     request.firstName, request.lastName, request.email, request.password
             );
-            return ResponseEntity.ok(new CreateAccountResponse(true, "账户创建成功，请检查邮箱并完成验证", accountDTO));
+            return ResponseEntity.ok(new CreateAccountResponse(true, "Account created successfully, please check your email and complete verification", accountDTO));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(new CreateAccountResponse(false, e.getMessage(), null));
         }
     }
 
     /**
-     * 激活账户（邮箱验证成功后调用）
+     * Activate account (called after email verification succeeds)
      */
     @PostMapping("/activate")
     public ResponseEntity<?> activateAccount(@RequestBody ActivateAccountRequest request) {
         boolean success = accountService.activateAccount(request.email);
         if (success) {
-            return ResponseEntity.ok(new ActivateAccountResponse(true, "账户激活成功"));
+            return ResponseEntity.ok(new ActivateAccountResponse(true, "Account activated successfully"));
         } else {
-            return ResponseEntity.badRequest().body(new ActivateAccountResponse(false, "账户激活失败"));
+            return ResponseEntity.badRequest().body(new ActivateAccountResponse(false, "Account activation failed"));
         }
     }
 
     /**
-     * 用户登录
+     * User login
      */
     @PostMapping("/login")
     public ResponseEntity<?> loginUser(@RequestBody LoginRequest request) {
         boolean success = accountService.verifyLogin(request.email, request.password);
         if (success) {
-            // 获取用户信息生成 JWT token
+            // Get user information and generate JWT token
             Optional<Account> accountOpt = accountService.getAccountByIdentifier(request.email);
             if (accountOpt.isPresent()) {
                 Account account = accountOpt.get();
                 String token = jwtUtil.generateToken(account.getId(), account.getEmail());
-                return ResponseEntity.ok(new LoginResponse(true, "登录成功", token, account.getId(), account.getEmail()));
+                return ResponseEntity.ok(new LoginResponse(true, "Login successful", token, account.getId(), account.getEmail()));
             }
-            return ResponseEntity.ok(new LoginResponse(true, "登录成功", null, null, null));
+            return ResponseEntity.ok(new LoginResponse(true, "Login successful", null, null, null));
         } else {
-            // 检查是否是邮箱未验证的问题
+            // Check if it's an unverified email issue
             if (accountService.emailExists(request.email) && !accountService.isEmailVerified(request.email)) {
-                return ResponseEntity.status(401).body(new LoginResponse(false, "请先验证您的邮箱", null, null, null));
+                return ResponseEntity.status(401).body(new LoginResponse(false, "Please verify your email first", null, null, null));
             }
-            return ResponseEntity.status(401).body(new LoginResponse(false, "邮箱或密码错误", null, null, null));
+            return ResponseEntity.status(401).body(new LoginResponse(false, "Email or password incorrect", null, null, null));
         }
     }
 
     /**
-     * 检查邮箱是否存在
+     * Check if email exists
      */
     @PostMapping("/check-email")
     public ResponseEntity<EmailCheckResponse> checkEmailExists(@RequestBody EmailCheckRequest request) {
@@ -92,7 +92,7 @@ public class AccountController {
     }
 
     /**
-     * 检查邮箱是否已验证
+     * Check if email is verified
      */
     @GetMapping("/check-verified/{email}")
     public ResponseEntity<?> checkEmailVerified(@PathVariable String email) {
@@ -101,41 +101,41 @@ public class AccountController {
     }
 
     /**
-     * 发送忘记密码邮件
+     * Send forgot password email
      */
     @PostMapping("/forgot-password")
     public ResponseEntity<?> forgotPassword(@RequestBody ForgotPasswordRequest request) {
         try {
             boolean success = accountService.sendPasswordResetEmail(request.email);
             if (success) {
-                return ResponseEntity.ok(new ForgotPasswordResponse(true, "密码重置邮件已发送，请检查您的邮箱"));
+                return ResponseEntity.ok(new ForgotPasswordResponse(true, "Password reset email sent, please check your email"));
             } else {
-                return ResponseEntity.badRequest().body(new ForgotPasswordResponse(false, "邮箱不存在或发送失败"));
+                return ResponseEntity.badRequest().body(new ForgotPasswordResponse(false, "Email does not exist or sending failed"));
             }
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ForgotPasswordResponse(false, "发送失败：" + e.getMessage()));
+            return ResponseEntity.badRequest().body(new ForgotPasswordResponse(false, "Failed to send: " + e.getMessage()));
         }
     }
 
     /**
-     * 重置密码
+     * Reset password
      */
     @PostMapping("/reset-password")
     public ResponseEntity<?> resetPassword(@RequestBody ResetPasswordRequest request) {
         try {
             boolean success = accountService.resetPassword(request.email, request.code, request.newPassword);
             if (success) {
-                return ResponseEntity.ok(new ResetPasswordResponse(true, "密码重置成功"));
+                return ResponseEntity.ok(new ResetPasswordResponse(true, "Password reset successful"));
             } else {
-                return ResponseEntity.badRequest().body(new ResetPasswordResponse(false, "验证码无效或已过期"));
+                return ResponseEntity.badRequest().body(new ResetPasswordResponse(false, "Verification code invalid or expired"));
             }
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new ResetPasswordResponse(false, "重置失败：" + e.getMessage()));
+            return ResponseEntity.badRequest().body(new ResetPasswordResponse(false, "Reset failed: " + e.getMessage()));
         }
     }
 
     /**
-     * 验证 token（供其他服务调用）
+     * Validate token (for other services to call)
      */
     @PostMapping("/validate-token")
     public ResponseEntity<TokenValidationResponse> validateToken(@RequestBody TokenValidationRequest request) {
@@ -147,7 +147,7 @@ public class AccountController {
         }
     }
 
-    // 请求和响应类
+    // Request and response classes
     public static class CreateAccountRequest {
         public String firstName;
         public String lastName;

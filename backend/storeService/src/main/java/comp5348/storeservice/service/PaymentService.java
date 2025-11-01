@@ -37,7 +37,7 @@ public class PaymentService {
     private String storeAccount;
     
     @Value("${bank.customer.account:CUSTOMER_ACCOUNT_001}")
-    private String customerAccount; // 全局默认（若用户未开户则使用）
+    private String customerAccount; // Global default (used if user has no account)
 
     @Autowired
     private comp5348.storeservice.repository.OrderRepository orderRepository;
@@ -46,19 +46,19 @@ public class PaymentService {
     private comp5348.storeservice.repository.AccountRepository accountRepository;
     
     /**
-     * 创建支付记录 - 幂等性保证
+     * Create payment record - idempotency guarantee
      */
     @Transactional
     public Payment createPayment(Long orderId, BigDecimal amount) {
         logger.info("Creating payment for orderId={}, amount={}", orderId, amount);
         
-        // 幂等性检查
+        // Idempotency check
         Optional<Payment> existingPayment = paymentRepository.findByOrderId(orderId);
         if (existingPayment.isPresent()) {
             Payment existing = existingPayment.get();
             logger.info("Payment already exists for orderId={}, status={}", orderId, existing.getStatus());
             
-            // 情况1：已有但仍处于待处理 → 补发事件
+            // Case 1: Already exists but still pending → resend event
             if (existing.getStatus() == PaymentStatus.PENDING) {
                 try {
                     outboxService.createPaymentPendingEvent(orderId, existing.getAmount());
@@ -69,7 +69,7 @@ public class PaymentService {
                 return existing;
             }
 
-            // 情况2：上次失败（例如你手动删库或银行失败）→ 将其复位为待处理并补发事件
+            // Case 2: Previous failure (e.g., manual DB deletion or bank failure) → reset to pending and resend event
             if (existing.getStatus() == PaymentStatus.FAILED) {
                 existing.setStatus(PaymentStatus.PENDING);
                 existing.setErrorMessage(null);
@@ -83,7 +83,7 @@ public class PaymentService {
                 return saved;
             }
 
-            // 情况3：已成功（或已退款）→ 幂等补发 PAYMENT_SUCCESS，避免下游事件缺失
+            // Case 3: Already succeeded (or refunded) → idempotently resend PAYMENT_SUCCESS to avoid downstream event loss
             if (existing.getStatus() == PaymentStatus.SUCCESS) {
                 try {
                     outboxService.createPaymentSuccessEvent(orderId, existing.getBankTxnId());
@@ -103,14 +103,14 @@ public class PaymentService {
         Payment savedPayment = paymentRepository.save(payment);
         logger.info("Payment created: id={}, orderId={}", savedPayment.getId(), orderId);
         
-        // 创建待支付事件到Outbox
+        // Create pending payment event to Outbox
         outboxService.createPaymentPendingEvent(orderId, amount);
         
         return savedPayment;
     }
     
     /**
-     * 处理支付 - 调用Bank服务
+     * Process payment - call Bank service
      */
     @Transactional
     public void processPayment(Long orderId) {
@@ -124,16 +124,16 @@ public class PaymentService {
         
         Payment payment = paymentOpt.get();
         
-        // 如果已经处理过，不重复处理
+        // If already processed, do not reprocess
         if (payment.getStatus() != PaymentStatus.PENDING) {
             logger.info("Payment already processed: orderId={}, status={}", orderId, payment.getStatus());
             return;
         }
         
-        // 生成唯一的交易参考号
+        // Generate unique transaction reference number
         String transactionRef = "TXN-" + orderId + "-" + UUID.randomUUID().toString().substring(0, 8);
         
-        // 选择付款方账户：优先使用用户专属银行账户
+        // Select payer account: prefer user-specific bank account
         String fromAccount = null;
         try {
             var order = orderRepository.findById(orderId).orElse(null);
@@ -150,7 +150,7 @@ public class PaymentService {
             return;
         }
 
-        // 调用Bank服务转账
+        // Call Bank service to transfer
         BankTransferRequest transferRequest = new BankTransferRequest(
                 fromAccount,
                 storeAccount,
@@ -168,7 +168,7 @@ public class PaymentService {
     }
     
     /**
-     * 处理支付成功
+     * Handle payment success
      */
     @Transactional
     public void handlePaymentSuccess(Payment payment, String bankTxnId) {
@@ -178,14 +178,14 @@ public class PaymentService {
         payment.setBankTxnId(bankTxnId);
         paymentRepository.save(payment);
         
-        // 创建支付成功事件到Outbox（用于触发配送）
+        // Create payment success event to Outbox (used to trigger delivery)
         outboxService.createPaymentSuccessEvent(payment.getOrderId(), bankTxnId);
         
         logger.info("Payment success event created for orderId={}", payment.getOrderId());
     }
     
     /**
-     * 处理支付失败
+     * Handle payment failure
      */
     @Transactional
     public void handlePaymentFailure(Payment payment, String errorMessage) {
@@ -195,14 +195,14 @@ public class PaymentService {
         payment.setErrorMessage(errorMessage);
         paymentRepository.save(payment);
         
-        // 创建支付失败事件到Outbox（用于释放库存和发送通知）
+        // Create payment failure event to Outbox (used to release inventory and send notification)
         outboxService.createPaymentFailedEvent(payment.getOrderId(), errorMessage);
         
         logger.info("Payment failure event created for orderId={}", payment.getOrderId());
     }
     
     /**
-     * 退款处理
+     * Refund processing
      */
     @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     public Payment refundPayment(Long orderId, String reason) {
@@ -219,7 +219,7 @@ public class PaymentService {
             throw new IllegalStateException("Can only refund successful payments. Current status: " + payment.getStatus());
         }
         
-        // 调用Bank服务退款
+        // Call Bank service to refund
         BankRefundRequest refundRequest = new BankRefundRequest(payment.getBankTxnId(), reason);
         BankRefundResponse response = bankAdapter.refund(refundRequest);
         
@@ -230,7 +230,7 @@ public class PaymentService {
             
             logger.info("Refund successful: orderId={}, refundTxnId={}", orderId, response.getRefundTransactionId());
             
-            // 创建退款成功事件（用于发送邮件通知）
+            // Create refund success event (used to send email notification)
             outboxService.createRefundSuccessEvent(orderId, response.getRefundTransactionId());
         } else {
             logger.error("Refund failed: orderId={}, error={}", orderId, response.getMessage());
@@ -241,14 +241,14 @@ public class PaymentService {
     }
     
     /**
-     * 根据orderId查询支付
+     * Query payment by orderId
      */
     public Optional<Payment> getPaymentByOrderId(Long orderId) {
         return paymentRepository.findByOrderId(orderId);
     }
     
     /**
-     * 根据id查询支付
+     * Query payment by id
      */
     public Optional<Payment> getPaymentById(Long id) {
         return paymentRepository.findById(id);

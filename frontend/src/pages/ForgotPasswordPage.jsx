@@ -56,17 +56,17 @@ const ForgotPasswordPage = () => {
       const response = await userAPI.forgotPassword(formData.email);
       
       if (response.success) {
-        // 导航到密码重置页面，传递邮箱参数
+        // Navigate to password reset page, passing email parameter
         navigate('/reset-password', { 
           state: { email: formData.email } 
         });
       } else {
-        setErrors({ submit: response.message || '发送失败，请重试' });
+        setErrors({ submit: response.message || 'Failed to send, please try again' });
       }
       
     } catch (error) {
       console.error('Forgot password failed:', error);
-      const errorMessage = error.response?.data?.message || '发送失败，请重试';
+      const errorMessage = error.response?.data?.message || 'Failed to send, please try again';
       setErrors({ submit: errorMessage });
     } finally {
       setIsLoading(false);

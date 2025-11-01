@@ -23,7 +23,7 @@ public class OrderController {
     private OrderService orderService;
     
     /**
-     * 獲取所有訂單列表
+     * Get all order list
      * GET /api/orders
      */
     @GetMapping
@@ -41,7 +41,7 @@ public class OrderController {
     }
     
     /**
-     * 根據用戶ID獲取訂單列表
+     * Get order list by user ID
      * GET /api/orders/user/{userId}
      */
     @GetMapping("/user/{userId}")
@@ -60,7 +60,7 @@ public class OrderController {
     }
     
     /**
-     * 根據訂單ID獲取訂單詳情
+     * Get order details by order ID
      * GET /api/orders/{id}
      */
     @GetMapping("/{id}")
@@ -82,7 +82,7 @@ public class OrderController {
     }
     
     /**
-     * 根據訂單狀態獲取訂單列表
+     * Get order list by order status
      * GET /api/orders/status/{status}
      */
     @GetMapping("/status/{status}")
@@ -105,7 +105,7 @@ public class OrderController {
     }
     
     /**
-     * 創建新訂單
+     * Create new order
      * POST /api/orders
      */
     @PostMapping
@@ -123,7 +123,7 @@ public class OrderController {
     }
     
     /**
-     * 更新訂單狀態
+     * Update order status
      * PUT /api/orders/{id}/status
      */
     @PutMapping("/{id}/status")
@@ -146,7 +146,7 @@ public class OrderController {
     }
     
     /**
-     * 取消訂單
+     * Cancel order
      * PUT /api/orders/{id}/cancel
      */
     @PutMapping("/{id}/cancel")

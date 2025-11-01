@@ -73,17 +73,17 @@ public class OrderService {
     }
 
     /**
-     * 根据订单ID获获取订单详情
+     * Get order details by order ID
      */
     public Optional<OrderDTO> getOrderById(Long orderId) {
         logger.info("Fetching order by id: {}", orderId);
-        // 使用我们新的、正确的方法
+        // Use our new, correct method
         return orderRepository.findByIdWithProduct(orderId)
                 .map(this::convertToDTO);
     }
 
     /**
-     * 根根据订单状态获取订单列表
+     * Get order list by order status
      */
     public List<OrderDTO> getOrdersByStatus(OrderStatus status) {
         logger.info("Fetching orders by status: {}", status);
@@ -93,13 +93,13 @@ public class OrderService {
     }
 
     /**
-     * 创建新订单 (适配单商品模型)
+     * Create new order (adapted for single product model)
      */
-    @Transactional // 确保整个方法在一个事务内
+    @Transactional // Ensure entire method is within one transaction
     public OrderDTO createOrder(CreateOrderRequest request) {
         logger.info("Creating new order for user: {}", request.getUserId());
 
-        // --- 验证逻辑 (保持不变) ---
+        // --- Validation logic (unchanged) ---
         if (request.getOrderItems() == null || request.getOrderItems().size() != 1) {
             throw new IllegalArgumentException("Order must contain exactly one item.");
         }
@@ -116,59 +116,59 @@ public class OrderService {
             throw new RuntimeException("Insufficient stock for product: " + product.getName());
         }
 
-        // --- 核心修改部分 ---
+        // --- Core modification part ---
 
-        // 1. 先创建一个临时的 Order 对象并保存，以获取数据库生成的 ID
+        // 1. First create a temporary Order object and save it to get the database-generated ID
         Order order = new Order();
         order.setUserId(request.getUserId());
-        order.setStatus(OrderStatus.PENDING_STOCK_HOLD); // 使用一个临时状态
+        order.setStatus(OrderStatus.PENDING_STOCK_HOLD); // Use a temporary status
         order.setProduct(product);
         order.setQuantity(quantity);
         order.setUnitPrice(product.getPrice());
         order.setTotalAmount(product.getPrice().multiply(BigDecimal.valueOf(quantity)));
-        Order savedOrder = orderRepository.saveAndFlush(order); // 使用 saveAndFlush 确保立即获得 ID
+        Order savedOrder = orderRepository.saveAndFlush(order); // Use saveAndFlush to ensure immediate ID acquisition
         Long orderId = savedOrder.getId();
 
-        // 2. 调用库存预留服务，并传入真实的 orderId
+        // 2. Call inventory reservation service, passing the real orderId
         var whDTO = warehouseService.getAndUpdateAvailableWarehouse(productId, quantity, orderId);
         if (whDTO == null || whDTO.getInventoryTransactionIds() == null || whDTO.getInventoryTransactionIds().isEmpty()) {
-            // 如果预留失败，整个事务会回滚，上面保存的临时订单也会被撤销
+            // If reservation fails, the entire transaction will rollback, and the temporary order saved above will also be revoked
             throw new RuntimeException("Failed to hold stock, maybe it was taken by another order. Product: " + product.getName());
         }
 
-        // 3. 将事务ID列表转换为字符串，并更新订单最终状态
+        // 3. Convert transaction ID list to string and update order final status
         String inventoryTxIds = whDTO.getInventoryTransactionIds().stream()
                 .map(String::valueOf)
                 .collect(Collectors.joining(","));
 
         savedOrder.setInventoryTransactionIds(inventoryTxIds);
-        savedOrder.setStatus(OrderStatus.PLACED); // 更新为最终的成功状态
+        savedOrder.setStatus(OrderStatus.PLACED); // Update to final success status
 
-        // 再次保存以更新状态和事务ID
+        // Save again to update status and transaction IDs
         Order finalOrder = orderRepository.save(savedOrder);
         logger.info("Order created successfully with id: {}", finalOrder.getId());
 
-        // 【新增】创建并保存 Outbox 消息
+        // [New] Create and save Outbox message
         try {
             PaymentOutbox outboxMessage = new PaymentOutbox();
             outboxMessage.setOrderId(finalOrder.getId());
             outboxMessage.setEventType(PaymentStatus.PENDING.name());
 
-            // 创建 payload，一个包含必要信息的 JSON 字符串
+            // Create payload, a JSON string containing necessary information
             Map<String, Object> payload = new HashMap<>();
             payload.put("orderId", finalOrder.getId());
             payload.put("amount", finalOrder.getTotalAmount());
             payload.put("userId", finalOrder.getUserId());
-            //... 你可以加入任何支付服务需要的信息
+            //... You can add any information needed by the payment service
 
             outboxMessage.setPayload(objectMapper.writeValueAsString(payload));
 
-            // 保存 Outbox 记录
+            // Save Outbox record
             paymentOutboxRepository.save(outboxMessage);
             logger.info("PAYMENT_PENDING event saved to outbox for orderId: {}", finalOrder.getId());
 
         } catch (Exception e) {
-            // 如果序列化 payload 或保存 Outbox 失败，整个事务应该回滚
+            // If serializing payload or saving Outbox fails, entire transaction should rollback
             logger.error("Failed to save event to outbox for orderId: {}", finalOrder.getId(), e);
             throw new RuntimeException("Failed to create outbox event, rolling back transaction.", e);
         }
@@ -177,7 +177,7 @@ public class OrderService {
     }
 
     /**
-     * 更新订单状态
+     * Update order status
      */
     public OrderDTO updateOrderStatus(Long orderId, OrderStatus status) {
         logger.info("Updating order status: orderId={}, status={}", orderId, status);
@@ -193,11 +193,11 @@ public class OrderService {
     }
 
     /**
-     * 取消订单 (逻辑大部分保持不变，非常棒)
+     * Cancel order (logic mostly unchanged, excellent)
      */
     public OrderDTO cancelOrder(Long orderId) {
-        // ... 你的取消订单逻辑几乎不需要修改，因为它已经是基于 Order 实体中的 inventoryTransactionIds 工作的。
-        // 我只做了微小调整
+        // ... Your cancel order logic hardly needs modification because it already works based on inventoryTransactionIds in the Order entity.
+        // I only made minor adjustments
         logger.info("Cancelling order: {}", orderId);
 
         Order order = orderRepository.findById(orderId)
@@ -237,19 +237,19 @@ public class OrderService {
         order.setStatus(OrderStatus.CANCELLED);
         Order savedOrder = orderRepository.save(order);
 
-        // 退款
+        // Refund
         try {
             paymentService.refundPayment(order.getId(), "Order cancelled by user");
         } catch (Exception e) {
             logger.warn("Refund skipped or failed for order {}: {}", order.getId(), e.getMessage());
         }
 
-        // 邮件通知
+        // Email notification
         try {
             accountRepository.findById(order.getUserId()).ifPresent(acc -> {
                 String email = acc.getEmail();
                 if (email != null && !email.isEmpty()) {
-                    emailAdapter.sendOrderCancelled(email, String.valueOf(order.getId()), "用户主动取消");
+                    emailAdapter.sendOrderCancelled(email, String.valueOf(order.getId()), "User cancelled");
                 }
             });
         } catch (Exception ignore) {}
@@ -282,23 +282,23 @@ public class OrderService {
 
         Long orderId = order.getId();
 
-        // 根据外部的 DeliveryStatus，“翻译”成我们内部的 OrderStatus
-        // 这是“防腐层”的核心逻辑
+        // Translate external DeliveryStatus to our internal OrderStatus
+        // This is the core logic of the "anti-corruption layer"
         String incomingStatus = notification.getStatus();
         OrderStatus newStatus = translateDeliveryStatus(incomingStatus);
 
-        // 如果新状态不为空，并且与当前状态不同，则更新
+        // If new status is not null and differs from current status, update
         if (newStatus != null && order.getStatus() != newStatus) {
             order.setStatus(newStatus);
             orderRepository.save(order);
             logger.info("Order status updated to {} for orderId={}", newStatus, orderId);
 
-            // 如果是配送方上报的 LOST（我们映射为 CANCELLED），则触发退款
+            // If delivery service reports LOST (we map to CANCELLED), trigger refund
             if ("LOST".equalsIgnoreCase(incomingStatus)) {
                 try {
                     Optional<Payment> payOpt = paymentService.getPaymentByOrderId(orderId);
                     if (payOpt.isPresent() && payOpt.get().getStatus() != PaymentStatus.REFUNDED) {
-                        paymentService.refundPayment(orderId, "自动退款：配送丢失");
+                        paymentService.refundPayment(orderId, "Auto refund: package lost during delivery");
                         logger.info("Refund triggered for LOST delivery, orderId={}", orderId);
                     } else {
                         logger.info("Refund already done or payment missing for orderId={}, skip.", orderId);
@@ -307,12 +307,12 @@ public class OrderService {
                     logger.error("Refund on LOST failed for orderId={}: {}", orderId, e.getMessage(), e);
                 }
 
-                // 发送取消订单（因丢失）通知邮件（与退款成功邮件互补）
+                // Send order cancellation (due to loss) notification email (complementary to refund success email)
                 try {
                     accountRepository.findById(order.getUserId()).ifPresent(acc -> {
                         String email = acc.getEmail();
                         if (email != null && !email.isEmpty()) {
-                            emailAdapter.sendOrderCancelled(email, String.valueOf(orderId), "包裹在配送过程中丢失，系统已为您发起退款");
+                            emailAdapter.sendOrderCancelled(email, String.valueOf(orderId), "Package lost during delivery, system has initiated refund");
                         }
                     });
                 } catch (Exception mailEx) {
@@ -320,7 +320,7 @@ public class OrderService {
                 }
             }
 
-            // 异步发送邮件通知用户
+            // Asynchronously send email notification to user
             sendEmailForStatusUpdate(order, newStatus);
         } else {
             logger.info("No status change needed for orderId={}. Current: {}, New (translated): {}",
@@ -329,25 +329,25 @@ public class OrderService {
     }
 
     /**
-     * 【新增】将外部的 DeliveryStatus 字符串翻译为内部的 OrderStatus 枚举
+     * [New] Translate external DeliveryStatus string to internal OrderStatus enum
      */
     private OrderStatus translateDeliveryStatus(String deliveryStatusStr) {
         if (deliveryStatusStr == null) {
             return null;
         }
-        // 注意：这里的字符串需要和你的 DeliveryService 团队约定好
+        // Note: The strings here need to be agreed upon with your DeliveryService team
         return switch (deliveryStatusStr.toUpperCase()) {
             case "PICKED_UP" -> OrderStatus.SHIPPED;
             case "DELIVERING" -> OrderStatus.IN_TRANSIT;
             case "RECEIVED", "DELIVERED" -> OrderStatus.DELIVERED;
-            // 将 LOST 与 CANCELLED 都映射到订单的 CANCELLED
+            // Map both LOST and CANCELLED to order's CANCELLED
             case "CANCELLED", "LOST" -> OrderStatus.CANCELLED;
-            default -> null; // 对于不关心的状态（如CREATED），我们不进行更新
+            default -> null; // For states we don't care about (e.g., CREATED), we don't update
         };
     }
 
     /**
-     * 【新增】根据新的订单状态发送相应的邮件
+     * [New] Send corresponding email based on new order status
      */
     private void sendEmailForStatusUpdate(Order order, OrderStatus newStatus) {
         try {

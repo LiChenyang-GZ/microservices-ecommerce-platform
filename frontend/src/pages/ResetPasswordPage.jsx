@@ -21,7 +21,7 @@ const ResetPasswordPage = () => {
   const [isSuccess, setIsSuccess] = useState(false);
 
   useEffect(() => {
-    // 从URL参数或state中获取邮箱
+    // Get email from URL parameters or state
     const urlParams = new URLSearchParams(location.search);
     const emailFromUrl = urlParams.get('email');
     const emailFromState = location.state?.email;
@@ -52,27 +52,27 @@ const ResetPasswordPage = () => {
     const newErrors = {};
     
     if (!formData.email) {
-      newErrors.email = '请输入邮箱地址';
+      newErrors.email = 'Please enter email address';
     } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = '请输入有效的邮箱地址';
+      newErrors.email = 'Please enter a valid email address';
     }
     
     if (!formData.code) {
-      newErrors.code = '请输入验证码';
+      newErrors.code = 'Please enter verification code';
     } else if (!/^\d{6}$/.test(formData.code)) {
-      newErrors.code = '验证码必须是6位数字';
+      newErrors.code = 'Verification code must be 6 digits';
     }
     
     if (!formData.newPassword) {
-      newErrors.newPassword = '请输入新密码';
+      newErrors.newPassword = 'Please enter new password';
     } else if (formData.newPassword.length < 6) {
-      newErrors.newPassword = '密码至少需要6位字符';
+      newErrors.newPassword = 'Password must be at least 6 characters';
     }
     
     if (!formData.confirmPassword) {
-      newErrors.confirmPassword = '请确认新密码';
+      newErrors.confirmPassword = 'Please confirm new password';
     } else if (formData.newPassword !== formData.confirmPassword) {
-      newErrors.confirmPassword = '两次输入的密码不一致';
+      newErrors.confirmPassword = 'Passwords do not match';
     }
     
     setErrors(newErrors);
@@ -99,12 +99,12 @@ const ResetPasswordPage = () => {
       if (response.success) {
         setIsSuccess(true);
       } else {
-        setErrors({ submit: response.message || '密码重置失败，请重试' });
+        setErrors({ submit: response.message || 'Password reset failed, please try again' });
       }
       
     } catch (error) {
       console.error('Reset password failed:', error);
-      const errorMessage = error.response?.data?.message || '密码重置失败，请重试';
+      const errorMessage = error.response?.data?.message || 'Password reset failed, please try again';
       setErrors({ submit: errorMessage });
     } finally {
       setIsLoading(false);
@@ -117,7 +117,7 @@ const ResetPasswordPage = () => {
 
   const handleResendCode = async () => {
     if (!formData.email) {
-      setErrors({ submit: '请先输入邮箱地址' });
+      setErrors({ submit: 'Please enter email address first' });
       return;
     }
     
@@ -128,14 +128,14 @@ const ResetPasswordPage = () => {
       const response = await userAPI.forgotPassword(formData.email);
       
       if (response.success) {
-        setErrors({ submit: '验证码已重新发送' });
+        setErrors({ submit: 'Verification code has been resent' });
       } else {
-        setErrors({ submit: response.message || '重新发送失败' });
+        setErrors({ submit: response.message || 'Failed to resend' });
       }
       
     } catch (error) {
       console.error('Resend code failed:', error);
-      const errorMessage = error.response?.data?.message || '重新发送失败';
+      const errorMessage = error.response?.data?.message || 'Failed to resend';
       setErrors({ submit: errorMessage });
     } finally {
       setIsLoading(false);
@@ -148,9 +148,9 @@ const ResetPasswordPage = () => {
         <div className="reset-password-card">
           <div className="success-header">
             <div className="success-icon">✓</div>
-            <h1 className="success-title">密码重置成功！</h1>
+            <h1 className="success-title">Password Reset Successful!</h1>
             <p className="success-subtitle">
-              您的密码已成功重置，现在可以使用新密码登录了
+              Your password has been successfully reset, you can now login with your new password
             </p>
           </div>
           
@@ -162,7 +162,7 @@ const ResetPasswordPage = () => {
                 size="large"
                 className="back-button"
               >
-                返回登录
+                Back to Login
               </Button>
             </div>
           </div>
@@ -175,9 +175,9 @@ const ResetPasswordPage = () => {
     <div className="reset-password-container">
       <div className="reset-password-card">
         <div className="reset-password-header">
-          <h1 className="reset-password-title">重置密码</h1>
+          <h1 className="reset-password-title">Reset Password</h1>
           <p className="reset-password-subtitle">
-            请输入您收到的验证码和新密码
+            Please enter the verification code you received and your new password
           </p>
         </div>
         
@@ -185,10 +185,10 @@ const ResetPasswordPage = () => {
           <Input
             type="email"
             name="email"
-            label="邮箱地址"
+            label="Email Address"
             value={formData.email}
             onChange={handleChange}
-            placeholder="请输入您的邮箱地址"
+            placeholder="Enter your email address"
             error={errors.email}
             disabled={isLoading}
             required
@@ -197,10 +197,10 @@ const ResetPasswordPage = () => {
           <Input
             type="text"
             name="code"
-            label="验证码"
+            label="Verification Code"
             value={formData.code}
             onChange={handleChange}
-            placeholder="请输入6位验证码"
+            placeholder="Enter 6-digit verification code"
             error={errors.code}
             disabled={isLoading}
             required
@@ -209,10 +209,10 @@ const ResetPasswordPage = () => {
           <Input
             type="password"
             name="newPassword"
-            label="新密码"
+            label="New Password"
             value={formData.newPassword}
             onChange={handleChange}
-            placeholder="请输入新密码"
+            placeholder="Enter new password"
             error={errors.newPassword}
             disabled={isLoading}
             required
@@ -221,10 +221,10 @@ const ResetPasswordPage = () => {
           <Input
             type="password"
             name="confirmPassword"
-            label="确认新密码"
+            label="Confirm New Password"
             value={formData.confirmPassword}
             onChange={handleChange}
-            placeholder="请再次输入新密码"
+            placeholder="Enter new password again"
             error={errors.confirmPassword}
             disabled={isLoading}
             required
@@ -244,7 +244,7 @@ const ResetPasswordPage = () => {
               size="large"
               className="submit-button"
             >
-              重置密码
+              Reset Password
             </Button>
             
             <Button 
@@ -255,7 +255,7 @@ const ResetPasswordPage = () => {
               size="medium"
               className="resend-button"
             >
-              重新发送验证码
+              Resend Verification Code
             </Button>
             
             <Button 
@@ -265,7 +265,7 @@ const ResetPasswordPage = () => {
               size="medium"
               className="back-button"
             >
-              返回登录
+              Back to Login
             </Button>
           </div>
         </form>

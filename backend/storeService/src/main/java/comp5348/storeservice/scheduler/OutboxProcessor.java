@@ -93,7 +93,7 @@ public class OutboxProcessor {
     }
 
     /**
-     * 定时处理Outbox消息 - 每5秒执行一次
+     * Scheduled processing of Outbox messages - executed every 5 seconds
      */
     @Scheduled(fixedDelay = 5000)
     @Transactional
@@ -103,7 +103,7 @@ public class OutboxProcessor {
         }
 
         try {
-            // 查询待处理的Outbox记录（PENDING状态且重试次数小于最大值）
+            // Query pending Outbox records (PENDING status and retry count less than max)
             List<PaymentOutbox> pendingOutboxes = outboxRepository.findByStatusAndRetryCountLessThan("PENDING", maxRetries);
 
             if (pendingOutboxes.isEmpty()) {
@@ -122,7 +122,7 @@ public class OutboxProcessor {
     }
     
     /**
-     * 处理单个Outbox消息
+     * Process a single Outbox message
      */
     private void processOutboxMessage(PaymentOutbox outbox) {
         logger.info("Processing outbox message: id={}, eventType={}, orderId={}", 
@@ -131,7 +131,7 @@ public class OutboxProcessor {
         try {
             boolean success = false;
 
-            // 兼容历史/异步消息中的事件名：如 PAYMENT_PENDING/PAYMENT_SUCCESS/REFUND_SUCCESS
+            // Compatible with historical/async message event names: e.g., PAYMENT_PENDING/PAYMENT_SUCCESS/REFUND_SUCCESS
             String rawEventType = outbox.getEventType();
             String normalized;
             if (rawEventType == null) {
@@ -147,11 +147,11 @@ public class OutboxProcessor {
                 case "REFUND_SUCCESS":
                     normalized = "REFUNDED"; break;
                 default:
-                    // 去掉统一前缀以提高健壮性
+                    // Remove unified prefix for robustness
                     normalized = rawEventType.replaceFirst("^PAYMENT_", "");
             }
 
-            PaymentStatus eventType = PaymentStatus.valueOf(normalized); // 将字符串转换为Enum
+            PaymentStatus eventType = PaymentStatus.valueOf(normalized); // Convert string to Enum
             switch (eventType) {
                 case PENDING:
                     success = processPaymentPending(outbox);
@@ -170,21 +170,21 @@ public class OutboxProcessor {
                     break;
 
                 case DELIVERY_FAILED:
-                    // DELIVERY_FAILED 事件需要等待30秒后才处理
+                    // DELIVERY_FAILED event needs to wait 30 seconds before processing
                     boolean compensationTriggered = processDeliveryFailed(outbox);
                     if (!compensationTriggered) {
-                        // 返回false表示还在等待期间（还没到30秒）
-                        // 不处理，也不增加重试次数，等待下次扫描
+                        // Return false means still waiting (haven't reached 30 seconds yet)
+                        // Don't process, don't increment retry count, wait for next scan
                         logger.debug("DELIVERY_FAILED event for orderId {} still waiting, skipping this round.", outbox.getOrderId());
-                        return; // 直接返回，不更新outbox状态，下次定时任务会再次扫描
+                        return; // Return directly without updating outbox status, next scheduled task will scan again
                     }
-                    // 返回true表示已经触发补偿
+                    // Return true means compensation has been triggered
                     success = true;
                     break;
 
                 default:
                     logger.warn("Unknown event type: {}", outbox.getEventType());
-                    success = false; // 或者直接抛出异常
+                    success = false; // Or throw exception directly
             }
             
             if (success) {
@@ -219,7 +219,7 @@ public class OutboxProcessor {
     }
     
     /**
-     * 处理待支付事件 - 调用PaymentService处理支付
+     * Process pending payment event - call PaymentService to process payment
      */
     private boolean processPaymentPending(PaymentOutbox outbox) {
         try {
@@ -239,7 +239,7 @@ public class OutboxProcessor {
     }
     
     /**
-     * 处理支付成功事件 - 创建配送请求（调用组员D的DeliveryService）
+     * Process payment success event - create delivery request (call team member D's DeliveryService)
      */
     private boolean processPaymentSuccess(PaymentOutbox outbox) {
         try {
@@ -248,38 +248,38 @@ public class OutboxProcessor {
 
             logger.info("Payment success for orderId={}", orderId);
 
-            // 【新增步骤 1】: 更新订单状态为 PAID
-            // 将状态更新放在调用外部服务之前，如果更新失败，则不会继续
+            // [New Step 1]: Update order status to PAID
+            // Place status update before calling external service, if update fails, don't continue
             try {
                 orderService.updateOrderStatus(orderId, OrderStatus.PAID);
                 logger.info("Order status updated to PAID for orderId={}", orderId);
             } catch (Exception e) {
                 logger.error("Failed to update order status to PAID for orderId={}. Will retry. Error: {}", orderId, e.getMessage(), e);
-                return false; // 更新订单状态是关键步骤，失败了必须重试
+                return false; // Updating order status is a critical step, must retry on failure
             }
 
-            // --- 后续逻辑基本保持不变 ---
+            // --- Subsequent logic remains mostly unchanged ---
 
             logger.info("Triggering delivery request for orderId={}", orderId);
 
-            // 1. 查询订单信息
-            Order order = orderRepository.findByIdWithProduct(orderId) // 使用 findByIdWithProduct 保证商品信息被加载
+            // 1. Query order information
+            Order order = orderRepository.findByIdWithProduct(orderId) // Use findByIdWithProduct to ensure product info is loaded
                     .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
 
-            // 2. 查询用户信息 (逻辑保持不变)
+            // 2. Query user information (logic unchanged)
             Account account = accountRepository.findById(order.getUserId()).orElse(null);
             String email = (account != null) ? account.getEmail() : "customer@example.com";
             String userName = (account != null) ? account.getFirstName() + " " + account.getLastName() : "Customer";
 
-            // 3. 【修改】获取订单商品信息
-            // 因为 Order 已经和 Product 直接关联，不再需要 getOrderItems()
+            // 3. [Modified] Get order product information
+            // Since Order is directly associated with Product, getOrderItems() is no longer needed
             if (order.getProduct() == null) {
                 throw new IllegalStateException("Order " + orderId + " has no associated product.");
             }
             String productName = order.getProduct().getName();
             int quantity = order.getQuantity();
 
-            // 4. 构造配送请求 (逻辑保持不变)
+            // 4. Construct delivery request (logic unchanged)
             DeliveryRequestDTO deliveryRequest = new DeliveryRequestDTO();
             deliveryRequest.setOrderId(orderId.toString());
             deliveryRequest.setEmail(email);
@@ -290,25 +290,25 @@ public class OutboxProcessor {
             deliveryRequest.setQuantity(quantity);
             deliveryRequest.setNotificationUrl("http://localhost:8082/api/delivery-webhook");
 
-            // 5. 【优化】确认库存预留 (Saga模式中的"Confirm")
-            // 这一步的目的是将 HOLD 状态的库存事务标记为 COMMITTED/CONFIRMED
-            // 这通常由 WarehouseService 提供一个专门的方法来完成
+            // 5. [Optimized] Confirm inventory reservation (Saga pattern "Confirm")
+            // The purpose of this step is to mark inventory transactions in HOLD status as COMMITTED/CONFIRMED
+            // This is usually done by WarehouseService providing a dedicated method
             // warehouseService.confirmHold(order.getInventoryTransactionIds());
-            // 如果你的流程中没有这一步，可以直接跳过或移除，但保留它体现了更完整的Saga思想
+            // If your process doesn't have this step, you can skip or remove it, but keeping it demonstrates more complete Saga thinking
             logger.info("Confirming stock hold for orderId={}", orderId);
 
-            // 6. 调用DeliveryService (逻辑保持不变)
+            // 6. Call DeliveryService (logic unchanged)
             DeliveryResponseDTO response = deliveryAdapter.createDelivery(deliveryRequest);
 
             if (response.isSuccess()) {
                 logger.info("Delivery request created successfully: orderId={}, deliveryId={}", orderId, response.getDeliveryId());
 
                 try {
-                    // 再次获取最新的 order 对象
+                    // Get latest order object again
                     Order orderToUpdate = orderRepository.findById(orderId)
                             .orElseThrow(() -> new RuntimeException("Order disappeared unexpectedly: " + orderId));
 
-                    // 设置并保存 deliveryId
+                    // Set and save deliveryId
                     orderToUpdate.setDeliveryId(response.getDeliveryId());
                     orderRepository.save(orderToUpdate);
 
@@ -317,8 +317,8 @@ public class OutboxProcessor {
                 } catch (Exception e) {
                     logger.error("CRITICAL: Failed to save deliveryId for orderId {}. This will break delivery notifications!",
                             orderId, e);
-                    // 即使保存deliveryId失败，配送任务也已经创建了，所以不应该返回false让整个流程重试
-                    // 这是一个需要人工介入修复的脏数据
+                    // Even if saving deliveryId fails, delivery task has already been created, so shouldn't return false to retry entire flow
+                    // This is dirty data that requires manual intervention to fix
                 }
                 return true;
             } else {
@@ -327,17 +327,17 @@ public class OutboxProcessor {
 //                return false;
                 logger.error("CRITICAL: Delivery creation failed permanently for orderId {}. Triggering compensation.", orderId);
 
-                // 【高级实现】: 创建一个新的 Outbox 事件，来触发退款
+                // [Advanced Implementation]: Create a new Outbox event to trigger refund
                 try {
-                    // 你需要一个 OutboxService 来辅助创建事件
+                    // You need an OutboxService to help create events
                     outboxService.createDeliveryFailedEvent(orderId, response.getMessage());
                 } catch (Exception e) {
                     logger.error("FATAL: Failed to even create the compensation event for orderId {}.", orderId, e);
-                    // 如果连创建补偿事件都失败了，就需要人工介入了
+                    // If even creating compensation event fails, manual intervention is needed
                 }
 
-                // 即使触发了补偿，我们仍然返回 true，因为这个 PAYMENt_SUCCESS 事件本身已经被“处理”了
-                // （它的后续处理是触发了另一个事件）
+                // Even though compensation is triggered, we still return true because the PAYMENT_SUCCESS event itself has been "processed"
+                // (Its subsequent processing is triggering another event)
                 return true;
             }
 
@@ -348,7 +348,7 @@ public class OutboxProcessor {
     }
     
     /**
-     * 处理支付失败事件 - 释放预留库存 + 发送Email通知
+     * Process payment failed event - release reserved inventory + send email notification
      */
     private boolean processPaymentFailed(PaymentOutbox outbox) {
         try {
@@ -361,10 +361,10 @@ public class OutboxProcessor {
             Order order = orderRepository.findById(orderId).orElse(null);
             if (order == null) {
                 logger.warn("Order not found for failed payment, cannot release stock. orderId={}", orderId);
-                return true; // 订单都没了，也就不需要释放库存了，认为处理成功
+                return true; // Order doesn't exist, no need to release inventory, consider processing successful
             }
 
-            // 1. 释放库存预留
+            // 1. Release inventory reservation
             try {
                 if (order.getInventoryTransactionIds() != null && !order.getInventoryTransactionIds().isEmpty()) {
                     List<Long> txIds = Arrays.stream(order.getInventoryTransactionIds().split(","))
@@ -381,10 +381,10 @@ public class OutboxProcessor {
                 }
             } catch (Exception e) {
                 logger.error("Failed to release inventory for orderId={}. Will retry. Error: {}", orderId, e.getMessage(), e);
-                return false; // 释放库存是关键步骤，失败了必须重试
+                return false; // Releasing inventory is a critical step, must retry on failure
             }
 
-            // 2. 发送失败通知邮件
+            // 2. Send failure notification email
             try {
                 accountRepository.findById(order.getUserId()).ifPresent(acc -> {
                     if (acc.getEmail() != null) {
@@ -393,7 +393,7 @@ public class OutboxProcessor {
                 });
             } catch (Exception e) {
                 logger.warn("Failed to send order failure email for orderId={}: {}", orderId, e.getMessage());
-                // 邮件发送失败不影响主流程，不返回false
+                // Email sending failure doesn't affect main flow, don't return false
             }
 
             return true;
@@ -405,7 +405,7 @@ public class OutboxProcessor {
     }
     
     /**
-     * 处理退款成功事件 - 发送Email通知
+     * Process refund success event - send email notification
      */
     private boolean processRefundSuccess(PaymentOutbox outbox) {
         try {
@@ -443,19 +443,19 @@ public class OutboxProcessor {
         LocalDateTime createdAt = outbox.getCreatedAt();
         LocalDateTime now = LocalDateTime.now();
         
-        // 计算等待时间（秒）
+        // Calculate wait time (seconds)
         long waitSeconds = java.time.Duration.between(createdAt, now).getSeconds();
-        long requiredWaitSeconds = 30; // 需要等待30秒
+        long requiredWaitSeconds = 30; // Need to wait 30 seconds
         
         if (waitSeconds < requiredWaitSeconds) {
-            // 还没到30秒，继续等待，不触发补偿
+            // Haven't reached 30 seconds yet, continue waiting, don't trigger compensation
             long remainingSeconds = requiredWaitSeconds - waitSeconds;
             logger.info("DELIVERY_FAILED event for orderId {} is waiting. Created {}s ago, need to wait {}s more before compensation.", 
                     orderId, waitSeconds, remainingSeconds);
-            return false; // 返回false表示不处理，下次再检查
+            return false; // Return false means don't process, check again next time
         }
         
-        // 已经等待了30秒，触发补偿机制
+        // Have waited 30 seconds, trigger compensation mechanism
         logger.warn("DELIVERY_FAILED event for orderId {} has waited {}s. Triggering compensation (refund).", 
                 orderId, waitSeconds);
         String reason = "Delivery service failed to create shipment after waiting 30 seconds.";

@@ -83,7 +83,7 @@ const RegisterPage = () => {
     setErrors({});
     
     try {
-      // 1. 创建账户
+      // 1. Create account
       const accountData = {
         firstName: formData.firstName,
         lastName: formData.lastName,
@@ -91,63 +91,63 @@ const RegisterPage = () => {
         password: formData.password
       };
       
-      console.log('正在创建账户:', accountData);
+      console.log('Creating account:', accountData);
       
       const response = await userAPI.createAccount(accountData);
       
       if (response.success) {
-        console.log('账户创建成功:', response);
+        console.log('Account created successfully:', response);
         
-        // 2. 发送验证码
+        // 2. Send verification code
         try {
-          console.log('正在发送验证码到:', formData.email);
+          console.log('Sending verification code to:', formData.email);
           const emailResponse = await emailAPI.sendVerificationCode(formData.email);
           
           if (emailResponse.success) {
-            console.log('验证码发送成功');
-            // 3. 跳转到邮箱验证页面
+            console.log('Verification code sent successfully');
+            // 3. Navigate to email verification page
             navigate('/email-verification', { 
               state: { 
                 email: formData.email,
-                message: '账户创建成功，请验证您的邮箱'
+                message: 'Account created successfully, please verify your email'
               }
             });
           } else {
-            setErrors({ submit: emailResponse.message || '发送验证码失败' });
+            setErrors({ submit: emailResponse.message || 'Failed to send verification code' });
           }
         } catch (emailError) {
-          console.error('发送验证码失败:', emailError);
+          console.error('Failed to send verification code:', emailError);
           if (emailError.response?.data?.message) {
             setErrors({ submit: emailError.response.data.message });
           } else {
-            setErrors({ submit: '发送验证码失败，请重试' });
+            setErrors({ submit: 'Failed to send verification code, please try again' });
           }
         }
       } else {
-        setErrors({ submit: response.message || '注册失败' });
+        setErrors({ submit: response.message || 'Registration failed' });
       }
       
     } catch (error) {
-      console.error('账户创建失败:', error);
+      console.error('Account creation failed:', error);
       
-      // 处理不同类型的错误
-      let errorMessage = '账户创建失败，请重试';
+      // Handle different types of errors
+      let errorMessage = 'Account creation failed, please try again';
       
       if (error.response) {
         const { status, data } = error.response;
         if (status === 400) {
-          errorMessage = '请检查输入的信息是否正确';
+          errorMessage = 'Please check if the entered information is correct';
         } else if (status === 409) {
-          errorMessage = '该邮箱已被注册，请使用其他邮箱';
+          errorMessage = 'This email is already registered, please use another email';
         } else if (status === 500) {
-          errorMessage = '服务器错误，请稍后重试';
+          errorMessage = 'Server error, please try again later';
         }
         
         if (data && data.message) {
           errorMessage = data.message;
         }
       } else if (error.request) {
-        errorMessage = '无法连接到服务器，请检查网络连接';
+        errorMessage = 'Unable to connect to server, please check network connection';
       }
       
       setErrors({ submit: errorMessage });

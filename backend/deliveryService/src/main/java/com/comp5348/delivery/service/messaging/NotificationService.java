@@ -27,20 +27,20 @@ public class NotificationService {
 
     public void sendNotification(NotificationMessage message) {
         String url = message.getUrl();
-        logger.info("【Notification发送】准备向URL: {} 发送状态更新: {}", url, message.getPayload().getStatus());
+        logger.info("[Notification Send] Preparing to send status update to URL: {} with status: {}", url, message.getPayload().getStatus());
 
         try {
-            // 尝试发送POST请求。我们暂时不关心对方的响应内容。
+            // Attempt to send POST request. We temporarily do not care about the response content.
             restTemplate.postForEntity(url, message.getPayload(), String.class);
-            logger.info("【Notification发送成功】已成功通知URL: {}", url);
+            logger.info("[Notification Send Success] Successfully notified URL: {}", url);
 
         } catch (RestClientException e) {
-            // 如果发送失败 (比如对方服务不在线，或者URL错误)
-            logger.error("【Notification发送失败】向URL: {} 发送通知时出错: {}", url, e.getMessage());
+            // If sending fails (e.g., target service is offline, or URL is incorrect)
+            logger.error("[Notification Send Failed] Error sending notification to URL: {}: {}", url, e.getMessage());
 
-            // 将发送失败的消息放入死信队列，以便后续处理
+            // Put the failed message into the dead letter queue for later processing
             rabbitTemplate.convertAndSend(RabbitMQConfig.DEAD_LETTER_QUEUE_NAME, message);
-            logger.warn("已将发送失败的Notification消息放入死信队列: {}", RabbitMQConfig.DEAD_LETTER_QUEUE_NAME);
+            logger.warn("Failed Notification message sent to dead letter queue: {}", RabbitMQConfig.DEAD_LETTER_QUEUE_NAME);
         }
     }
 }

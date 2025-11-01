@@ -32,7 +32,7 @@ public class AccountService {
     private comp5348.storeservice.adapter.BankAdapter bankAdapter;
 
     /**
-     * 创建账户（需要邮箱验证）
+     * Create account (requires email verification)
      */
     @Transactional
     public AccountDTO createAccount(String firstName, String lastName, String email, String password) {
@@ -40,12 +40,12 @@ public class AccountService {
             throw new IllegalArgumentException("Email already exists!");
         }
         
-        // 创建 Account 实体对象
+        // Create Account entity object
         Account account = new Account();
         account.setFirstName(firstName);
         account.setLastName(lastName);
         account.setEmail(email);
-        // 用户名唯一：优先用 firstName.lastName 组合；缺失则用邮箱前缀；再缺失用 user
+        // Username must be unique: prioritize firstName.lastName combination; if missing, use email prefix; if still missing, use user
         String base = null;
         String fn = firstName != null ? firstName.trim() : "";
         String ln = lastName != null ? lastName.trim() : "";
@@ -67,12 +67,12 @@ public class AccountService {
         account.setUsername(candidate);
         String encodedPassword = passwordEncoder.encode(password);
         account.setPassword(encodedPassword);
-        account.setEmailVerified(false); // 初始状态为未验证
-        account.setActive(false); // 初始状态为未激活
+        account.setEmailVerified(false); // Initial state is unverified
+        account.setActive(false); // Initial state is inactive
 
-        // 保存到数据库
+        // Save to database
         Account savedAccount = accountRepository.save(account);
-        // 注册后立即开户（默认余额10000），并绑定到账户
+        // Open account immediately after registration (default balance 10000) and bind to account
         try {
             String acctNo = bankAdapter.createCustomerAccount(email, new BigDecimal("10000"));
             if (acctNo != null) {
@@ -85,12 +85,12 @@ public class AccountService {
                 savedAccount.getFirstName(),
                 savedAccount.getLastName(),
                 savedAccount.getEmail(),
-                "********" // 不返回真实密码
+                "********" // Do not return real password
         );
     }
 
     /**
-     * 激活账户（邮箱验证成功后调用）
+     * Activate account (called after email verification succeeds)
      */
     @Transactional
     public boolean activateAccount(String email) {
@@ -99,7 +99,7 @@ public class AccountService {
             Account account = accountOpt.get();
             account.setEmailVerified(true);
             account.setActive(true);
-            // 激活时为用户开户（默认余额10000），仅当尚未绑定银行账户
+            // Open account for user upon activation (default balance 10000), only if bank account is not yet bound
             if (account.getBankAccountNumber() == null || account.getBankAccountNumber().isEmpty()) {
                 try {
                     String acctNo = bankAdapter.createCustomerAccount(account.getEmail(), new java.math.BigDecimal("10000"));
@@ -113,7 +113,7 @@ public class AccountService {
     }
 
     /**
-     * 验证登录（只允许已验证的账户登录）
+     * Verify login (only allow verified accounts to login)
      */
     public boolean verifyLogin(String identifier, String password) {
         Optional<Account> userOpt = accountRepository.findByEmail(identifier);
@@ -122,7 +122,7 @@ public class AccountService {
         }
         if (userOpt.isPresent()) {
             Account user = userOpt.get();
-            // 检查账户是否激活且邮箱已验证
+            // Check if account is active and email is verified
             if (!Boolean.TRUE.equals(user.getActive()) || !Boolean.TRUE.equals(user.getEmailVerified())) {
                 return false;
             }
@@ -132,7 +132,7 @@ public class AccountService {
     }
 
     /**
-     * 根据邮箱获取账户信息
+     * Get account information by email
      */
     public Optional<Account> getAccountByEmail(String email) {
         return accountRepository.findByEmail(email);
@@ -145,14 +145,14 @@ public class AccountService {
     }
 
     /**
-     * 检查邮箱是否存在
+     * Check if email exists
      */
     public boolean emailExists(String email) {
         return accountRepository.findByEmail(email).isPresent();
     }
 
     /**
-     * 检查邮箱是否已验证
+     * Check if email is verified
      */
     public boolean isEmailVerified(String identifier) {
         Optional<Account> accountOpt = accountRepository.findByEmail(identifier);
@@ -161,7 +161,7 @@ public class AccountService {
     }
 
     /**
-     * 检查账户是否激活
+     * Check if account is active
      */
     public boolean isAccountActive(String identifier) {
         Optional<Account> accountOpt = accountRepository.findByEmail(identifier);
@@ -170,39 +170,39 @@ public class AccountService {
     }
 
     /**
-     * 发送密码重置邮件
+     * Send password reset email
      */
     public boolean sendPasswordResetEmail(String email) {
-        // 检查邮箱是否存在
+        // Check if email exists
         if (!emailExists(email)) {
             return false;
         }
 
         try {
-            // 调用邮件服务发送密码重置验证码
+            // Call email service to send password reset verification code
             String url = EMAIL_SERVICE_URL + "/send-password-reset";
             PasswordResetRequest request = new PasswordResetRequest(email);
             
             PasswordResetResponse response = restTemplate.postForObject(url, request, PasswordResetResponse.class);
             return response != null && response.success;
         } catch (Exception e) {
-            System.err.println("发送密码重置邮件失败: " + e.getMessage());
+            System.err.println("Failed to send password reset email: " + e.getMessage());
             return false;
         }
     }
 
     /**
-     * 重置密码
+     * Reset password
      */
     @Transactional
     public boolean resetPassword(String email, String code, String newPassword) {
-        // 检查邮箱是否存在
+        // Check if email exists
         if (!emailExists(email)) {
             return false;
         }
 
         try {
-            // 验证重置码
+            // Verify reset code
             String url = EMAIL_SERVICE_URL + "/verify-password-reset";
             PasswordResetVerifyRequest request = new PasswordResetVerifyRequest(email, code);
             

@@ -26,7 +26,7 @@ public class OutboxService {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
-     * 创建待支付事件
+     * Create pending payment event
      */
     @Transactional
     public void createPaymentPendingEvent(Long orderId, BigDecimal amount) {
@@ -39,7 +39,7 @@ public class OutboxService {
 
             PaymentOutbox outbox = new PaymentOutbox();
             outbox.setOrderId(orderId);
-            // 统一使用 PaymentStatus 枚举名，避免与处理器不一致
+            // Consistently use PaymentStatus enum name to avoid inconsistency with processor
             outbox.setEventType(PaymentStatus.PENDING.name());
             outbox.setPayload(objectMapper.writeValueAsString(payload));
             outbox.setStatus("PENDING");
@@ -54,7 +54,7 @@ public class OutboxService {
     }
 
     /**
-     * 创建支付成功事件
+     * Create payment success event
      */
     @Transactional
     public void createPaymentSuccessEvent(Long orderId, String bankTxnId) {
@@ -67,7 +67,7 @@ public class OutboxService {
 
             PaymentOutbox outbox = new PaymentOutbox();
             outbox.setOrderId(orderId);
-            // 统一使用 PaymentStatus 枚举名
+            // Consistently use PaymentStatus enum name
             outbox.setEventType(PaymentStatus.SUCCESS.name());
             outbox.setPayload(objectMapper.writeValueAsString(payload));
             outbox.setStatus("PENDING");
@@ -82,7 +82,7 @@ public class OutboxService {
     }
 
     /**
-     * 创建支付失败事件
+     * Create payment failed event
      */
     @Transactional
     public void createPaymentFailedEvent(Long orderId, String error) {
@@ -95,7 +95,7 @@ public class OutboxService {
 
             PaymentOutbox outbox = new PaymentOutbox();
             outbox.setOrderId(orderId);
-            // 统一使用 PaymentStatus 枚举名
+            // Consistently use PaymentStatus enum name
             outbox.setEventType(PaymentStatus.FAILED.name());
             outbox.setPayload(objectMapper.writeValueAsString(payload));
             outbox.setStatus("PENDING");
@@ -110,7 +110,7 @@ public class OutboxService {
     }
 
     /**
-     * 创建退款成功事件
+     * Create refund success event
      */
     @Transactional
     public void createRefundSuccessEvent(Long orderId, String refundTxnId) {
@@ -123,7 +123,7 @@ public class OutboxService {
 
             PaymentOutbox outbox = new PaymentOutbox();
             outbox.setOrderId(orderId);
-            // 统一使用 PaymentStatus 枚举名（而非 REFUND_SUCCESS 字符串）
+            // Consistently use PaymentStatus enum name (not REFUND_SUCCESS string)
             outbox.setEventType(PaymentStatus.REFUNDED.name());
             outbox.setPayload(objectMapper.writeValueAsString(payload));
             outbox.setStatus("PENDING");
@@ -143,9 +143,9 @@ public class OutboxService {
 
         PaymentOutbox outboxMessage = new PaymentOutbox();
         outboxMessage.setOrderId(orderId);
-        outboxMessage.setEventType(PaymentStatus.DELIVERY_FAILED.name()); // 使用 Enum
+        outboxMessage.setEventType(PaymentStatus.DELIVERY_FAILED.name()); // Use Enum
 
-        // 构造 payload
+        // Construct payload
         Map<String, Object> payload = new HashMap<>();
         payload.put("orderId", orderId);
         payload.put("reason", reason);

@@ -11,29 +11,29 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class RabbitMQConfig {
 
-    // 和组员C约定好的队列名称
+    // Queue names agreed with team member C
     public static final String DELIVERY_QUEUE_NAME = "delivery_processing_queue";
-    public static final String NOTIFICATION_QUEUE_NAME = "notification_queue"; // <-- 新增
-    public static final String DEAD_LETTER_QUEUE_NAME = "dead_letter_queue";   // <-- 新增
+    public static final String NOTIFICATION_QUEUE_NAME = "notification_queue"; // <-- New
+    public static final String DEAD_LETTER_QUEUE_NAME = "dead_letter_queue";   // <-- New
 
     @Bean
     public Queue deliveryRequestQueue() {
-        // durable=true 表示队列是持久化的，即使RabbitMQ重启，队列和里面的消息也不会丢失
+        // durable=true means the queue is persistent, even if RabbitMQ restarts, the queue and messages won't be lost
         return new Queue(DELIVERY_QUEUE_NAME, true);
     }
 
-    @Bean // 新增Webhook队列的Bean
+    @Bean // New Webhook queue bean
     public Queue notificationQueue() {
         return new Queue(NOTIFICATION_QUEUE_NAME, true);
     }
 
-    @Bean // 新增死信队列的Bean
+    @Bean // New dead letter queue bean
     public Queue deadLetterQueue() {
         return new Queue(DEAD_LETTER_QUEUE_NAME, true);
     }
 
     /**
-     * 定义一个消息转换器，使用 Jackson 将 Java 对象转换为 JSON 格式。
+     * Define a message converter that uses Jackson to convert Java objects to JSON format.
      * @return a MessageConverter bean
      */
     @Bean
@@ -42,10 +42,10 @@ public class RabbitMQConfig {
     }
 
     /**
-     * 自定义 RabbitTemplate，并为其设置我们刚刚定义好的 JSON 消息转换器。
-     * 这样，每当你使用 rabbitTemplate.convertAndSend() 发送一个对象时，
-     * 它都会被自动转换为 JSON 字符串。
-     * @param connectionFactory Spring Boot 自动配置的连接工厂
+     * Customize RabbitTemplate and set the JSON message converter we just defined.
+     * This way, whenever you use rabbitTemplate.convertAndSend() to send an object,
+     * it will be automatically converted to a JSON string.
+     * @param connectionFactory Spring Boot auto-configured connection factory
      * @return a configured RabbitTemplate bean
      */
     @Bean
