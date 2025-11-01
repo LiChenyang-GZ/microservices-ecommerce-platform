@@ -2,7 +2,6 @@ package comp5348.storeservice.config;
 
 import comp5348.storeservice.model.*;
 import comp5348.storeservice.repository.ProductRepository;
-import comp5348.storeservice.repository.AccountRepository;
 import comp5348.storeservice.repository.WarehouseRepository;
 import comp5348.storeservice.repository.WarehouseProductRepository;
 import org.slf4j.Logger;
@@ -16,7 +15,6 @@ import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 
 @Component
@@ -26,9 +24,6 @@ public class StoreDataInitializer implements CommandLineRunner {
 
     @Autowired
     private ProductRepository productRepository;
-    
-    @Autowired
-    private AccountRepository accountRepository;
 
     @Autowired
     private WarehouseRepository warehouseRepository;
@@ -64,23 +59,6 @@ public class StoreDataInitializer implements CommandLineRunner {
             } else {
                 logger.info("Product exists, skipped: {}", s.name);
             }
-        }
-
-        // Initialize default user: username: customer, password: COMP5348
-        final String defaultEmail = "customer@example.com";
-        if (!accountRepository.findByEmail(defaultEmail).isPresent()) {
-            Account a = new Account();
-            a.setFirstName("John");
-            a.setLastName("Customer");
-            a.setUsername("customer");
-            a.setEmail(defaultEmail);
-            a.setPassword(new BCryptPasswordEncoder().encode("COMP5348"));
-            a.setEmailVerified(true);
-            a.setActive(true);
-            accountRepository.save(a);
-            logger.info("Created default demo user: email={}, password=COMP5348", defaultEmail);
-        } else {
-            logger.info("Default demo user exists: {}", defaultEmail);
         }
 
         // Initialize three warehouses, each product has total inventory of 10, distributed across warehouses

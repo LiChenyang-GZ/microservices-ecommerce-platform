@@ -37,7 +37,7 @@ public class AccountController {
     public ResponseEntity<?> createAccount(@RequestBody CreateAccountRequest request) {
         try {
             AccountDTO accountDTO = accountService.createAccount(
-                    request.firstName, request.lastName, request.email, request.password
+                    request.username, request.email, request.password
             );
             return ResponseEntity.ok(new CreateAccountResponse(true, "Account created successfully, please check your email and complete verification", accountDTO));
         } catch (IllegalArgumentException e) {
@@ -149,8 +149,7 @@ public class AccountController {
 
     // Request and response classes
     public static class CreateAccountRequest {
-        public String firstName;
-        public String lastName;
+        public String username;
         public String email;
         public String password;
     }

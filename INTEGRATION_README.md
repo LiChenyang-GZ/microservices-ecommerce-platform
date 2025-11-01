@@ -26,8 +26,7 @@ npm start
 - **请求体**:
 ```json
 {
-  "firstName": "用户名字",
-  "lastName": "用户姓氏", 
+  "username": "username",
   "email": "user@example.com",
   "password": "password123"
 }

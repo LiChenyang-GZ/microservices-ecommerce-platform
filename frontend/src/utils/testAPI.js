@@ -5,8 +5,7 @@ import { userAPI } from '../services/api';
 
 // Test data
 const testAccountData = {
-  firstName: 'Test',
-  lastName: 'User',
+  username: 'testuser',
   email: 'test@example.com',
   password: 'TestPassword123'
 };

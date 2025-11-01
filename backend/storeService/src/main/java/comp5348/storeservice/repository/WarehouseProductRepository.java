@@ -12,7 +12,7 @@ import java.util.Optional;
 
 public interface WarehouseProductRepository extends JpaRepository<WarehouseProduct, Long> {
 
-    @Query("select wp from WarehouseProduct wp where wp.product.id = :productId and wp.quantity > 0 order by wp.quantity desc")
+    @Query("select wp from WarehouseProduct wp where wp.product.id = :productId and wp.quantity > 0 order by wp.quantity asc")
     List<WarehouseProduct> findByProductIdAndQuantity(@Param("productId") Long productId);
 
     @Query("select sum(wp.quantity) from WarehouseProduct wp where wp.product.id = :productId")

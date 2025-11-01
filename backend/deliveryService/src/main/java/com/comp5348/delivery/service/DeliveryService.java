@@ -30,13 +30,11 @@ public class DeliveryService {
     // 依赖注入：我们需要仓库和RabbitMQ模板
     private final DeliveryRepository deliveryRepository;
     private final RabbitTemplate rabbitTemplate;
-    private final com.comp5348.delivery.adapters.EmailAdapter emailAdapter;
 
     @Autowired
-    public DeliveryService(DeliveryRepository deliveryRepository, RabbitTemplate rabbitTemplate, com.comp5348.delivery.adapters.EmailAdapter emailAdapter) {
+    public DeliveryService(DeliveryRepository deliveryRepository, RabbitTemplate rabbitTemplate) {
         this.deliveryRepository = deliveryRepository;
         this.rabbitTemplate = rabbitTemplate;
-        this.emailAdapter = emailAdapter;
     }
 
     /**
@@ -252,10 +250,8 @@ public class DeliveryService {
         d.setUpdateTime(java.time.LocalDateTime.now());
         Delivery saved = deliveryRepository.save(d);
 
-        // 发送取消邮件
-        try {
-            emailAdapter.sendDeliveryUpdate(saved.getEmail(), saved.getOrderId(), saved.getId(), "CANCELLED");
-        } catch (Exception ignore) {}
+        // Email notifications are now handled by Store Service via webhook notifications
+        // No need to send emails directly from Delivery Service
 
         // 若有通知URL，发Webhook通知到 StoreService，让其进行退款/回滚库存/邮件
         try {

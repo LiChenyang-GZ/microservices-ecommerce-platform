@@ -35,36 +35,20 @@ public class AccountService {
      * Create account (requires email verification)
      */
     @Transactional
-    public AccountDTO createAccount(String firstName, String lastName, String email, String password) {
+    public AccountDTO createAccount(String username, String email, String password) {
         if (accountRepository.findByEmail(email).isPresent()) {
             throw new IllegalArgumentException("Email already exists!");
         }
         
+        // Check if username already exists
+        if (accountRepository.findByUsername(username).isPresent()) {
+            throw new IllegalArgumentException("Username already exists!");
+        }
+        
         // Create Account entity object
         Account account = new Account();
-        account.setFirstName(firstName);
-        account.setLastName(lastName);
+        account.setUsername(username);
         account.setEmail(email);
-        // Username must be unique: prioritize firstName.lastName combination; if missing, use email prefix; if still missing, use user
-        String base = null;
-        String fn = firstName != null ? firstName.trim() : "";
-        String ln = lastName != null ? lastName.trim() : "";
-        if (!fn.isEmpty() || !ln.isEmpty()) {
-            base = (fn + (ln.isEmpty()? "" : "." + ln))
-                    .replaceAll("\\s+", "")
-                    .toLowerCase();
-        }
-        if (base == null || base.isEmpty()) {
-            try { base = email != null ? email.split("@")[0] : null; } catch (Exception ignore) {}
-        }
-        if (base == null || base.isEmpty()) base = "user";
-        String candidate = base;
-        int suffix = 1;
-        while (accountRepository.findByUsername(candidate).isPresent()) {
-            candidate = base + suffix;
-            suffix++;
-        }
-        account.setUsername(candidate);
         String encodedPassword = passwordEncoder.encode(password);
         account.setPassword(encodedPassword);
         account.setEmailVerified(false); // Initial state is unverified
@@ -82,8 +66,7 @@ public class AccountService {
         } catch (Exception ignore) {}
 
         return new AccountDTO(
-                savedAccount.getFirstName(),
-                savedAccount.getLastName(),
+                savedAccount.getUsername(),
                 savedAccount.getEmail(),
                 "********" // Do not return real password
         );

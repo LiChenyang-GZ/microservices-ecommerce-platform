@@ -269,7 +269,7 @@ public class OutboxProcessor {
             // 2. Query user information (logic unchanged)
             Account account = accountRepository.findById(order.getUserId()).orElse(null);
             String email = (account != null) ? account.getEmail() : "customer@example.com";
-            String userName = (account != null) ? account.getFirstName() + " " + account.getLastName() : "Customer";
+            String userName = (account != null && account.getUsername() != null) ? account.getUsername() : "Customer";
 
             // 3. [Modified] Get order product information
             // Since Order is directly associated with Product, getOrderItems() is no longer needed

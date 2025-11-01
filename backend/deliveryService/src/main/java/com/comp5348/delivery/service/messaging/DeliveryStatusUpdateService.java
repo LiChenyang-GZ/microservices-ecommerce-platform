@@ -29,22 +29,19 @@ public class DeliveryStatusUpdateService {
     private final DeliveryRepository deliveryRepository;
     private final RabbitTemplate rabbitTemplate;
     private final PlatformTransactionManager transactionManager;
-    private final com.comp5348.delivery.adapters.EmailAdapter emailAdapter;
     private final Random random = new Random(); // Used to generate random numbers
 
     // Constants for simulating delivery
     private static final int BASE_WAIT_TIME_MS = 10000; // Base wait time: 10 seconds
-    private static final double PACKAGE_LOSS_RATE = 0.05; // 5% package loss rate
+    private static final double PACKAGE_LOSS_RATE = 0.00; // 5% package loss rate
 
     @Autowired
     public DeliveryStatusUpdateService(DeliveryRepository deliveryRepository,
                                        RabbitTemplate rabbitTemplate,
-                                       PlatformTransactionManager transactionManager,
-                                       com.comp5348.delivery.adapters.EmailAdapter emailAdapter) {
+                                       PlatformTransactionManager transactionManager) {
         this.deliveryRepository = deliveryRepository;
         this.rabbitTemplate = rabbitTemplate;
         this.transactionManager = transactionManager;
-        this.emailAdapter = emailAdapter;
     }
 
     // @RabbitListener tells Spring to keep listening to this queue, and call this method when a message arrives!
@@ -107,15 +104,8 @@ public class DeliveryStatusUpdateService {
             transactionManager.commit(status); // !! Manually commit transaction here !!
             logger.info("Delivery ID: {} status updated to -> {}, and saved to database.", deliveryId, delivery.getDeliveryStatus());
 
-            // Send notification email after successful persistence to avoid false notifications due to concurrent cancellation
-            try {
-                DeliveryStatus s = savedDelivery.getDeliveryStatus();
-                if (s == DeliveryStatus.PICKED_UP || s == DeliveryStatus.DELIVERING || s == DeliveryStatus.RECEIVED) {
-                    emailAdapter.sendDeliveryUpdate(savedDelivery.getEmail(), savedDelivery.getOrderId(), savedDelivery.getId(), s.name());
-                }
-            } catch (Exception mailEx) {
-                logger.warn("Failed to send delivery status email: {}", mailEx.getMessage());
-            }
+            // Email notifications are now handled by Store Service via webhook notifications
+            // No need to send emails directly from Delivery Service
 
             // 6. Check if notificationUrl exists, if exists send Webhook notification
             if (savedDelivery.getNotificationUrl() != null && !savedDelivery.getNotificationUrl().isEmpty()) {

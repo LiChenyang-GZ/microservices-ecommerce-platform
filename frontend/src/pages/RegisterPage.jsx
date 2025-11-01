@@ -8,8 +8,7 @@ import './RegisterPage.css';
 const RegisterPage = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
-    firstName: '',
-    lastName: '',
+    username: '',
     email: '',
     password: '',
     confirmPassword: '',
@@ -36,12 +35,8 @@ const RegisterPage = () => {
   const validateForm = () => {
     const newErrors = {};
     
-    if (!formData.firstName.trim()) {
-      newErrors.firstName = 'Please enter your first name';
-    }
-    
-    if (!formData.lastName.trim()) {
-      newErrors.lastName = 'Please enter your last name';
+    if (!formData.username.trim()) {
+      newErrors.username = 'Please enter a username';
     }
     
     if (!formData.email) {
@@ -52,10 +47,6 @@ const RegisterPage = () => {
     
     if (!formData.password) {
       newErrors.password = 'Please enter a password';
-    } else if (formData.password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters';
-    } else if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(formData.password)) {
-      newErrors.password = 'Password must contain at least one uppercase letter, one lowercase letter, and one number';
     }
     
     if (!formData.confirmPassword) {
@@ -85,8 +76,7 @@ const RegisterPage = () => {
     try {
       // 1. Create account
       const accountData = {
-        firstName: formData.firstName,
-        lastName: formData.lastName,
+        username: formData.username,
         email: formData.email,
         password: formData.password
       };
@@ -169,31 +159,17 @@ const RegisterPage = () => {
         </div>
         
         <form className="register-form" onSubmit={handleSubmit}>
-          <div className="name-fields">
-            <Input
-              type="text"
-              name="firstName"
-              label="First Name"
-              value={formData.firstName}
-              onChange={handleChange}
-              placeholder="Enter your first name"
-              error={errors.firstName}
-              disabled={isLoading}
-              required
-            />
-            
-            <Input
-              type="text"
-              name="lastName"
-              label="Last Name"
-              value={formData.lastName}
-              onChange={handleChange}
-              placeholder="Enter your last name"
-              error={errors.lastName}
-              disabled={isLoading}
-              required
-            />
-          </div>
+          <Input
+            type="text"
+            name="username"
+            label="Username"
+            value={formData.username}
+            onChange={handleChange}
+            placeholder="Enter your username"
+            error={errors.username}
+            disabled={isLoading}
+            required
+          />
           
           <Input
             type="email"
