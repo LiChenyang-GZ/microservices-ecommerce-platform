@@ -55,7 +55,7 @@ export default function CheckoutPage() {
       });
       if (resp?.success) {
         alert('Order created successfully!');
-        navigate('/');
+        navigate('/orders');
       } else {
         setError(resp?.message || 'Order creation failed');
       }

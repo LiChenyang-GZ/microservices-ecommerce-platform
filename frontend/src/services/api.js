@@ -363,6 +363,14 @@ export const orderAPI = {
       const response = await api.post(`/store/orders/${orderId}/cancel`);
       return response.data;
     } catch (error) { throw error; }
+  },
+
+  // Retry/Complete payment for an existing unpaid order
+  retryPayment: async (orderId) => {
+    try {
+      const response = await api.post(`/store/orders/${orderId}/retry-payment`);
+      return response.data;
+    } catch (error) { throw error; }
   }
 };
 
@@ -447,7 +455,108 @@ export const paymentAPI = {
       throw error;
     }
   }
-  
+
+};
+
+// Bank service API - using separate axios instance
+const bankApi = axios.create({
+  baseURL: 'http://localhost:8084/api', // Bank service address
+  timeout: 10000,
+  headers: {
+    'Content-Type': 'application/json',
+  },
+});
+
+// Make bankApi use the same request interceptor to attach token
+bankApi.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+    console.log('Bank API request:', config.url);
+    return config;
+  },
+  (error) => {
+    console.error('Bank API request error:', error);
+    return Promise.reject(error);
+  }
+);
+
+// Make bankApi use response interceptor to handle errors
+bankApi.interceptors.response.use(
+  (response) => {
+    console.log('Bank API response:', response.config.url, response.status);
+    return response;
+  },
+  (error) => {
+    console.error('Bank API response error:', error.config?.url, error.response?.status);
+    error.formattedMessage = formatErrorMessage(error);
+
+    if (error.response?.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('userEmail');
+      localStorage.removeItem('userId');
+      localStorage.removeItem('isLoggedIn');
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
+
+    return Promise.reject(error);
+  }
+);
+
+export const bankAPI = {
+  // Get or create my bank account (uses JWT token to identify user)
+  getOrCreateAccount: async () => {
+    try {
+      const response = await bankApi.get('/bank/account/me');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  // Get account balance
+  getBalance: async (accountNumber) => {
+    try {
+      const response = await bankApi.get(`/bank/account/${accountNumber}/balance`);
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  // Add money to account (simulated by transferring from SYSTEM account)
+  addMoney: async (toAccount, amount) => {
+    try {
+      const response = await bankApi.post('/bank/transfer', {
+        fromAccount: 'SYSTEM',
+        toAccount: toAccount,
+        amount: amount,
+        transactionRef: `DEPOSIT-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      });
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  // Transfer money between accounts
+  transfer: async (fromAccount, toAccount, amount) => {
+    try {
+      const response = await bankApi.post('/bank/transfer', {
+        fromAccount,
+        toAccount,
+        amount,
+        transactionRef: `TRANSFER-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+      });
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  }
 };
 
 export default api;

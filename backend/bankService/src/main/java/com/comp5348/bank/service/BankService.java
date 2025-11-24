@@ -206,6 +206,52 @@ public class BankService {
     private String generateAccountNumber() {
         return "ACC-" + System.currentTimeMillis();
     }
+
+    /**
+     * Get or create account by owner email
+     * Handles race condition where multiple requests try to create account simultaneously
+     */
+    public BankAccountCreateResponse getOrCreateAccountByEmail(String ownerEmail) {
+        try {
+            // Try to find existing account first
+            Optional<BankAccount> existingAccount = accountRepository.findByOwnerName(ownerEmail);
+            if (existingAccount.isPresent()) {
+                BankAccount acc = existingAccount.get();
+                logger.info("Found existing bank account for user: {}, accountNumber: {}", ownerEmail, acc.getAccountNumber());
+                return new BankAccountCreateResponse(true, acc.getAccountNumber(), "Account found");
+            }
+
+            // Create new account if not found
+            try {
+                BankAccount acc = new BankAccount();
+                acc.setAccountNumber(generateAccountNumber());
+                acc.setOwnerName(ownerEmail);
+                acc.setBalance(BigDecimal.ZERO);
+                accountRepository.save(acc);
+                logger.info("Created new bank account for user: {}, accountNumber: {}", ownerEmail, acc.getAccountNumber());
+                return new BankAccountCreateResponse(true, acc.getAccountNumber(), "Account created");
+            } catch (Exception createException) {
+                // Handle race condition: if account creation failed due to duplicate key,
+                // it means another thread created it, so try to find it again
+                logger.warn("Account creation failed for {}, trying to find existing account again: {}",
+                    ownerEmail, createException.getMessage());
+
+                Optional<BankAccount> retryAccount = accountRepository.findByOwnerName(ownerEmail);
+                if (retryAccount.isPresent()) {
+                    BankAccount acc = retryAccount.get();
+                    logger.info("Found account after creation conflict for user: {}, accountNumber: {}",
+                        ownerEmail, acc.getAccountNumber());
+                    return new BankAccountCreateResponse(true, acc.getAccountNumber(), "Account found");
+                }
+
+                // If still not found, throw the original exception
+                throw createException;
+            }
+        } catch (Exception e) {
+            logger.error("Get or create account failed for {}: {}", ownerEmail, e.getMessage(), e);
+            return new BankAccountCreateResponse(false, null, "Failed to get or create account: " + e.getMessage());
+        }
+    }
     
     /**
      * Create failed transaction record

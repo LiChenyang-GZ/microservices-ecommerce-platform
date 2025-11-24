@@ -164,6 +164,27 @@ public class BankAdapter {
         }
         return null;
     }
+
+    /**
+     * Get account by owner email (for inter-service communication)
+     * Returns account number if found, null otherwise
+     */
+    public String getAccountByOwnerEmail(String ownerEmail) {
+        String url = bankServiceUrl + "/api/bank/account/by-owner/" + ownerEmail;
+        try {
+            ResponseEntity<java.util.Map> resp = restTemplate.getForEntity(url, java.util.Map.class);
+            if (resp.getStatusCode().is2xxSuccessful() && resp.getBody() != null) {
+                Object acct = resp.getBody().get("accountNumber");
+                if (acct != null) {
+                    logger.info("Found bank account for {}: {}", ownerEmail, acct);
+                    return String.valueOf(acct);
+                }
+            }
+        } catch (Exception e) {
+            logger.warn("Get bank account by email failed for {}: {}", ownerEmail, e.getMessage());
+        }
+        return null;
+    }
 }
 
 

@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 
 import java.util.List;
@@ -83,26 +84,6 @@ public class StoreController {
     }
     
     /**
-     * Cancel order and process refund
-     * PUT /api/store/orders/{id}/cancel-with-refund
-     */
-    @PutMapping("/orders/{id}/cancel-with-refund")
-    public ResponseEntity<OrderResponse> cancelOrderWithRefund(@PathVariable Long id, 
-                                                               @RequestBody(required = false) String reason) {
-        logger.info("PUT /api/store/orders/{}/cancel-with-refund - Cancelling order with refund", id);
-        
-        try {
-            String refundReason = (reason != null && !reason.isEmpty()) ? reason : "Customer requested refund";
-            OrderDTO order = orderProductService.cancelOrderWithRefund(id, refundReason);
-            return ResponseEntity.ok(OrderResponse.success(order, "Order cancelled with refund processed"));
-        } catch (Exception e) {
-            logger.error("Error cancelling order with refund for {}: {}", id, e.getMessage(), e);
-            return ResponseEntity.badRequest()
-                    .body(OrderResponse.error("Failed to cancel order with refund: " + e.getMessage()));
-        }
-    }
-    
-    /**
      * Get product stock information
      * GET /api/store/products/{id}/stock
      */
@@ -140,6 +121,30 @@ public class StoreController {
     }
 
     /**
+     * Retry payment for an existing order with PENDING_PAYMENT status
+     * POST /api/store/orders/{id}/retry-payment
+     */
+    @PostMapping("/orders/{id}/retry-payment")
+    public ResponseEntity<OrderResponse> retryPayment(@PathVariable Long id, HttpServletRequest request) {
+        logger.info("POST /api/store/orders/{}/retry-payment - Retrying payment for order", id);
+
+        String userEmail = (String) request.getAttribute("userEmail");
+        if (userEmail == null || userEmail.isEmpty()) {
+            return ResponseEntity.status(401)
+                    .body(OrderResponse.error("User not authenticated"));
+        }
+
+        try {
+            OrderDTO order = orderProductService.retryOrderPayment(id, userEmail);
+            return ResponseEntity.ok(OrderResponse.success(order, "Payment processed successfully"));
+        } catch (Exception e) {
+            logger.error("Error retrying payment for order {}: {}", id, e.getMessage(), e);
+            return ResponseEntity.badRequest()
+                    .body(OrderResponse.error("Payment failed: " + e.getMessage()));
+        }
+    }
+
+    /**
      * Cancel order (only allowed before delivery pickup)
      * POST /api/store/orders/{id}/cancel
      */
@@ -155,7 +160,7 @@ public class StoreController {
                     .body(OrderResponse.error("Failed to cancel order: " + e.getMessage()));
         }
     }
-    
+
     /**
      * Process payment failure
      * POST /api/store/orders/{id}/payment-failure

@@ -15,9 +15,9 @@ import java.util.Optional;
 public interface OrderRepository extends JpaRepository<Order, Long> {
     
     /**
-     * Find orders by user ID
+     * Find orders by user ID, sorted by creation date descending (newest first)
      */
-    List<Order> findByUserId(Long userId);
+    List<Order> findByUserIdOrderByCreatedAtDesc(Long userId);
     
     /**
      * Find orders by order status

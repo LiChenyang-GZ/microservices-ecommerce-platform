@@ -4,3 +4,29 @@
   min-height: 100vh;
   width: 100%;
 }
+
+/* Back Button Styling */
+.btn-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.75rem 1.5rem;
+  background: linear-gradient(135deg, #4a90e2 0%, #7b68ee 50%, #9370db 100%);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-bottom: 1.5rem;
+}
+
+.btn-back:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 25px rgba(74, 144, 226, 0.4);
+}
+
+.btn-back:active {
+  transform: translateY(0);
+}

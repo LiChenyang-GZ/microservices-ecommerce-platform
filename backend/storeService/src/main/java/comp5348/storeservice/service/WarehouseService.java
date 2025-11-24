@@ -202,6 +202,9 @@ public class WarehouseService {
         List<InventoryTransaction> savedTxs = inventoryTransactionRepository.saveAll(transactionsToCreate);
         List<Long> inventoryTransactionIds = savedTxs.stream().map(InventoryTransaction::getId).collect(Collectors.toList());
 
+        logger.info("Created {} inventory transactions for product {}, orderId {}: {}",
+                inventoryTransactionIds.size(), productId, orderId, inventoryTransactionIds);
+
         // --- Step 3: Prepare and return response ---
         WarehouseDTO responseDTO = new WarehouseDTO();
         responseDTO.setWarehouses(warehouseDTOs);
@@ -213,12 +216,37 @@ public class WarehouseService {
     public boolean unholdProduct(UnholdProductRequest request) {
         List<Long> ids = request.getInventoryTransactionIds();
         if (ids == null || ids.isEmpty()) return false;
+
+        logger.info("Unholding {} inventory transactions: {}", ids.size(), ids);
+
         try {
             List<InventoryTransaction> transactions = inventoryTransactionRepository.findAllById(ids);
+            logger.info("Found {} transactions to unhold", transactions.size());
+
+            int totalReleased = 0;
             for (InventoryTransaction tx : transactions) {
+                // Skip if already released (UNHOLD)
+                if (tx.getType() == InventoryTransactionType.UNHOLD) {
+                    logger.info("Transaction {} already unheld, skipping", tx.getId());
+                    continue;
+                }
+
+                // Only process HOLD transactions
+                if (tx.getType() != InventoryTransactionType.HOLD) {
+                    logger.warn("Transaction {} has unexpected type: {}, skipping", tx.getId(), tx.getType());
+                    continue;
+                }
+
                 Optional<WarehouseProduct> wpOpt = warehouseProductRepository.findByWarehouseAndProduct(tx.getWarehouse(), tx.getProduct());
-                if (!wpOpt.isPresent()) return false;
+                if (!wpOpt.isPresent()) {
+                    logger.error("WarehouseProduct not found for transaction {}", tx.getId());
+                    continue;
+                }
                 WarehouseProduct wp = wpOpt.get();
+
+                logger.info("Releasing {} units for transaction {}, warehouse product {} (current: {})",
+                        tx.getQuantity(), tx.getId(), wp.getId(), wp.getQuantity());
+
                 wp.setQuantity(wp.getQuantity() + tx.getQuantity());
                 wp.setModifyTime(LocalDateTime.now());
                 warehouseProductRepository.save(wp);
@@ -226,9 +254,14 @@ public class WarehouseService {
                 tx.setType(InventoryTransactionType.UNHOLD);
                 tx.setTransactionTime(LocalDateTime.now());
                 inventoryTransactionRepository.save(tx);
+
+                totalReleased += tx.getQuantity();
             }
+
+            logger.info("Total released: {} units", totalReleased);
             return true;
         } catch (Exception e) {
+            logger.error("Error unholding inventory: {}", e.getMessage(), e);
             return false;
         }
     }

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import BackButton from '../components/BackButton';
 import { deliveryAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
+import './DeliveryListPage.css';
 
 function DeliveryListPage() {
     const [deliveries, setDeliveries] = useState([]);
@@ -56,35 +57,84 @@ function DeliveryListPage() {
         }
     }, [isLoggedIn, authLoading, navigate]); // Dependencies include login status
 
+    const getStatusClass = (status) => {
+        const statusLower = status?.toLowerCase();
+        if (statusLower === 'received' || statusLower === 'delivered') return 'status-completed';
+        if (statusLower === 'cancelled' || statusLower === 'canceled' || statusLower === 'lost') return 'status-cancelled';
+        if (statusLower === 'created' || statusLower === 'pending') return 'status-pending';
+        if (statusLower === 'pickup' || statusLower === 'in_transit') return 'status-processing';
+        return 'status-default';
+    };
+
+    const formatDate = (dateString) => {
+        if (!dateString) return 'N/A';
+        const date = new Date(dateString);
+        return date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+    };
+
     if (isLoading) {
-        return <div>Loading your orders...</div>;
+        return <div className="loading-container">Loading your deliveries...</div>;
     }
 
     if (error) {
-        return <div className="error">{error}</div>;
+        return (
+            <div className="delivery-list-container">
+                <BackButton fallback="/" />
+                <div className="error-message">{error}</div>
+            </div>
+        );
     }
 
     return (
-        <div className="container" style={{ paddingBottom: 24 }}>
+        <div className="delivery-list-container">
             <BackButton fallback="/" />
-            <h1>My Deliveries</h1>
+            <h1 className="page-title">My Deliveries</h1>
             {deliveries.length === 0 ? (
-                <p>You currently have no orders in delivery.</p>
+                <div className="empty-state">
+                    <p>You currently have no active deliveries.</p>
+                    <Link to="/products" className="btn btn-primary">
+                        Browse Products
+                    </Link>
+                </div>
             ) : (
-                <ul className="delivery-list" style={{ maxHeight: '70vh', overflowY: 'auto', paddingRight: 8 }}>
+                <div className="deliveries-grid">
                     {deliveries.map(delivery => (
-                        <li key={delivery.id} className="delivery-item">
-                            <div>
-                                <strong>Product:</strong> {delivery.productName}
-                                <br />
-                                <strong>Status:</strong> <span className={`status status-${delivery.deliveryStatus}`}>{delivery.deliveryStatus}</span>
+                        <div key={delivery.id} className="delivery-card">
+                            <div className="delivery-header">
+                                <div className="delivery-info">
+                                    <span className="delivery-id">Delivery #{delivery.id}</span>
+                                    {delivery.creationTime && (
+                                        <span className="delivery-date">{formatDate(delivery.creationTime)}</span>
+                                    )}
+                                </div>
+                                <span className={`delivery-status ${getStatusClass(delivery.deliveryStatus)}`}>
+                                    {delivery.deliveryStatus}
+                                </span>
                             </div>
-                            <Link to={`/delivery/${delivery.id}`} className="btn">
-                                View Details
-                            </Link>
-                        </li>
+                            <div className="delivery-body">
+                                <div className="detail-row">
+                                    <span className="label">Product:</span>
+                                    <span className="value">{delivery.productName || 'N/A'}</span>
+                                </div>
+                                <div className="detail-row">
+                                    <span className="label">Quantity:</span>
+                                    <span className="value">{delivery.quantity || 1}</span>
+                                </div>
+                                {delivery.toAddress && (
+                                    <div className="detail-row">
+                                        <span className="label">Delivery To:</span>
+                                        <span className="value">{delivery.toAddress}</span>
+                                    </div>
+                                )}
+                            </div>
+                            <div className="delivery-footer">
+                                <Link to={`/delivery/${delivery.id}`} className="btn btn-details">
+                                    View Details
+                                </Link>
+                            </div>
+                        </div>
                     ))}
-                </ul>
+                </div>
             )}
         </div>
     );
