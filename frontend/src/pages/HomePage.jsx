@@ -31,19 +31,35 @@ const HomePage = () => {
       
       <div className="home-content">
         <div className="feature-cards">
-          <div className="feature-card" onClick={() => navigate('/deliveries')}>
-            <h3>📦 Delivery Tracking</h3>
-            <p>View package delivery progress</p>
-            <Button onClick={(e) => { e.stopPropagation(); navigate('/deliveries'); }}>
-              View Deliveries
-            </Button>
-          </div>
-          
           <div className="feature-card" onClick={() => navigate('/products')}>
             <h3>🛍️ Product Catalog</h3>
             <p>Browse products and place orders</p>
             <Button onClick={(e) => { e.stopPropagation(); navigate('/products'); }}>
               Shop Now
+            </Button>
+          </div>
+
+          <div className="feature-card" onClick={() => navigate('/orders')}>
+            <h3>📋 My Orders</h3>
+            <p>View your order history and details</p>
+            <Button onClick={(e) => { e.stopPropagation(); navigate('/orders'); }}>
+              View Orders
+            </Button>
+          </div>
+
+          <div className="feature-card" onClick={() => navigate('/add-money')}>
+            <h3>💰 Add Money</h3>
+            <p>Add funds to your bank account</p>
+            <Button onClick={(e) => { e.stopPropagation(); navigate('/add-money'); }}>
+              Manage Balance
+            </Button>
+          </div>
+
+          <div className="feature-card" onClick={() => navigate('/deliveries')}>
+            <h3>📦 Delivery Tracking</h3>
+            <p>Track your package deliveries</p>
+            <Button onClick={(e) => { e.stopPropagation(); navigate('/deliveries'); }}>
+              View Deliveries
             </Button>
           </div>
         </div>

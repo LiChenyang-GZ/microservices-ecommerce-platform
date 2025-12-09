@@ -63,11 +63,11 @@ public class OrderService {
     }
 
     /**
-     * Get orders list by user ID
+     * Get orders list by user ID, sorted by creation date descending (newest first)
      */
     public List<OrderDTO> getOrdersByUserId(Long userId) {
         logger.info("Fetching orders for user: {}", userId);
-        return orderRepository.findByUserId(userId).stream()
+        return orderRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
                 .map(this::convertToDTO)
                 .collect(Collectors.toList());
     }
@@ -203,18 +203,29 @@ public class OrderService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
 
-        if (order.getStatus() == OrderStatus.DELIVERED || order.getStatus() == OrderStatus.CANCELLED) {
+        // Cannot cancel if already shipped, in transit, delivered, or cancelled
+        if (order.getStatus() == OrderStatus.SHIPPED ||
+            order.getStatus() == OrderStatus.IN_TRANSIT ||
+            order.getStatus() == OrderStatus.DELIVERED ||
+            order.getStatus() == OrderStatus.CANCELLED) {
             throw new RuntimeException("Cannot cancel order with status: " + order.getStatus());
         }
 
-        // Try to cancel delivery
-        try {
-            boolean cancelled = deliveryAdapter.cancelByOrderId(String.valueOf(order.getId()));
-            if (!cancelled) {
-                throw new RuntimeException("Cannot cancel after pickup or delivery not found");
+        // Only try to cancel delivery if one exists (order has been paid and delivery created)
+        if (order.getDeliveryId() != null) {
+            try {
+                boolean cancelled = deliveryAdapter.cancelByOrderId(String.valueOf(order.getId()));
+                if (!cancelled) {
+                    throw new RuntimeException("Cannot cancel after pickup - delivery is already in progress");
+                }
+                logger.info("Delivery cancelled successfully for order: {}", orderId);
+            } catch (Exception e) {
+                // If delivery exists but can't be cancelled, stop the entire cancellation
+                logger.error("Cannot cancel order {}: delivery cancellation failed: {}", orderId, e.getMessage());
+                throw new RuntimeException("Cannot cancel order: " + e.getMessage());
             }
-        } catch (Exception e) {
-            logger.warn("Cancel delivery failed, proceeding with order cancellation. Reason: {}", e.getMessage());
+        } else {
+            logger.info("No delivery exists for order: {}, skipping delivery cancellation", orderId);
         }
 
         // Rollback inventory

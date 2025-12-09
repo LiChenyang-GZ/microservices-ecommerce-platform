@@ -12,6 +12,9 @@ import DeliveryDetailPage from './pages/DeliveryDetailPage.jsx';
 import ProductCatalogPage from './pages/ProductCatalogPage.jsx';
 import ProductDetailPage from './pages/ProductDetailPage.jsx';
 import CheckoutPage from './pages/CheckoutPage.jsx';
+import MyOrdersPage from './pages/MyOrdersPage.jsx';
+import OrderDetailPage from './pages/OrderDetailPage.jsx';
+import AddMoneyPage from './pages/AddMoneyPage.jsx';
 import './App.css';
 
 // Protected route component
@@ -83,6 +86,21 @@ function App() {
             <Route path="/delivery/:id" element={
               <ProtectedRoute>
                 <DeliveryDetailPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/orders" element={
+              <ProtectedRoute>
+                <MyOrdersPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/orders/:id" element={
+              <ProtectedRoute>
+                <OrderDetailPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/add-money" element={
+              <ProtectedRoute>
+                <AddMoneyPage />
               </ProtectedRoute>
             } />
           </Routes>

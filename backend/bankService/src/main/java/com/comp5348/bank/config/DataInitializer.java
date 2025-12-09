@@ -22,7 +22,18 @@ public class DataInitializer implements CommandLineRunner {
     @Override
     public void run(String... args) {
         logger.info("Initializing Bank accounts...");
-        
+
+        // SYSTEM Account (for deposits and external transfers)
+        if (!accountRepository.existsByAccountNumber("SYSTEM")) {
+            BankAccount systemAccount = new BankAccount();
+            systemAccount.setAccountNumber("SYSTEM");
+            systemAccount.setBalance(new BigDecimal("999999999.00")); // Very high balance
+            systemAccount.setOwnerName("SYSTEM");
+            systemAccount.setCreatedAt(LocalDateTime.now());
+            accountRepository.save(systemAccount);
+            logger.info("Created SYSTEM Account with balance $999,999,999");
+        }
+
         // Store Account
         if (!accountRepository.existsByAccountNumber("STORE_ACCOUNT_001")) {
             BankAccount storeAccount = new BankAccount();
