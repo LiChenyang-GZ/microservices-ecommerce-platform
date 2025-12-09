@@ -6,12 +6,10 @@ public enum OrderStatus {
     PENDING_PAYMENT("Pending Payment"),
     PAID("Paid"),
     PROCESSING("Processing"),
-    SHIPPED("Shipped"),
+    PICKED_UP("Picked Up"),
     IN_TRANSIT("In Transit"),
     DELIVERED("Delivered"),
     CANCELLED("Cancelled"),
-    REFUNDED("Refunded"),
-    LOST("Package Lost"),
     CANCELLED_SYSTEM("Delivery Service Down");
     private final String description;
     

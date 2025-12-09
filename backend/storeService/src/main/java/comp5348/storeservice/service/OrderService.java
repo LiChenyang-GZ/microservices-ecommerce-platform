@@ -203,8 +203,8 @@ public class OrderService {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
 
-        // Cannot cancel if already shipped, in transit, delivered, or cancelled
-        if (order.getStatus() == OrderStatus.SHIPPED ||
+        // Cannot cancel if already picked up, in transit, delivered, or cancelled
+        if (order.getStatus() == OrderStatus.PICKED_UP ||
             order.getStatus() == OrderStatus.IN_TRANSIT ||
             order.getStatus() == OrderStatus.DELIVERED ||
             order.getStatus() == OrderStatus.CANCELLED) {
@@ -348,7 +348,7 @@ public class OrderService {
         }
         // Note: The strings here need to be agreed upon with your DeliveryService team
         return switch (deliveryStatusStr.toUpperCase()) {
-            case "PICKED_UP" -> OrderStatus.SHIPPED;
+            case "PICKED_UP" -> OrderStatus.PICKED_UP;
             case "DELIVERING" -> OrderStatus.IN_TRANSIT;
             case "RECEIVED", "DELIVERED" -> OrderStatus.DELIVERED;
             // Map both LOST and CANCELLED to order's CANCELLED
@@ -366,8 +366,8 @@ public class OrderService {
                 String email = account.getEmail();
                 if (email != null && !email.isEmpty()) {
                     switch (newStatus) {
-                        case SHIPPED:
-                            // When status changes to SHIPPED, it means package was picked up
+                        case PICKED_UP:
+                            // When status changes to PICKED_UP, it means package was picked up by delivery partner
                             if (order.getDeliveryId() != null) {
                                 emailAdapter.sendOrderPickedUp(email, String.valueOf(order.getId()), order.getDeliveryId());
                             }
