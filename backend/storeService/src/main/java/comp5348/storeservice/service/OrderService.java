@@ -128,13 +128,17 @@ public class OrderService {
         order.setTotalAmount(product.getPrice().multiply(BigDecimal.valueOf(quantity)));
         Order savedOrder = orderRepository.saveAndFlush(order); // Use saveAndFlush to ensure immediate ID acquisition
         Long orderId = savedOrder.getId();
+        logger.info("[ORDER] Order temporary saved with id: {}, status: PENDING_STOCK_HOLD", orderId);
 
         // 2. Call inventory reservation service, passing the real orderId
+        logger.info("[ORDER] Calling warehouseService.getAndUpdateAvailableWarehouse for orderId: {}", orderId);
         var whDTO = warehouseService.getAndUpdateAvailableWarehouse(productId, quantity, orderId);
         if (whDTO == null || whDTO.getInventoryTransactionIds() == null || whDTO.getInventoryTransactionIds().isEmpty()) {
             // If reservation fails, the entire transaction will rollback, and the temporary order saved above will also be revoked
+            logger.error("[ORDER] Failed to hold stock for orderId: {}", orderId);
             throw new RuntimeException("Failed to hold stock, maybe it was taken by another order. Product: " + product.getName());
         }
+        logger.info("[ORDER] Stock hold successful for orderId: {}, txIds: {}", orderId, whDTO.getInventoryTransactionIds());
 
         // 3. Convert transaction ID list to string and update order final status
         String inventoryTxIds = whDTO.getInventoryTransactionIds().stream()
@@ -146,7 +150,7 @@ public class OrderService {
 
         // Save again to update status and transaction IDs
         Order finalOrder = orderRepository.save(savedOrder);
-        logger.info("Order created successfully with id: {}", finalOrder.getId());
+        logger.info("[ORDER] Order finalized with id: {}, status: PLACED, inventoryTxIds: {}", finalOrder.getId(), inventoryTxIds);
 
         // [New] Create and save Outbox message
         try {
@@ -248,11 +252,25 @@ public class OrderService {
         order.setStatus(OrderStatus.CANCELLED);
         Order savedOrder = orderRepository.save(order);
 
-        // Refund
+        // Handle payment cancellation
         try {
-            paymentService.refundPayment(order.getId(), "Order cancelled by user");
+            Optional<Payment> paymentOpt = paymentService.getPaymentByOrderId(order.getId());
+            if (paymentOpt.isPresent()) {
+                Payment payment = paymentOpt.get();
+                
+                if (payment.getStatus() == PaymentStatus.SUCCESS) {
+                    // If payment was successful, process refund
+                    paymentService.refundPayment(order.getId(), "Order cancelled by user");
+                } else if (payment.getStatus() == PaymentStatus.PENDING) {
+                    // If payment is still pending, mark as FAILED (will not be retried)
+                    payment.setStatus(PaymentStatus.FAILED);
+                    payment.setErrorMessage("Order cancelled by user");
+                    paymentService.updatePayment(payment);
+                    logger.info("Payment marked as FAILED due to order cancellation: orderId={}", order.getId());
+                }
+            }
         } catch (Exception e) {
-            logger.warn("Refund skipped or failed for order {}: {}", order.getId(), e.getMessage());
+            logger.warn("Payment cancellation skipped or failed for order {}: {}", order.getId(), e.getMessage());
         }
 
         // Email notification
@@ -303,6 +321,24 @@ public class OrderService {
             order.setStatus(newStatus);
             orderRepository.save(order);
             logger.info("Order status updated to {} for orderId={}", newStatus, orderId);
+
+            // Record OUT transaction when order is DELIVERED or LOST
+            if (newStatus == OrderStatus.DELIVERED || "LOST".equalsIgnoreCase(incomingStatus)) {
+                try {
+                    boolean outRecorded = warehouseService.recordOutTransaction(
+                            order.getProduct().getId(), 
+                            order.getQuantity(), 
+                            orderId
+                    );
+                    if (outRecorded) {
+                        logger.info("OUT transaction recorded for orderId={}, status={}", orderId, newStatus);
+                    } else {
+                        logger.warn("Failed to record OUT transaction for orderId={}", orderId);
+                    }
+                } catch (Exception e) {
+                    logger.error("Error recording OUT transaction for orderId={}: {}", orderId, e.getMessage(), e);
+                }
+            }
 
             // If delivery service reports LOST (we map to CANCELLED), trigger refund
             if ("LOST".equalsIgnoreCase(incomingStatus)) {

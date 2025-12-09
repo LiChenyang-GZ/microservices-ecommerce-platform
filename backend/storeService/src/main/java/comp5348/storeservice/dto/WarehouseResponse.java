@@ -12,6 +12,7 @@ public class WarehouseResponse extends BaseResponse {
     private List<WarehouseDTO> warehouses;
     private List<Long> inventoryTransactionIds;
     private WarehouseDTO response;
+    private Object data;  // Generic data field for other response types like List<InventoryAuditLogDTO>
 
     public WarehouseResponse(Warehouse warehouse, String message, String responseCode) {
         super(message, responseCode);
@@ -37,5 +38,17 @@ public class WarehouseResponse extends BaseResponse {
     public WarehouseResponse(String message, String responseCode) {
         super(message, responseCode);
     }
+    
+    /**
+     * Generic constructor for any data type (including List<InventoryAuditLogDTO>)
+     * Use this when returning non-standard types
+     */
+    public static WarehouseResponse withData(Object data, String message, String responseCode) {
+        WarehouseResponse response = new WarehouseResponse(message, responseCode);
+        response.setData(data);
+        return response;
+    }
 }
+
+
 

@@ -160,6 +160,50 @@ public class WarehouseController {
                 ResponseCode.W10.getMessage(), ResponseCode.W10.getResponseCode());
         return ResponseEntity.ok(response);
     }
+    
+    /**
+     * Get inventory audit logs for an order
+     */
+    @GetMapping("/audit-logs/order/{orderId}")
+    public ResponseEntity<WarehouseResponse> getAuditLogsByOrder(@PathVariable Long orderId) {
+        logger.info("Received request to get audit logs for order: {}", orderId);
+        List<InventoryAuditLogDTO> auditLogs = warehouseService.getAuditLogsByOrderId(orderId);
+        WarehouseResponse response = WarehouseResponse.withData(auditLogs, "Audit logs retrieved successfully", ResponseCode.W7.getResponseCode());
+        return ResponseEntity.ok(response);
+    }
+    
+    /**
+     * Get inventory audit logs for a product
+     */
+    @GetMapping("/audit-logs/product/{productId}")
+    public ResponseEntity<WarehouseResponse> getAuditLogsByProduct(@PathVariable Long productId) {
+        logger.info("Received request to get audit logs for product: {}", productId);
+        List<InventoryAuditLogDTO> auditLogs = warehouseService.getAuditLogsByProductId(productId);
+        WarehouseResponse response = WarehouseResponse.withData(auditLogs, "Audit logs retrieved successfully", ResponseCode.W7.getResponseCode());
+        return ResponseEntity.ok(response);
+    }
+    
+    /**
+     * Get inventory audit logs for a warehouse
+     */
+    @GetMapping("/audit-logs/warehouse/{warehouseId}")
+    public ResponseEntity<WarehouseResponse> getAuditLogsByWarehouse(@PathVariable Long warehouseId) {
+        logger.info("Received request to get audit logs for warehouse: {}", warehouseId);
+        List<InventoryAuditLogDTO> auditLogs = warehouseService.getAuditLogsByWarehouseId(warehouseId);
+        WarehouseResponse response = WarehouseResponse.withData(auditLogs, "Audit logs retrieved successfully", ResponseCode.W7.getResponseCode());
+        return ResponseEntity.ok(response);
+    }
+    
+    /**
+     * Get failed audit logs
+     */
+    @GetMapping("/audit-logs/failed")
+    public ResponseEntity<WarehouseResponse> getFailedAuditLogs() {
+        logger.info("Received request to get failed audit logs");
+        List<InventoryAuditLogDTO> auditLogs = warehouseService.getFailedAuditLogs();
+        WarehouseResponse response = WarehouseResponse.withData(auditLogs, "Failed audit logs retrieved successfully", ResponseCode.W7.getResponseCode());
+        return ResponseEntity.ok(response);
+    }
 }
 
 
