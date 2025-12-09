@@ -38,6 +38,8 @@ public class Payment {
     
     private LocalDateTime updatedAt;
     
+    private LocalDateTime paymentDate;  // 记录支付成功的时间
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();

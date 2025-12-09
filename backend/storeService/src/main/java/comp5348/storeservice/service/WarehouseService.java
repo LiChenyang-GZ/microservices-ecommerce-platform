@@ -2,7 +2,9 @@ package comp5348.storeservice.service;
 
 import comp5348.storeservice.dto.*;
 import comp5348.storeservice.model.*;
+import comp5348.storeservice.repository.InventoryAuditLogRepository;
 import comp5348.storeservice.repository.InventoryTransactionRepository;
+import comp5348.storeservice.repository.ProductRepository;
 import comp5348.storeservice.repository.WarehouseProductRepository;
 import comp5348.storeservice.repository.WarehouseRepository;
 import jakarta.persistence.EntityNotFoundException;
@@ -36,6 +38,12 @@ public class WarehouseService {
 
     @Autowired
     private InventoryTransactionRepository inventoryTransactionRepository;
+    
+    @Autowired
+    private InventoryAuditLogRepository auditLogRepository;
+    
+    @Autowired
+    private ProductRepository productRepository;
 
     @Transactional(readOnly = true)
     public List<WarehouseDTO> getAllWarehouses() {
@@ -158,12 +166,21 @@ public class WarehouseService {
 
     @Transactional // Ensure annotation is present
     public WarehouseDTO getAndUpdateAvailableWarehouse(long productId, int quantity, Long orderId) { // Suggest passing orderId
+        logger.info("[WAREHOUSE] START: getAndUpdateAvailableWarehouse for productId={}, quantity={}, orderId={}", 
+                productId, quantity, orderId);
+        
         List<WarehouseProduct> availableProducts = warehouseProductRepository.findByProductIdAndQuantity(productId);
+        logger.info("[WAREHOUSE] Found {} warehouses with available stock for productId={}", 
+                availableProducts.size(), productId);
 
         // --- Step 1: Pure in-memory calculation and check ---
         int totalAvailable = availableProducts.stream().mapToInt(WarehouseProduct::getQuantity).sum();
+        logger.info("[WAREHOUSE] Total available: {}, Requested: {}", totalAvailable, quantity);
+        
         if (totalAvailable < quantity) {
-            logger.warn("Insufficient stock for product: {}. Required: {}, Available: {}", productId, quantity, totalAvailable);
+            logger.warn("[WAREHOUSE] INSUFFICIENT STOCK for product: {}. Required: {}, Available: {}", 
+                    productId, quantity, totalAvailable);
+            recordAuditLog(productId, null, null, null, quantity, orderId, totalAvailable, totalAvailable, "HOLD", "FAILED", "Insufficient stock");
             return null; // Insufficient stock, return directly
         }
 
@@ -176,33 +193,42 @@ public class WarehouseService {
             if (remainingQuantity <= 0) break;
 
             int quantityToTake = Math.min(wp.getQuantity(), remainingQuantity);
+            int stockBefore = wp.getQuantity();
+            logger.info("[WAREHOUSE] Taking {} units from warehouse {}, current stock before: {}", 
+                    quantityToTake, wp.getWarehouse().getId(), wp.getQuantity());
 
             // Update inventory entity (only in memory)
             wp.setQuantity(wp.getQuantity() - quantityToTake);
+            int stockAfter = wp.getQuantity();
+            logger.info("[WAREHOUSE] Warehouse {} stock after deduction: {}", 
+                    wp.getWarehouse().getId(), wp.getQuantity());
+            
             productsToUpdate.add(wp);
 
             // Create transaction entity (only in memory)
-            InventoryTransaction tx = new InventoryTransaction();
-            tx.setProduct(wp.getProduct());
-            tx.setWarehouse(wp.getWarehouse());
-            tx.setQuantity(quantityToTake);
-            tx.setType(InventoryTransactionType.HOLD);
-            tx.setTransactionTime(LocalDateTime.now());
-            // tx.setOrderId(orderId); // Link to order
+            InventoryTransaction tx = createInventoryTransaction(wp, quantityToTake, InventoryTransactionType.HOLD);
             transactionsToCreate.add(tx);
 
             remainingQuantity -= quantityToTake;
 
             // Prepare return DTO
             warehouseDTOs.add(new WarehouseDTO(wp.getWarehouse()));
+            
+            // Record audit log for this warehouse operation
+            recordAuditLog(wp.getProduct().getId(), wp.getProduct().getName(),
+                    wp.getWarehouse().getId(), wp.getWarehouse().getName(),
+                    quantityToTake, orderId, stockBefore, stockAfter, "HOLD", "SUCCESS", null);
         }
 
         // --- Step 2: Unified database write ---
+        logger.info("[WAREHOUSE] Saving {} warehouse products to database", productsToUpdate.size());
         warehouseProductRepository.saveAll(productsToUpdate);
+        
+        logger.info("[WAREHOUSE] Saving {} inventory transactions to database", transactionsToCreate.size());
         List<InventoryTransaction> savedTxs = inventoryTransactionRepository.saveAll(transactionsToCreate);
         List<Long> inventoryTransactionIds = savedTxs.stream().map(InventoryTransaction::getId).collect(Collectors.toList());
 
-        logger.info("Created {} inventory transactions for product {}, orderId {}: {}",
+        logger.info("[WAREHOUSE] COMPLETED: Created {} inventory transactions for product {}, orderId {}: {}", 
                 inventoryTransactionIds.size(), productId, orderId, inventoryTransactionIds);
 
         // --- Step 3: Prepare and return response ---
@@ -244,10 +270,12 @@ public class WarehouseService {
                 }
                 WarehouseProduct wp = wpOpt.get();
 
+                int stockBefore = wp.getQuantity();
                 logger.info("Releasing {} units for transaction {}, warehouse product {} (current: {})",
                         tx.getQuantity(), tx.getId(), wp.getId(), wp.getQuantity());
 
                 wp.setQuantity(wp.getQuantity() + tx.getQuantity());
+                int stockAfter = wp.getQuantity();
                 wp.setModifyTime(LocalDateTime.now());
                 warehouseProductRepository.save(wp);
 
@@ -256,6 +284,11 @@ public class WarehouseService {
                 inventoryTransactionRepository.save(tx);
 
                 totalReleased += tx.getQuantity();
+                
+                // Record audit log for unhold operation
+                recordAuditLog(tx.getProduct().getId(), tx.getProduct().getName(),
+                        tx.getWarehouse().getId(), tx.getWarehouse().getName(),
+                        tx.getQuantity(), tx.getId(), stockBefore, stockAfter, "UNHOLD", "SUCCESS", null);
             }
 
             logger.info("Total released: {} units", totalReleased);
@@ -264,6 +297,170 @@ public class WarehouseService {
             logger.error("Error unholding inventory: {}", e.getMessage(), e);
             return false;
         }
+    }
+
+    /**
+     * 创建库存交易记录的公共方法
+     * @param wp 仓库产品
+     * @param quantity 数量
+     * @param type 交易类型（HOLD/UNHOLD/OUT/IN）
+     * @return 创建的库存交易对象
+     */
+    private InventoryTransaction createInventoryTransaction(
+            WarehouseProduct wp,
+            int quantity,
+            InventoryTransactionType type) {
+        InventoryTransaction tx = new InventoryTransaction();
+        tx.setProduct(wp.getProduct());
+        tx.setWarehouse(wp.getWarehouse());
+        tx.setQuantity(quantity);
+        tx.setType(type);
+        tx.setTransactionTime(LocalDateTime.now());
+        return tx;
+    }
+
+    /**
+     * Record OUT transaction for delivered or lost orders
+     * This is an audit record to track when inventory officially leaves the system
+     * Uses the same logic as getAndUpdateAvailableWarehouse to distribute across multiple warehouses
+     * @param productId Product ID
+     * @param quantity Quantity that left
+     * @param orderId Order ID for reference
+     * @return true if recording successful, false otherwise
+     */
+    @Transactional
+    public boolean recordOutTransaction(Long productId, int quantity, Long orderId) {
+        logger.info("Recording OUT transaction: productId={}, quantity={}, orderId={}", productId, quantity, orderId);
+        
+        try {
+            // Get product info for audit log (in case of failure)
+            Product product = productRepository.findById(productId).orElse(null);
+            String productName = product != null ? product.getName() : null;
+            
+            // Get all warehouse products for this product (using same logic as hold)
+            List<WarehouseProduct> availableProducts = warehouseProductRepository.findByProductIdAndQuantity(productId);
+            
+            if (availableProducts.isEmpty()) {
+                logger.warn("No warehouse products found for productId={}", productId);
+                recordAuditLog(productId, productName, null, null, quantity, orderId, 0, 0, "OUT", "FAILED", "No warehouse products found");
+                return false;
+            }
+            
+            // Create OUT transaction(s) for audit trail
+            // Distribute quantity across multiple warehouses using same allocation logic
+            int remainingQuantity = quantity;
+            List<InventoryTransaction> transactionsToCreate = new ArrayList<>();
+            int totalRecorded = 0;
+            
+            for (WarehouseProduct wp : availableProducts) {
+                if (remainingQuantity <= 0) break;
+                
+                // Note: we don't modify warehouse stock here, just create audit record
+                // The stock was already deducted during order creation (HOLD phase)
+                int quantityToRecord = Math.min(wp.getQuantity(), remainingQuantity);
+                if (quantityToRecord <= 0) continue;
+                
+                // Use public createInventoryTransaction method
+                InventoryTransaction tx = createInventoryTransaction(wp, quantityToRecord, InventoryTransactionType.OUT);
+                transactionsToCreate.add(tx);
+                
+                remainingQuantity -= quantityToRecord;
+                totalRecorded += quantityToRecord;
+                
+                logger.debug("Recording {} units OUT from warehouse {} for orderId={}", 
+                        quantityToRecord, wp.getWarehouse().getId(), orderId);
+                
+                // Record audit log for this specific warehouse operation
+                recordAuditLog(wp.getProduct().getId(), wp.getProduct().getName(), 
+                        wp.getWarehouse().getId(), wp.getWarehouse().getName(),
+                        quantityToRecord, orderId, wp.getQuantity(), 
+                        wp.getQuantity() - quantityToRecord, "OUT", "SUCCESS", null);
+            }
+            
+            if (transactionsToCreate.isEmpty()) {
+                logger.warn("No OUT transactions created for orderId={}", orderId);
+                recordAuditLog(productId, productName, null, null, quantity, orderId, 0, 0, "OUT", "FAILED", "No quantity to record");
+                return false;
+            }
+            
+            inventoryTransactionRepository.saveAll(transactionsToCreate);
+            logger.info("Created {} OUT transaction(s) for orderId={}, total quantity={}", 
+                    transactionsToCreate.size(), orderId, totalRecorded);
+            
+            return true;
+        } catch (Exception e) {
+            logger.error("Error recording OUT transaction: {}", e.getMessage(), e);
+            
+            // Try to get product info for audit log
+            Product product = productRepository.findById(productId).orElse(null);
+            String productName = product != null ? product.getName() : null;
+            recordAuditLog(productId, productName, null, null, quantity, orderId, 0, 0, "OUT", "FAILED", e.getMessage());
+            return false;
+        }
+    }
+    
+    /**
+     * Record inventory operation to audit log table
+     */
+    private void recordAuditLog(Long productId, String productName, Long warehouseId, String warehouseName,
+                                Integer quantity, Long orderId, Integer stockBefore, Integer stockAfter,
+                                String operationType, String status, String errorMessage) {
+        try {
+            InventoryAuditLog auditLog = new InventoryAuditLog();
+            auditLog.setOperationType(operationType);
+            auditLog.setProductId(productId);
+            auditLog.setProductName(productName);
+            auditLog.setWarehouseId(warehouseId);
+            auditLog.setWarehouseName(warehouseName);
+            auditLog.setQuantity(quantity);
+            auditLog.setOrderId(orderId);
+            auditLog.setStockBefore(stockBefore);
+            auditLog.setStockAfter(stockAfter);
+            auditLog.setOperationTime(LocalDateTime.now());
+            auditLog.setReason("Order processing");
+            auditLog.setStatus(status);
+            auditLog.setErrorMessage(errorMessage);
+            
+            auditLogRepository.save(auditLog);
+        } catch (Exception e) {
+            logger.error("Failed to record audit log: {}", e.getMessage(), e);
+        }
+    }
+    
+    /**
+     * Query audit logs by order ID
+     */
+    @Transactional(readOnly = true)
+    public List<InventoryAuditLogDTO> getAuditLogsByOrderId(Long orderId) {
+        List<InventoryAuditLog> logs = auditLogRepository.findByOrderId(orderId);
+        return logs.stream().map(InventoryAuditLogDTO::new).collect(Collectors.toList());
+    }
+    
+    /**
+     * Query audit logs by product ID
+     */
+    @Transactional(readOnly = true)
+    public List<InventoryAuditLogDTO> getAuditLogsByProductId(Long productId) {
+        List<InventoryAuditLog> logs = auditLogRepository.findByProductId(productId);
+        return logs.stream().map(InventoryAuditLogDTO::new).collect(Collectors.toList());
+    }
+    
+    /**
+     * Query audit logs by warehouse ID
+     */
+    @Transactional(readOnly = true)
+    public List<InventoryAuditLogDTO> getAuditLogsByWarehouseId(Long warehouseId) {
+        List<InventoryAuditLog> logs = auditLogRepository.findByWarehouseId(warehouseId);
+        return logs.stream().map(InventoryAuditLogDTO::new).collect(Collectors.toList());
+    }
+    
+    /**
+     * Query failed audit logs
+     */
+    @Transactional(readOnly = true)
+    public List<InventoryAuditLogDTO> getFailedAuditLogs() {
+        List<InventoryAuditLog> logs = auditLogRepository.findFailedOperations();
+        return logs.stream().map(InventoryAuditLogDTO::new).collect(Collectors.toList());
     }
 }
 

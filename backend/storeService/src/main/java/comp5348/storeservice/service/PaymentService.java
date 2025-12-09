@@ -16,6 +16,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -176,6 +177,7 @@ public class PaymentService {
         
         payment.setStatus(PaymentStatus.SUCCESS);
         payment.setBankTxnId(bankTxnId);
+        payment.setPaymentDate(LocalDateTime.now());  // 记录支付成功的时间
         paymentRepository.save(payment);
         
         // Create payment success event to Outbox (used to trigger delivery)
@@ -185,20 +187,21 @@ public class PaymentService {
     }
     
     /**
-     * Handle payment failure
+     * Handle payment failure - keep status as PENDING for retry, don't release inventory yet
      */
     @Transactional
     public void handlePaymentFailure(Payment payment, String errorMessage) {
-        logger.error("Payment failed: orderId={}, error={}", payment.getOrderId(), errorMessage);
+        logger.error("Payment failed (retry pending): orderId={}, error={}", payment.getOrderId(), errorMessage);
         
-        payment.setStatus(PaymentStatus.FAILED);
+        // Keep status as PENDING - do NOT release inventory yet
+        // Inventory will only be released if order is cancelled by user
+        payment.setStatus(PaymentStatus.PENDING);
         payment.setErrorMessage(errorMessage);
         paymentRepository.save(payment);
         
-        // Create payment failure event to Outbox (used to release inventory and send notification)
-        outboxService.createPaymentFailedEvent(payment.getOrderId(), errorMessage);
-        
-        logger.info("Payment failure event created for orderId={}", payment.getOrderId());
+        // Do NOT create payment failed event here - inventory stays HELD
+        // Only notify user that payment failed, they can retry
+        logger.info("Payment will retry for orderId={}, inventory remains HELD", payment.getOrderId());
     }
     
     /**
@@ -252,6 +255,14 @@ public class PaymentService {
      */
     public Optional<Payment> getPaymentById(Long id) {
         return paymentRepository.findById(id);
+    }
+    
+    /**
+     * Update payment status (for cancellation scenarios)
+     */
+    @Transactional
+    public void updatePayment(Payment payment) {
+        paymentRepository.save(payment);
     }
 }
 
