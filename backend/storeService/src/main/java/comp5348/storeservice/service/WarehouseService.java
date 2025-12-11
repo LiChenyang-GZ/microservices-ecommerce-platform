@@ -49,7 +49,25 @@ public class WarehouseService {
     public List<WarehouseDTO> getAllWarehouses() {
         List<Warehouse> warehouses = warehouseRepository.findAll();
         return warehouses.stream()
-                .map(WarehouseDTO::new)
+                .map(warehouse -> {
+                    WarehouseDTO warehouseDTO = new WarehouseDTO(warehouse);
+                    // Get all warehouse-product relationships for this warehouse
+                    List<WarehouseProduct> warehouseProducts = warehouseProductRepository.findByWarehouseId(warehouse.getId());
+                    // Convert to ProductDTOs with quantity information
+                    List<ProductDTO> productDTOs = warehouseProducts.stream()
+                            .map(wp -> {
+                                ProductDTO productDTO = new ProductDTO();
+                                productDTO.setId(wp.getProduct().getId());
+                                productDTO.setName(wp.getProduct().getName());
+                                productDTO.setPrice(wp.getProduct().getPrice());
+                                productDTO.setDescription(wp.getProduct().getDescription());
+                                productDTO.setStockQuantity(wp.getQuantity());  // Store quantity in stockQuantity field
+                                return productDTO;
+                            })
+                            .collect(Collectors.toList());
+                    warehouseDTO.setProducts(productDTOs);
+                    return warehouseDTO;
+                })
                 .collect(Collectors.toList());
     }
 
@@ -461,6 +479,51 @@ public class WarehouseService {
     public List<InventoryAuditLogDTO> getFailedAuditLogs() {
         List<InventoryAuditLog> logs = auditLogRepository.findFailedOperations();
         return logs.stream().map(InventoryAuditLogDTO::new).collect(Collectors.toList());
+    }
+    
+    /**
+     * Query OUT operation audit logs only (for admin dashboard)
+     * Shows warehouse outbound records when orders are delivered or lost
+     */
+    @Transactional(readOnly = true)
+    public List<InventoryAuditLogDTO> getOutTransactionLogs() {
+        List<InventoryAuditLog> logs = auditLogRepository.findByOperationType("OUT");
+        return logs.stream().map(InventoryAuditLogDTO::new).collect(Collectors.toList());
+    }
+    
+    /**
+     * Query OUT operation audit logs by order ID (for admin dashboard)
+     */
+    @Transactional(readOnly = true)
+    public List<InventoryAuditLogDTO> getOutTransactionLogsByOrderId(Long orderId) {
+        List<InventoryAuditLog> logs = auditLogRepository.findByOrderIdAndOperationType(orderId, "OUT");
+        return logs.stream().map(InventoryAuditLogDTO::new).collect(Collectors.toList());
+    }
+    
+    /**
+     * Query OUT operation audit logs by product ID (for admin dashboard)
+     */
+    @Transactional(readOnly = true)
+    public List<InventoryAuditLogDTO> getOutTransactionLogsByProductId(Long productId) {
+        // Filter OUT operations by product ID
+        List<InventoryAuditLog> allLogs = auditLogRepository.findByProductId(productId);
+        return allLogs.stream()
+                .filter(log -> "OUT".equals(log.getOperationType()))
+                .map(InventoryAuditLogDTO::new)
+                .collect(Collectors.toList());
+    }
+    
+    /**
+     * Query OUT operation audit logs by warehouse ID (for admin dashboard)
+     */
+    @Transactional(readOnly = true)
+    public List<InventoryAuditLogDTO> getOutTransactionLogsByWarehouseId(Long warehouseId) {
+        // Filter OUT operations by warehouse ID
+        List<InventoryAuditLog> allLogs = auditLogRepository.findByWarehouseId(warehouseId);
+        return allLogs.stream()
+                .filter(log -> "OUT".equals(log.getOperationType()))
+                .map(InventoryAuditLogDTO::new)
+                .collect(Collectors.toList());
     }
 }
 

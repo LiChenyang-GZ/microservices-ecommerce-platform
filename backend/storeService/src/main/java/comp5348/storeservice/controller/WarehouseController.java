@@ -204,6 +204,73 @@ public class WarehouseController {
         WarehouseResponse response = WarehouseResponse.withData(auditLogs, "Failed audit logs retrieved successfully", ResponseCode.W7.getResponseCode());
         return ResponseEntity.ok(response);
     }
+    
+    // ============ Admin Dashboard - OUT Transaction Logs ============
+    
+    /**
+     * Admin: Get all OUT transaction logs (warehouse outbound records)
+     * Shows all products that have left the warehouse when orders are delivered/lost
+     */
+    @GetMapping("/admin/out-transactions")
+    public ResponseEntity<WarehouseResponse> getOutTransactions() {
+        logger.info("Received admin request to get OUT transaction logs");
+        List<InventoryAuditLogDTO> outLogs = warehouseService.getOutTransactionLogs();
+        WarehouseResponse response = WarehouseResponse.withData(outLogs, "OUT transaction logs retrieved successfully", ResponseCode.W7.getResponseCode());
+        return ResponseEntity.ok(response);
+    }
+    
+    /**
+     * Admin: Get OUT transaction logs for a specific order
+     * Shows which products left the warehouse for a specific order
+     */
+    @GetMapping("/admin/out-transactions/order/{orderId}")
+    public ResponseEntity<WarehouseResponse> getOutTransactionsByOrder(@PathVariable Long orderId) {
+        logger.info("Received admin request to get OUT transaction logs for order: {}", orderId);
+        List<InventoryAuditLogDTO> outLogs = warehouseService.getOutTransactionLogsByOrderId(orderId);
+        WarehouseResponse response = WarehouseResponse.withData(outLogs, "OUT transaction logs retrieved successfully", ResponseCode.W7.getResponseCode());
+        return ResponseEntity.ok(response);
+    }
+    
+    /**
+     * Admin: Get OUT transaction logs for a specific product
+     * Shows which orders caused this product to leave the warehouse
+     */
+    @GetMapping("/admin/out-transactions/product/{productId}")
+    public ResponseEntity<WarehouseResponse> getOutTransactionsByProduct(@PathVariable Long productId) {
+        logger.info("Received admin request to get OUT transaction logs for product: {}", productId);
+        List<InventoryAuditLogDTO> outLogs = warehouseService.getOutTransactionLogsByProductId(productId);
+        WarehouseResponse response = WarehouseResponse.withData(outLogs, "OUT transaction logs retrieved successfully", ResponseCode.W7.getResponseCode());
+        return ResponseEntity.ok(response);
+    }
+    
+    /**
+     * Admin: Get OUT transaction logs for a specific warehouse
+     * Shows all products that have left a specific warehouse
+     */
+    @GetMapping("/admin/out-transactions/warehouse/{warehouseId}")
+    public ResponseEntity<WarehouseResponse> getOutTransactionsByWarehouse(@PathVariable Long warehouseId) {
+        logger.info("Received admin request to get OUT transaction logs for warehouse: {}", warehouseId);
+        List<InventoryAuditLogDTO> outLogs = warehouseService.getOutTransactionLogsByWarehouseId(warehouseId);
+        WarehouseResponse response = WarehouseResponse.withData(outLogs, "OUT transaction logs retrieved successfully", ResponseCode.W7.getResponseCode());
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Get all OUT transaction logs (public endpoint for admin dashboard)
+     */
+    @GetMapping("/audit-logs/out-transactions")
+    public ResponseEntity<WarehouseResponse> getAllOutTransactions() {
+        logger.info("Received request to get all OUT transaction logs");
+        try {
+            List<InventoryAuditLogDTO> outLogs = warehouseService.getOutTransactionLogs();
+            WarehouseResponse response = WarehouseResponse.withData(outLogs, "OUT transaction logs retrieved successfully", ResponseCode.W7.getResponseCode());
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            logger.error("Error fetching OUT transaction logs: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(WarehouseResponse.withData(null, "Failed to fetch OUT transaction logs: " + e.getMessage(), "500"));
+        }
+    }
 }
 
 
