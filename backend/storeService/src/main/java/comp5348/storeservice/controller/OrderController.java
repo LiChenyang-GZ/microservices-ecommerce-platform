@@ -3,6 +3,7 @@ package comp5348.storeservice.controller;
 import comp5348.storeservice.dto.*;
 import comp5348.storeservice.model.OrderStatus;
 import comp5348.storeservice.service.OrderService;
+import comp5348.storeservice.service.WarehouseService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +22,9 @@ public class OrderController {
     
     @Autowired
     private OrderService orderService;
+    
+    @Autowired
+    private WarehouseService warehouseService;
     
     /**
      * Get all order list
@@ -160,6 +164,28 @@ public class OrderController {
             logger.error("Error cancelling order {}: {}", id, e.getMessage(), e);
             return ResponseEntity.badRequest()
                     .body(OrderResponse.error("Failed to cancel order: " + e.getMessage()));
+        }
+    }
+    
+    // ============ Order Inventory Records ============
+    
+    /**
+     * Get order inventory records (what products left the warehouse)
+     * Shows all outbound inventory transactions for a specific order
+     * 
+     * GET /api/orders/{orderId}/inventory-records
+     */
+    @GetMapping("/{orderId}/inventory-records")
+    public ResponseEntity<OrderResponse> getOrderInventoryRecords(@PathVariable Long orderId) {
+        logger.info("GET /api/orders/{}/inventory-records - Fetching inventory records for order", orderId);
+        
+        try {
+            List<InventoryAuditLogDTO> records = warehouseService.getOutTransactionLogsByOrderId(orderId);
+            return ResponseEntity.ok(OrderResponse.success(records, "Order inventory records retrieved successfully"));
+        } catch (Exception e) {
+            logger.error("Error fetching order inventory records: {}", e.getMessage(), e);
+            return ResponseEntity.internalServerError()
+                    .body(OrderResponse.error("Failed to fetch order inventory records: " + e.getMessage()));
         }
     }
 }

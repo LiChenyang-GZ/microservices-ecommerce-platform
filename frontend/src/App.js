@@ -15,6 +15,7 @@ import CheckoutPage from './pages/CheckoutPage.jsx';
 import MyOrdersPage from './pages/MyOrdersPage.jsx';
 import OrderDetailPage from './pages/OrderDetailPage.jsx';
 import AddMoneyPage from './pages/AddMoneyPage.jsx';
+import AdminDashboard from './pages/admin/AdminDashboard.jsx';
 import './App.css';
 
 // Protected route component
@@ -101,6 +102,16 @@ function App() {
             <Route path="/add-money" element={
               <ProtectedRoute>
                 <AddMoneyPage />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin" element={
+              <ProtectedRoute>
+                <AdminDashboard />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin/:module" element={
+              <ProtectedRoute>
+                <AdminDashboard />
               </ProtectedRoute>
             } />
           </Routes>

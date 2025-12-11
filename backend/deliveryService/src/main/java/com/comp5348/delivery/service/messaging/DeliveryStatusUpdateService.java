@@ -33,7 +33,7 @@ public class DeliveryStatusUpdateService {
 
     // Constants for simulating delivery
     private static final int BASE_WAIT_TIME_MS = 10000; // Base wait time: 10 seconds
-    private static final double PACKAGE_LOSS_RATE = 0.00; // 5% package loss rate
+    private static final double PACKAGE_LOSS_RATE = 1.00; // 5% package loss rate
 
     @Autowired
     public DeliveryStatusUpdateService(DeliveryRepository deliveryRepository,

@@ -1,0 +1,469 @@
+/* Admin Dashboard Main Page */
+.admin-dashboard {
+  min-height: 100vh;
+  background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+  padding: 20px;
+}
+
+.admin-header {
+  text-align: center;
+  margin-bottom: 40px;
+  color: #333;
+}
+
+.admin-header h1 {
+  font-size: 2.5em;
+  font-weight: bold;
+  margin-bottom: 10px;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin: 0;
+}
+
+.admin-header .subtitle {
+  font-size: 1.1em;
+  color: #666;
+  margin: 0;
+}
+
+/* Admin Container */
+.admin-container {
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+/* Module Grid */
+.module-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 25px;
+  margin-top: 30px;
+}
+
+/* Module Cards */
+.module-card {
+  background: white;
+  border-radius: 15px;
+  padding: 30px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+  transition: all 0.3s ease;
+  text-align: center;
+  border: 2px solid transparent;
+}
+
+.module-card:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+  border-color: #667eea;
+}
+
+.card-icon {
+  font-size: 3.5em;
+  margin-bottom: 15px;
+}
+
+.card-title {
+  font-size: 1.4em;
+  font-weight: bold;
+  color: #333;
+  margin: 15px 0;
+}
+
+.card-subtitle {
+  font-size: 0.95em;
+  color: #667eea;
+  font-weight: 600;
+  margin: 10px 0;
+}
+
+.card-description {
+  font-size: 0.9em;
+  color: #666;
+  margin: 15px 0;
+  line-height: 1.5;
+}
+
+.card-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 12px 25px;
+  font-size: 0.95em;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  margin-top: 15px;
+  transition: all 0.3s ease;
+}
+
+.card-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.card-btn:active {
+  transform: scale(0.98);
+}
+
+/* Module View Container */
+.module-view-container {
+  background: white;
+  border-radius: 15px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+/* Module Header Bar */
+.module-header-bar {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 20px 30px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.module-header-bar h2 {
+  margin: 0;
+  font-size: 1.8em;
+  flex-grow: 1;
+}
+
+/* Back Button - With Gradient */
+.back-btn {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0.1) 100%);
+  color: white;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  padding: 10px 20px;
+  font-size: 1em;
+  font-weight: 600;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.back-btn:hover {
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.4) 0%, rgba(255, 255, 255, 0.2) 100%);
+  border-color: white;
+  transform: translateX(-3px);
+}
+
+.back-btn:active {
+  transform: translateX(-1px);
+}
+
+/* Module View */
+.module-view {
+  padding: 30px;
+}
+
+/* Search Form */
+.search-form {
+  background: linear-gradient(135deg, #f5f7fa 0%, #e9ecef 100%);
+  padding: 20px;
+  border-radius: 10px;
+  margin-bottom: 25px;
+  display: flex;
+  gap: 15px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  min-width: 200px;
+}
+
+.form-group label {
+  font-weight: 600;
+  color: #333;
+  font-size: 0.95em;
+}
+
+.input-field {
+  padding: 12px 15px;
+  border: 2px solid #ddd;
+  border-radius: 8px;
+  font-size: 0.95em;
+  transition: all 0.3s ease;
+  background: white;
+  color: #333;
+}
+
+.input-field:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 8px rgba(102, 126, 234, 0.2);
+  background: #f9fbff;
+}
+
+.input-field::placeholder {
+  color: #999;
+}
+
+/* Search Buttons */
+.search-btn,
+.clear-btn {
+  padding: 12px 25px;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.95em;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  white-space: nowrap;
+}
+
+.search-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.search-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.search-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.clear-btn {
+  background: #e0e0e0;
+  color: #333;
+  border: 2px solid #ccc;
+}
+
+.clear-btn:hover:not(:disabled) {
+  background: #d0d0d0;
+  border-color: #999;
+}
+
+.clear-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Records Info */
+.records-info {
+  background: linear-gradient(135deg, #e0eaff 0%, #f0f4ff 100%);
+  padding: 15px 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border-left: 4px solid #667eea;
+}
+
+.records-info p {
+  margin: 0;
+  color: #333;
+  font-weight: 600;
+}
+
+/* Records Table Wrapper */
+.records-table-wrapper {
+  overflow-x: auto;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+}
+
+/* Records Table */
+.records-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+}
+
+.records-table thead {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.records-table thead tr th {
+  padding: 15px;
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.95em;
+  border-bottom: 3px solid #5568d3;
+}
+
+.records-table tbody tr {
+  border-bottom: 1px solid #eee;
+  transition: background-color 0.3s ease;
+}
+
+.records-table tbody tr:hover {
+  background-color: #f8f9ff;
+}
+
+.records-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.records-table tbody td {
+  padding: 15px;
+  color: #333;
+  font-size: 0.95em;
+}
+
+/* Status Badge */
+.status-badge {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.85em;
+  font-weight: 600;
+  text-align: center;
+  min-width: 60px;
+}
+
+.status-badge.status-success {
+  background: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.status-badge.status-failed {
+  background: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
+.operation-badge {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 0.85em;
+  font-weight: 600;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+/* Loading State */
+.loading-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #666;
+  font-size: 1.1em;
+}
+
+.loading-state p {
+  margin: 0;
+  animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 60px 20px;
+  color: #999;
+  font-size: 1em;
+  background: #f9f9f9;
+  border-radius: 10px;
+}
+
+.empty-state p {
+  margin: 0;
+}
+
+/* Error Message */
+.error-message {
+  background: #f8d7da;
+  color: #721c24;
+  padding: 15px 20px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border-left: 4px solid #f5c6cb;
+  border: 1px solid #f5c6cb;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .admin-header h1 {
+    font-size: 1.8em;
+  }
+
+  .module-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .module-header-bar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 15px;
+  }
+
+  .module-header-bar h2 {
+    margin-bottom: 5px;
+  }
+
+  .search-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .form-group {
+    min-width: 100%;
+  }
+
+  .search-btn,
+  .clear-btn {
+    width: 100%;
+  }
+
+  .records-table {
+    font-size: 0.85em;
+  }
+
+  .records-table thead tr th,
+  .records-table tbody td {
+    padding: 10px;
+  }
+}
+
+@media (max-width: 480px) {
+  .admin-dashboard {
+    padding: 10px;
+  }
+
+  .admin-header h1 {
+    font-size: 1.4em;
+  }
+
+  .module-view {
+    padding: 15px;
+  }
+
+  .search-form {
+    padding: 15px;
+  }
+
+  .card-icon {
+    font-size: 2.5em;
+  }
+
+  .records-table {
+    font-size: 0.75em;
+  }
+
+  .records-table thead tr th,
+  .records-table tbody td {
+    padding: 8px;
+  }
+}

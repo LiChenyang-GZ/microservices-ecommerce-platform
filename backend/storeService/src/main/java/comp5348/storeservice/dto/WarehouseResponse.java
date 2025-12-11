@@ -9,6 +9,7 @@ import java.util.List;
 @Data
 @EqualsAndHashCode(callSuper = true)
 public class WarehouseResponse extends BaseResponse {
+    private boolean success;
     private List<WarehouseDTO> warehouses;
     private List<Long> inventoryTransactionIds;
     private WarehouseDTO response;
@@ -16,6 +17,7 @@ public class WarehouseResponse extends BaseResponse {
 
     public WarehouseResponse(Warehouse warehouse, String message, String responseCode) {
         super(message, responseCode);
+        this.success = true;
         if (warehouse != null) {
             this.response = new WarehouseDTO(warehouse);
         }
@@ -23,6 +25,7 @@ public class WarehouseResponse extends BaseResponse {
 
     public WarehouseResponse(List<WarehouseDTO> warehouses, String message, String responseCode) {
         super(message, responseCode);
+        this.success = true;
         if (warehouses != null) {
             this.warehouses = warehouses;
         }
@@ -30,6 +33,7 @@ public class WarehouseResponse extends BaseResponse {
 
     public WarehouseResponse(WarehouseDTO warehouse, String message, String responseCode) {
         super(message, responseCode);
+        this.success = true;
         if (warehouse != null) {
             this.response = warehouse;
         }
@@ -37,6 +41,7 @@ public class WarehouseResponse extends BaseResponse {
 
     public WarehouseResponse(String message, String responseCode) {
         super(message, responseCode);
+        this.success = true;
     }
     
     /**
@@ -46,6 +51,7 @@ public class WarehouseResponse extends BaseResponse {
     public static WarehouseResponse withData(Object data, String message, String responseCode) {
         WarehouseResponse response = new WarehouseResponse(message, responseCode);
         response.setData(data);
+        response.setSuccess(true);
         return response;
     }
 }
