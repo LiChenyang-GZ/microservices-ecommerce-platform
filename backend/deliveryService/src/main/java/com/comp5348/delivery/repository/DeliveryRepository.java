@@ -16,6 +16,12 @@ public interface DeliveryRepository extends JpaRepository<Delivery, Long> {
     List<Delivery> findByEmail(String email);
 
     /**
+     * Find all delivery tasks related to an email address ordered by ID descending.
+     * Useful for showing newest deliveries first.
+     */
+    List<Delivery> findByEmailOrderByIdDesc(String email);
+
+    /**
      * Find delivery by order ID
      */
     java.util.Optional<Delivery> findByOrderId(String orderId);

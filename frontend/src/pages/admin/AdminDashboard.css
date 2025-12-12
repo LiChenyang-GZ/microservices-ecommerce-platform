@@ -113,7 +113,8 @@
   background: white;
   border-radius: 15px;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
-  overflow: hidden;
+  /* Allow vertical scrolling for long module content */
+  overflow: auto;
 }
 
 /* Module Header Bar */

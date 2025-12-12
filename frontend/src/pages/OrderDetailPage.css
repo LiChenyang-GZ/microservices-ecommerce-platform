@@ -135,6 +135,26 @@
     color: #555;
 }
 
+.product-link {
+    color: #007bff;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.product-link:hover {
+    text-decoration: underline;
+}
+
+.delivery-link {
+    color: #17a2b8;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.delivery-link:hover {
+    text-decoration: underline;
+}
+
 .items-table tr:hover {
     background-color: #f8f9fa;
 }

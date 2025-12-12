@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import BackButton from '../components/BackButton';
 import { orderAPI, paymentAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
@@ -26,6 +26,7 @@ function OrderDetailPage() {
                 orderId: response.order?.id,
                 orderDate: response.order?.createdAt,
                 orderStatus: response.order?.status,
+                deliveryId: response.order?.deliveryId,
                 totalAmount: response.order?.totalAmount,
                 items: response.order ? [{
                     productId: response.order.productId,
@@ -172,16 +173,22 @@ function OrderDetailPage() {
 
     // Determine if refund is available - hide when in delivery or already cancelled
     // Note: Cancel button already handles refunds, so refund button is only for special cases
+    const normalizedOrderStatus = order?.orderStatus?.toUpperCase() || '';
+    const isCancelledStatus = normalizedOrderStatus.includes('CANCELLED');
+
     const canRefund = order && order.payment &&
         order.payment.status &&
         order.payment.status.toUpperCase() === 'SUCCESS' &&
         order.orderStatus &&
-        !['CANCELLED', 'CANCELED', 'REFUNDED', 'SHIPPED', 'IN_TRANSIT', 'DELIVERING', 'DELIVERED'].includes(order.orderStatus.toUpperCase());
+        !['CANCELLED', 'CANCELED', 'REFUNDED', 'SHIPPED', 'IN_TRANSIT', 'DELIVERING', 'DELIVERED'].includes(normalizedOrderStatus);
 
-    // Determine if payment is needed (pending payment or failed payment)
-    const needsPayment = order && order.orderStatus &&
-        (order.orderStatus.toUpperCase() === 'PENDING_PAYMENT' ||
-         (order.payment && ['FAILED', 'PENDING'].includes(order.payment.status.toUpperCase())));
+    const paymentStatusNormalized = order?.payment?.status?.toUpperCase() || '';
+
+    // Determine if payment is needed (pending payment or failed/pending payment) but hide if already cancelled by system
+    const needsPayment = order && !isCancelledStatus && (
+        normalizedOrderStatus === 'PENDING_PAYMENT' ||
+        (order.payment && ['FAILED', 'PENDING'].includes(paymentStatusNormalized))
+    );
 
     if (isLoading) {
         return <div className="loading-container">Loading order details...</div>;
@@ -250,7 +257,13 @@ function OrderDetailPage() {
                             <tbody>
                                 {order.items.map((item, index) => (
                                     <tr key={index}>
-                                        <td>{item.productName || `Product ID: ${item.productId}`}</td>
+                                            <td>{item.productId ? (
+                                                <Link to={`/products/${item.productId}`} className="product-link">
+                                                    {item.productName || `Product #${item.productId}`}
+                                                </Link>
+                                            ) : (
+                                                item.productName || `Product ID: ${item.productId}`
+                                            )}</td>
                                         <td>{item.quantity}</td>
                                         <td>{formatPrice(item.unitPrice)}</td>
                                         <td>{formatPrice(item.quantity * item.unitPrice)}</td>
@@ -285,6 +298,20 @@ function OrderDetailPage() {
                         <div className="info-item">
                             <span className="label">Payment Date:</span>
                             <span className="value">{formatDate(order.payment.paymentDate)}</span>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {order.deliveryId && (
+                <div className="detail-section">
+                    <h2 className="section-title">Delivery Information</h2>
+                    <div className="info-grid">
+                        <div className="info-item">
+                            <span className="label">Delivery Task</span>
+                            <Link to={`/delivery/${order.deliveryId}`} className="value delivery-link">
+                                View delivery #{order.deliveryId}
+                            </Link>
                         </div>
                     </div>
                 </div>

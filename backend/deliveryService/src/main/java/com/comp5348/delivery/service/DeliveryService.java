@@ -227,12 +227,13 @@ public class DeliveryService {
      */
     @Transactional(readOnly = true)
     public List<DeliveryOrderDTO> getAllDeliveryOrders(String email) {
-        List<Delivery> deliveries = deliveryRepository.findByEmail(email);
+        // Fetch deliveries ordered by ID descending so newest deliveries appear first
+        List<Delivery> deliveries = deliveryRepository.findByEmailOrderByIdDesc(email);
 
-        // Use Java Stream API to convert entity list to DTO list
+        // Convert entity list to DTO list
         return deliveries.stream()
-                .map(DeliveryOrderDTO::new)
-                .collect(Collectors.toList());
+            .map(DeliveryOrderDTO::new)
+            .collect(Collectors.toList());
     }
 
     /**
