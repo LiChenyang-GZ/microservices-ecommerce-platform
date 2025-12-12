@@ -24,4 +24,5 @@ public class OrderDTO {
     private Integer quantity;
     private BigDecimal unitPrice;
     private BigDecimal totalPrice;
+    private Long deliveryId;
 }

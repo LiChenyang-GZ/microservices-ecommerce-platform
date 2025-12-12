@@ -452,6 +452,8 @@ public class OrderService {
             dto.setProductName(order.getProduct().getName());
         }
 
+        dto.setDeliveryId(order.getDeliveryId());
+
         return dto;
     }
 }
