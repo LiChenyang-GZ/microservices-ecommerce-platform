@@ -59,6 +59,9 @@ public class Delivery {
     @Column(nullable = true) // Notification URL can be optional, so nullable = true is safer
     private String notificationUrl;
 
+    @Column(nullable = false)
+    private int retryCount = 0; // Track failed processing attempts
+
     public Delivery(DeliveryRequest requestEntity) {
         this.deliveryStatus = DeliveryStatus.CREATED;
         this.orderId = requestEntity.getOrderId();
@@ -71,6 +74,7 @@ public class Delivery {
         this.creationTime = LocalDateTime.now();
         this.updateTime = LocalDateTime.now();
         this.notificationUrl = requestEntity.getNotificationUrl();
+        this.retryCount = 0; // Initialize retry count to 0
     }
 
 }

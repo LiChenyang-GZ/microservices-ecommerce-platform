@@ -333,6 +333,33 @@ export const deliveryAPI = {
   cancelDeliveryById: (id) => {
     return deliveryApi.post(`/deliveries/${id}/cancel`);
   },
+
+  /**
+   * Fetch delivery-specific DLQ alerts
+   * @returns Promise resolving to alert list
+   */
+  getDeliveryDlqAlerts: async () => {
+    const response = await deliveryApi.get('/admin/dlq/delivery');
+    return response.data;
+  },
+
+  /**
+   * Resolve a delivery DLQ alert
+   * @param {number|string} alertId
+   */
+  resolveDeliveryDlqAlert: async (alertId) => {
+    const response = await deliveryApi.post(`/admin/dlq/delivery/${alertId}/resolve`);
+    return response.data;
+  },
+
+  /**
+   * Requeue a delivery task that raised a DLQ alert
+   * @param {number|string} alertId
+   */
+  requeueDeliveryDlqAlert: async (alertId) => {
+    const response = await deliveryApi.post(`/admin/dlq/delivery/${alertId}/requeue`);
+    return response.data;
+  },
 }
 // Order related API
 export const orderAPI = {
