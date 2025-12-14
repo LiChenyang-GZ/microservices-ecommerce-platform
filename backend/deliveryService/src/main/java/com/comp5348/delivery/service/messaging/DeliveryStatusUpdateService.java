@@ -34,6 +34,7 @@ public class DeliveryStatusUpdateService {
     // Constants for simulating delivery
     private static final int BASE_WAIT_TIME_MS = 10000; // Base wait time: 10 seconds
     private static final double PACKAGE_LOSS_RATE = 0.00; // 5% package loss rate
+    private static final int MAX_DELIVERY_RETRIES = 5; // Maximum retry attempts before DLQ
 
     @Autowired
     public DeliveryStatusUpdateService(DeliveryRepository deliveryRepository,
@@ -131,6 +132,44 @@ public class DeliveryStatusUpdateService {
             if (!status.isCompleted()) {
                 transactionManager.rollback(status); // Rollback transaction
             }
+        } catch (Exception e) {
+            // Handle all other exceptions with retry logic
+            logger.error("[Delivery Processing Error] Failed to process delivery ID: {}. Error: {}", deliveryId, e.getMessage());
+            
+            if (!status.isCompleted()) {
+                transactionManager.rollback(status);
+            }
+            
+            // Try to retry before giving up and entering DLQ
+            try {
+                Delivery delivery = deliveryRepository.findById(deliveryId).orElse(null);
+                if (delivery != null) {
+                    int currentRetries = delivery.getRetryCount();
+                    
+                    if (currentRetries < MAX_DELIVERY_RETRIES) {
+                        // Increment retry count and requeue
+                        delivery.setRetryCount(currentRetries + 1);
+                        delivery.setUpdateTime(LocalDateTime.now());
+                        deliveryRepository.saveAndFlush(delivery);
+                        
+                        logger.warn("[Delivery Retry] Requeuing delivery ID: {} for retry {}/{}", 
+                                deliveryId, currentRetries + 1, MAX_DELIVERY_RETRIES);
+                        
+                        // Put message back into queue for retry
+                        rabbitTemplate.convertAndSend(RabbitMQConfig.DELIVERY_QUEUE_NAME, deliveryId);
+                        return; // Don't rethrow, message will be retried
+                    } else {
+                        // Max retries exceeded, allow message to enter DLQ
+                        logger.error("[Delivery Max Retries Exceeded] Delivery ID: {} has exceeded maximum retry attempts ({}). Entering DLQ.",
+                                deliveryId, MAX_DELIVERY_RETRIES);
+                    }
+                }
+            } catch (Exception retryException) {
+                logger.error("[Retry Logic Error] Failed to handle retry for delivery ID: {}", deliveryId, retryException);
+            }
+            
+            // If retries exceeded or retry logic failed, rethrow to enter DLQ
+            throw e;
         }
 
     }

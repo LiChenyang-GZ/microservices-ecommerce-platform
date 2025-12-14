@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import adminService from '../../services/adminService';
+import { deliveryAPI } from '../../services/api';
 import './AdminDashboard.css';
 
 const AdminDashboard = () => {
@@ -35,6 +36,13 @@ const AdminDashboard = () => {
       subtitle: 'Transaction History',
       icon: '📊',
       description: 'View all inventory transactions'
+    },
+    {
+      id: 'delivery-dlq',
+      title: 'Delivery DLQ Alerts',
+      subtitle: 'Dead-letter queue monitoring',
+      icon: '🚨',
+      description: 'Inspect and resolve delivery tasks that landed in the DLQ'
     }
   ];
 
@@ -91,6 +99,7 @@ const ModuleView = ({ moduleConfig, onBack }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filterValue, setFilterValue] = useState('');
+  const [actionStatuses, setActionStatuses] = useState({});
 
   useEffect(() => {
     loadData();
@@ -101,7 +110,7 @@ const ModuleView = ({ moduleConfig, onBack }) => {
     setError('');
     try {
       let response;
-      
+
       switch(moduleConfig.id) {
         case 'order':
           response = await adminService.getAllOrders();
@@ -115,48 +124,68 @@ const ModuleView = ({ moduleConfig, onBack }) => {
         case 'audit':
           response = await adminService.getAllOutTransactions();
           break;
+        case 'delivery-dlq':
+          response = await deliveryAPI.getDeliveryDlqAlerts();
+          break;
         default:
           throw new Error('Unknown module');
       }
 
-      if (!response) {
-        setError('No response from server');
-        return;
+      const records = normalizeRecords(response);
+      if (!records) {
+        throw new Error(response?.message || 'No data available');
       }
 
-      // Extract data based on response structure
-      let extractedData = null;
-      
-      // Try different data field names depending on response type
-      if (response.data) {
-        extractedData = response.data;
-      } else if (response.orders) {
-        extractedData = response.orders;
-      } else if (response.products) {
-        extractedData = response.products;
-      } else if (response.warehouses) {
-        extractedData = response.warehouses;
-      } else {
-        setError(response?.message || response?.result?.message || 'No data available');
-        return;
-      }
-
-      if (Array.isArray(extractedData) && extractedData.length > 0) {
-        setData(extractedData);
-        setFilteredData(extractedData);
-      } else if (Array.isArray(extractedData) && extractedData.length === 0) {
+      if (records.length === 0) {
         setData([]);
         setFilteredData([]);
         setError('No records found');
-      } else {
-        setError(response?.message || 'Failed to load data');
+        return;
       }
+
+      setData(records);
+      setFilteredData(records);
     } catch (err) {
       console.error('Error loading data:', err);
-      setError(`Failed to load data: ${err.message}`);
+      setError(err?.formattedMessage || err?.message || 'Failed to load data');
+      setData([]);
+      setFilteredData([]);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDeliveryAction = async (alertId, actionType) => {
+    setError('');
+    const key = `${actionType}-${alertId}`;
+    setActionStatuses(prev => ({ ...prev, [key]: true }));
+    try {
+      const result = actionType === 'resolve'
+        ? await deliveryAPI.resolveDeliveryDlqAlert(alertId)
+        : await deliveryAPI.requeueDeliveryDlqAlert(alertId);
+      if (result) {
+        updateAlertRecord(result);
+      }
+    } catch (err) {
+      console.error('Error performing DLQ action:', err);
+      setError(err?.formattedMessage || err?.message || 'Failed to perform DLQ action');
+    } finally {
+      setActionStatuses(prev => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+    }
+  };
+
+  const updateAlertRecord = (updated) => {
+    if (!updated || typeof updated.id === 'undefined') return;
+    setData(prev => prev.map(alert => alert.id === updated.id ? updated : alert));
+    setFilteredData(prev => prev.map(alert => alert.id === updated.id ? updated : alert));
+  };
+
+  const isActionLoading = (alertId, actionType) => {
+    return !!actionStatuses[`${actionType}-${alertId}`];
   };
 
   const handleFilter = (e) => {
@@ -196,6 +225,16 @@ const ModuleView = ({ moduleConfig, onBack }) => {
         return <WarehouseModuleContent data={filteredData} />;
       case 'audit':
         return <AuditModuleContent data={filteredData} formatDate={formatDate} />;
+      case 'delivery-dlq':
+        return (
+          <DeliveryDLQModuleContent
+            alerts={filteredData}
+            onResolve={(id) => handleDeliveryAction(id, 'resolve')}
+            onRequeue={(id) => handleDeliveryAction(id, 'requeue')}
+            isActionLoading={isActionLoading}
+            formatDate={formatDate}
+          />
+        );
       default:
         return null;
     }
@@ -258,6 +297,19 @@ const ModuleView = ({ moduleConfig, onBack }) => {
       </div>
     </div>
   );
+};
+
+const normalizeRecords = (payload) => {
+  if (!payload) return null;
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.data)) return payload.data;
+  const candidates = ['orders', 'order', 'products', 'warehouses', 'transactions', 'alerts', 'records', 'items'];
+  for (const field of candidates) {
+    if (Array.isArray(payload[field])) {
+      return payload[field];
+    }
+  }
+  return null;
 };
 
 // Order Module Content
@@ -439,6 +491,145 @@ const AuditModuleContent = ({ data, formatDate }) => {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+};
+
+const DeliveryDLQModuleContent = ({ alerts = [], onResolve, onRequeue, isActionLoading, formatDate }) => {
+  const normalizedAlerts = Array.isArray(alerts) ? alerts : [];
+  const [showResolved, setShowResolved] = useState(false);
+  const [severityFilter, setSeverityFilter] = useState('all');
+
+  const severityLevels = React.useMemo(() => {
+    const set = new Set();
+    normalizedAlerts.forEach(alert => {
+      const label = (alert.severity || 'unknown').toLowerCase();
+      set.add(label);
+    });
+    return ['all', ...Array.from(set).sort()];
+  }, [normalizedAlerts]);
+
+  const visibleAlerts = React.useMemo(() => {
+    const filterSeverity = severityFilter || 'all';
+    return normalizedAlerts
+      .filter(alert => showResolved || !alert.resolved)
+      .filter(alert => filterSeverity === 'all' || (alert.severity || 'unknown').toLowerCase() === filterSeverity);
+  }, [normalizedAlerts, showResolved, severityFilter]);
+
+  const unresolvedCount = normalizedAlerts.filter(alert => !alert.resolved).length;
+  const resolvedCount = normalizedAlerts.filter(alert => alert.resolved).length;
+  const totalCount = normalizedAlerts.length;
+
+  return (
+    <div className="dlq-panel">
+      <div className="dlq-toolbar">
+        <div className="dlq-summary-grid">
+          <div className="dlq-summary-card total">
+            <p>Total alerts</p>
+            <strong>{totalCount}</strong>
+          </div>
+          <div className="dlq-summary-card pending">
+            <p>Unresolved</p>
+            <strong>{unresolvedCount}</strong>
+          </div>
+          <div className="dlq-summary-card resolved">
+            <p>Resolved</p>
+            <strong>{resolvedCount}</strong>
+          </div>
+        </div>
+        <div className="dlq-controls">
+          <label className="dlq-filter-label">
+            Severity
+            <select value={severityFilter} onChange={(e) => setSeverityFilter(e.target.value)}>
+              {severityLevels.map(level => (
+                <option key={level} value={level}>
+                  {level === 'all' ? 'All severities' : level.toUpperCase()}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="dlq-toggle-label">
+            <input
+              type="checkbox"
+              checked={showResolved}
+              onChange={(e) => setShowResolved(e.target.checked)}
+            />
+            Show resolved
+          </label>
+        </div>
+      </div>
+
+      {visibleAlerts.length === 0 ? (
+        <div className="empty-state">
+          <p>{totalCount === 0 ? 'No DLQ alerts have been recorded yet.' : 'No alerts match the current filters.'}</p>
+        </div>
+      ) : (
+        <div className="records-table-wrapper dlq-records-table">
+          <table className="records-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Delivery ID</th>
+                <th>Severity</th>
+                <th>Reason</th>
+                <th>Alerted At</th>
+                <th>Resolved At</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visibleAlerts.map(alert => {
+                const severityKey = (alert.severity || 'unknown').toLowerCase();
+                const reasonPreview = alert.reason ? (alert.reason.length > 90 ? `${alert.reason.slice(0, 90)}…` : alert.reason) : 'No reason provided';
+                const resolving = isActionLoading(alert.id, 'resolve');
+                const requeueing = isActionLoading(alert.id, 'requeue');
+                return (
+                  <tr key={alert.id} className={alert.resolved ? 'dlq-record-row resolved' : ''}>
+                    <td>{alert.id}</td>
+                    <td>{alert.deliveryId}</td>
+                    <td>
+                      <span className={`dlq-severity-badge severity-${severityKey}`}>
+                        {(alert.severity || 'UNKNOWN').toUpperCase()}
+                      </span>
+                    </td>
+                    <td>
+                      <span className="dlq-reason" title={alert.reason || 'No reason provided'}>
+                        {reasonPreview}
+                      </span>
+                    </td>
+                    <td>{formatDate(alert.alertTimestamp)}</td>
+                    <td>{alert.resolved ? formatDate(alert.resolvedAt) : 'Pending'}</td>
+                    <td>
+                      <span className={`status-badge ${alert.resolved ? 'status-success' : 'status-failed'}`}>
+                        {alert.resolved ? 'Resolved' : 'Pending'}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="dlq-action-group">
+                        <button
+                          className="dlq-action-btn resolve"
+                          onClick={() => onResolve(alert.id)}
+                          disabled={alert.resolved || resolving}
+                        >
+                          {resolving ? 'Resolving...' : 'Resolve'}
+                        </button>
+                        <button
+                          className="dlq-action-btn requeue"
+                          onClick={() => onRequeue(alert.id)}
+                          disabled={alert.resolved || requeueing}
+                        >
+                          {requeueing ? 'Requeueing...' : 'Requeue'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 };
