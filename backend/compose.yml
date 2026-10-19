@@ -1,12 +1,172 @@
+# The whole system on one machine. From the repository root:
+#   docker compose -f backend/compose.yml up -d --build --wait
+# ${...} values come from backend/.env (copy backend/.env.example).
+# Each service lists only the variables it needs, so a container never sees
+# another service's password (no env_file on purpose).
+name: shop
+
+x-java-healthcheck: &java-healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 5
+  start_period: 120s
+
 services:
-  rabbitmq:
-    container_name: 'rabbitmq-5348'
-    image: 'rabbitmq:3.13-management'
+  postgres:
+    image: postgres:16-alpine
     environment:
-      - 'RABBITMQ_DEFAULT_PASS=admin'
-      - 'RABBITMQ_DEFAULT_USER=admin'
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in backend/.env}
+      # Read by docker/postgres/init/01-create-databases.sh on first start
+      STORE_DB_PASSWORD: ${STORE_DB_PASSWORD:?set STORE_DB_PASSWORD in backend/.env}
+      BANK_DB_PASSWORD: ${BANK_DB_PASSWORD:?set BANK_DB_PASSWORD in backend/.env}
+      DELIVERY_DB_PASSWORD: ${DELIVERY_DB_PASSWORD:?set DELIVERY_DB_PASSWORD in backend/.env}
+      EMAIL_DB_PASSWORD: ${EMAIL_DB_PASSWORD:?set EMAIL_DB_PASSWORD in backend/.env}
+      TRACKING_DB_PASSWORD: ${TRACKING_DB_PASSWORD:?set TRACKING_DB_PASSWORD in backend/.env}
+    ports:
+      - '5433:5432' # host 5432 is taken by a locally installed PostgreSQL
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # -h 127.0.0.1 checks over TCP, which is how the other containers connect.
+      # Without it pg_isready uses the Unix socket, and on the first start the
+      # temporary init server answers on the socket only, so the container would
+      # be reported healthy before the init script has created the databases.
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U postgres -d postgres']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3.13-management
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:?set RABBITMQ_USERNAME in backend/.env}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in backend/.env}
     ports:
       - '5672:5672'
-      - '15672:15672'
+      - '15672:15672' # management UI
+    healthcheck:
+      test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
+      interval: 10s
+      timeout: 10s
+      retries: 10
 
-# rabbitmq-plugins enable rabbitmq_managemen
+  store:
+    build:
+      context: .
+      args:
+        SERVICE: storeService
+    image: shop-store
+    ports:
+      - '8082:8082'
+    environment:
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      STORE_DB_PASSWORD: ${STORE_DB_PASSWORD}
+      SPRING_RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in backend/.env}
+      # Inside the compose network, services reach each other by service name.
+      STORE_SERVICE_URL: http://store:8082
+      BANK_SERVICE_URL: http://bank:8084
+      DELIVERY_SERVICE_URL: http://delivery:8081
+      DELIVERY_NOTIFICATION_URL: http://store:8082/api/delivery-webhook
+      EMAIL_SERVICE_URL: http://email:8083
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      <<: *java-healthcheck
+      test: ['CMD', 'curl', '-fsS', 'http://localhost:8082/actuator/health']
+
+  bank:
+    build:
+      context: .
+      args:
+        SERVICE: bankService
+    image: shop-bank
+    ports:
+      - '8084:8084'
+    environment:
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      BANK_DB_PASSWORD: ${BANK_DB_PASSWORD}
+      STORE_SERVICE_URL: http://store:8082
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      <<: *java-healthcheck
+      test: ['CMD', 'curl', '-fsS', 'http://localhost:8084/actuator/health']
+
+  delivery:
+    build:
+      context: .
+      args:
+        SERVICE: deliveryService
+    image: shop-delivery
+    ports:
+      - '8081:8081'
+    environment:
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      DELIVERY_DB_PASSWORD: ${DELIVERY_DB_PASSWORD}
+      SPRING_RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      STORE_SERVICE_URL: http://store:8082
+      STORE_AUTH_URL: http://store:8082/api/user/login
+      EMAIL_SERVICE_URL: http://email:8083
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      <<: *java-healthcheck
+      test: ['CMD', 'curl', '-fsS', 'http://localhost:8081/actuator/health']
+
+  email:
+    build:
+      context: .
+      args:
+        SERVICE: emailService
+    image: shop-email
+    ports:
+      - '8083:8083'
+    environment:
+      DB_HOST: postgres
+      DB_PORT: '5432'
+      EMAIL_DB_PASSWORD: ${EMAIL_DB_PASSWORD}
+      SPRING_RABBITMQ_HOST: rabbitmq
+      RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      STORE_SERVICE_URL: http://store:8082
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      <<: *java-healthcheck
+      test: ['CMD', 'curl', '-fsS', 'http://localhost:8083/actuator/health']
+
+  frontend:
+    build: ../frontend
+    image: shop-frontend
+    ports:
+      # Must stay 3000: the backends only allow CORS from http://localhost:3000
+      - '3000:80'
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1/']
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:

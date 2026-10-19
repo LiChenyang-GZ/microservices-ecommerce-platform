@@ -5,6 +5,7 @@ import comp5348.storeservice.model.Account;
 import comp5348.storeservice.repository.AccountRepository;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import comp5348.storeservice.dto.AccountDTO;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,7 +22,8 @@ public class AccountService {
     private final AccountRepository accountRepository;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
     private final RestTemplate restTemplate = new RestTemplate();
-    private final String EMAIL_SERVICE_URL = "http://localhost:8083/api/email";
+    @Value("${email.service.url:http://localhost:8083}")
+    private String emailServiceUrl;
     
     @Autowired
     public AccountService(AccountRepository accountRepository) {
@@ -163,7 +165,7 @@ public class AccountService {
 
         try {
             // Call email service to send password reset verification code
-            String url = EMAIL_SERVICE_URL + "/send-password-reset";
+            String url = emailServiceUrl + "/api/email/send-password-reset";
             PasswordResetRequest request = new PasswordResetRequest(email);
             
             PasswordResetResponse response = restTemplate.postForObject(url, request, PasswordResetResponse.class);
@@ -186,7 +188,7 @@ public class AccountService {
 
         try {
             // Verify reset code
-            String url = EMAIL_SERVICE_URL + "/verify-password-reset";
+            String url = emailServiceUrl + "/api/email/verify-password-reset";
             PasswordResetVerifyRequest request = new PasswordResetVerifyRequest(email, code);
             
             PasswordResetVerifyResponse response = restTemplate.postForObject(url, request, PasswordResetVerifyResponse.class);
