@@ -37,6 +37,7 @@
 - **JSON 里缺了某个字段时，Jackson 不报错，直接传 null。** 这就是第一类红灯的原因。
 - 因为 Jackson 一定会调用构造器，所以只要在紧凑构造器里检查，**读消息时就自动被检查**。构造器抛出的异常会被 Jackson 包成 `JsonProcessingException`，`EventCodec` 再统一转成 `InvalidEventException`：[EventCodec.java:37](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java#L37)
 - 小坑：JSON 里写 `"payload": null` 时，`JsonNode` 类型的字段拿到的不是 Java 的 `null`，而是一个 `NullNode` 对象。所以检查写成 `payload == null || !payload.isObject()`：[EventEnvelope.java:34](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventEnvelope.java#L34)
+- **后来补的（PR #9）**：Jackson 默认**遇到多出来的字段也会报错**（`FAIL_ON_UNKNOWN_PROPERTIES`）。这和契约"只加字段、旧消费者照样能读"矛盾，第一版漏掉了，是写 Go tracking 的 agent 拿 README 对照时发现的。修法：关掉这个开关。注意它和"必填字段不能缺"是两回事：缺字段靠构造器拦，多字段直接忽略。测试 `newFieldAddedByProducer_isIgnoredByOlderConsumer`。
 
 ### 2.4 Jackson 的类型强制转换（coercion）
 - coercion = "类型不对时，自动帮你转"。Jackson 默认会把数字 `42` 转成字符串 `"42"`，填进 `String` 字段。
