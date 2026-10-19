@@ -1,122 +1,124 @@
-# 00 · 事件契约：在门口拦下坏消息
+# 00 · Event contract: stop bad messages at the door
 
-> 对应 commit：`dc19398 test(red)` → `41ecfc5 feat`
-> 预计回放时间：**30 分钟**
-> 契约本身的说明（每个字段、每种事件）见 [contracts/README.zh-CN.md](../../backend/contracts/README.zh-CN.md)。这份文档只讲**这一步学到的概念**。
+**English** | [中文](00-event-contract.zh-CN.md)
 
----
-
-## 1. 问题
-
-**服务之间用 Kafka 传消息时，一条格式不对的消息会被悄悄收下，等到几步之后才出错，或者只在另一种语言（Go）那边出错。**
-
-复现的测试（`test(red)` 时 14 个红）：
-- 缺字段被当成 null 收下：[EventEnvelopeContractTest.java:46](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L46)、[:61](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L61)
-- `orderId: 42`（数字）被自动转成 `"42"`：[:71](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L71)
-- payload 是一段文字也被收下：[:84](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L84)
-- 配送状态 `CREATED` 找不到事件 `DeliveryCreated`：[DeliveryEventContractTest.java:22](../../backend/deliveryService/src/test/java/com/comp5348/delivery/contracts/DeliveryEventContractTest.java#L22)
+> Commits: `dc19398 test(red)` → `41ecfc5 feat`
+> Replay time: **30 minutes**
+> The contract itself (every field, every event) is described in [contracts/README.md](../../backend/contracts/README.md). This doc covers only **the concepts learned in this step**.
 
 ---
 
-## 2. 是什么（框架层）
+## 1. Problem
 
-### 2.1 契约（contract）
-**大白话**：写消息的一方和读消息的一方事先约好"消息长什么样"。
-这里有两种：Kafka 事件的 JSON 格式（`EventEnvelope` + payload），和 store 调 bank 的 gRPC 接口（`bank.proto`）。
-放在一个单独的 Gradle 模块 `contracts` 里，各服务用 `implementation project(':contracts')` 引用同一份。
+**When services pass messages through Kafka, a malformed message gets quietly accepted and only fails several steps later, or only fails on the other language's side (Go).**
 
-### 2.2 Java record 和紧凑构造器（compact constructor）
-- `record` 是 Java 16 起正式的"只装数据的类"：写出字段，编译器自动生成构造器、getter（`eventId()`）、`equals`、`hashCode`、`toString`。字段都是 `final`，造好就不能改。
-- **紧凑构造器**：在 record 里写 `public EventEnvelope { ... }`，不写参数列表。它在字段被赋值**之前**运行，适合做检查。检查不通过就抛异常，对象根本造不出来。
-- 代码：[EventEnvelope.java:28](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventEnvelope.java#L28)
-
-### 2.3 Jackson 怎么把 JSON 变成 record
-- Jackson 是 Spring Boot 默认的 JSON 库。`ObjectMapper.readValue(json, EventEnvelope.class)` 会：读 JSON → 找到 record 的构造器 → 按字段名把值传进去。
-- **JSON 里缺了某个字段时，Jackson 不报错，直接传 null。** 这就是第一类红灯的原因。
-- 因为 Jackson 一定会调用构造器，所以只要在紧凑构造器里检查，**读消息时就自动被检查**。构造器抛出的异常会被 Jackson 包成 `JsonProcessingException`，`EventCodec` 再统一转成 `InvalidEventException`：[EventCodec.java:37](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java#L37)
-- 小坑：JSON 里写 `"payload": null` 时，`JsonNode` 类型的字段拿到的不是 Java 的 `null`，而是一个 `NullNode` 对象。所以检查写成 `payload == null || !payload.isObject()`：[EventEnvelope.java:34](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventEnvelope.java#L34)
-
-### 2.4 Jackson 的类型强制转换（coercion）
-- coercion = "类型不对时，自动帮你转"。Jackson 默认会把数字 `42` 转成字符串 `"42"`，填进 `String` 字段。
-- Jackson 2.12 起有 `CoercionConfig`：可以按"目标类型 + 输入形状"决定怎么处理。`CoercionAction` 有四种：`Fail`（报错）、`TryConvert`（尝试转换）、`AsNull`、`AsEmpty`。
-- 我们的设置：`String` 类字段（`LogicalType.Textual`）收到整数、小数、布尔值 → `Fail`：[EventCodec.java:27](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java#L27)
-- 为什么要关：Go 的 `encoding/json` 遇到"数字填进 string 字段"会返回 `UnmarshalTypeError`。Java 放过、Go 报错，问题就会藏到集成时才出现。
-
-### 2.5 checked 异常 `InvalidEventException`
-- 它继承 `Exception`（不是 `RuntimeException`），所以调用 `EventCodec.parse` 的地方**必须** catch 或者声明 throws，编译器会逼你处理。
-- 用途：把"消息本身坏了"和"数据库暂时连不上"分开。前者重试也没用，送进 DLT；后者原地重试（设计规则 6 / ADR-08）。
-
-### 2.6 枚举里写明对应关系
-- `DeliveryEventType.valueOf("CREATED")` 按**常量名**找，但常量叫 `DELIVERY_CREATED`，所以找不到。
-- 修法：每个常量带一个字段写明对应哪个状态，`fromStatus` 逐个比较：[DeliveryEventType.java:10](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java#L10)、[:35](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java#L35)
-
-### 2.7 Kafka 的 key 和分区
-- 每条 Kafka 消息有一个 key。**key 相同的消息进同一个分区，同一个分区里的顺序是有保证的。**
-- 所以外壳里的 `orderId` 就是 key：同一个订单的事件按顺序到达（设计规则 5）。不同订单之间没有顺序保证，也不需要。
-
-### 2.8 Gradle 多模块
-- `settings.gradle` 里的 `include 'contracts'` 让 Gradle 认出这个模块；`implementation project(':contracts')` 让 delivery 编译时能用它的类。
-- 顺带修了一个构建问题：Windows 中文系统上 javac 默认按 GBK 读源码，中文注释会编译失败，所以在根 `build.gradle` 里统一设成 `UTF-8`。
+Tests that reproduce it (14 red at `test(red)`):
+- a missing field is accepted as null: [EventEnvelopeContractTest.java:46](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L46), [:61](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L61)
+- `orderId: 42` (a number) is silently turned into `"42"`: [:71](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L71)
+- a payload sent as a string is accepted: [:84](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L84)
+- delivery status `CREATED` has no matching event `DeliveryCreated`: [DeliveryEventContractTest.java:22](../../backend/deliveryService/src/test/java/com/comp5348/delivery/contracts/DeliveryEventContractTest.java#L22)
 
 ---
 
-## 3. 请求路径导读
+## 2. What it is (framework level)
 
-这一步还没接上 Kafka（那是第 2 波），所以这里画的是**以后**消息会走的路，标出这一步写的代码在哪一环：
+### 2.1 Contract
+**Plainly**: the side that writes a message and the side that reads it agree up front on what it looks like.
+There are two here: the JSON format of Kafka events (`EventEnvelope` + payload), and the gRPC interface store uses to call bank (`bank.proto`).
+They live in a separate Gradle module, `contracts`, and every service references the same copy with `implementation project(':contracts')`.
+
+### 2.2 Java records and the compact constructor
+- A `record` (standard since Java 16) is a class that only holds data: you list the fields, and the compiler generates the constructor, accessors (`eventId()`), `equals`, `hashCode` and `toString`. Fields are `final`, so the object can't change once built.
+- **Compact constructor**: inside the record you write `public EventEnvelope { ... }` with no parameter list. It runs **before** the fields are assigned, which makes it the place for checks. If a check fails it throws, and the object is never created.
+- Code: [EventEnvelope.java:28](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventEnvelope.java#L28)
+
+### 2.3 How Jackson turns JSON into a record
+- Jackson is Spring Boot's default JSON library. `ObjectMapper.readValue(json, EventEnvelope.class)` reads the JSON, finds the record's constructor, and passes in the values by field name.
+- **When a field is missing from the JSON, Jackson does not fail; it passes null.** That is the cause of the first group of red tests.
+- Because Jackson always goes through the constructor, a check in the compact constructor **runs automatically on every parse**. Jackson wraps the constructor's exception in a `JsonProcessingException`, and `EventCodec` turns that into an `InvalidEventException`: [EventCodec.java:37](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java#L37)
+- Gotcha: for `"payload": null`, a `JsonNode` field receives a `NullNode` object, not Java `null`. So the check is `payload == null || !payload.isObject()`: [EventEnvelope.java:34](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventEnvelope.java#L34)
+
+### 2.4 Jackson coercion
+- Coercion = "the type is wrong, so convert it for you". By default Jackson turns the number `42` into the string `"42"` for a `String` field.
+- Since Jackson 2.12 there is `CoercionConfig`, which decides what to do per target type and input shape. `CoercionAction` has four values: `Fail`, `TryConvert`, `AsNull`, `AsEmpty`.
+- Our setting: `String`-like fields (`LogicalType.Textual`) receiving an integer, float or boolean → `Fail`: [EventCodec.java:27](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java#L27)
+- Why turn it off: Go's `encoding/json` returns an `UnmarshalTypeError` for a number in a string field. If Java accepts what Go rejects, the problem hides until integration.
+
+### 2.5 Checked exception `InvalidEventException`
+- It extends `Exception` (not `RuntimeException`), so code that calls `EventCodec.parse` **must** catch it or declare it; the compiler forces you to deal with it.
+- Purpose: separate "the message itself is broken" from "the database is temporarily down". The first can never succeed on retry, so it goes to the DLT; the second is retried in place (design rule 6 / ADR-08).
+
+### 2.6 Explicit mapping inside an enum
+- `DeliveryEventType.valueOf("CREATED")` looks up a **constant name**, but the constant is `DELIVERY_CREATED`, so it fails.
+- Fix: each constant carries a field naming its status, and `fromStatus` compares them one by one: [DeliveryEventType.java:10](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java#L10), [:35](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java#L35)
+
+### 2.7 Kafka keys and partitions
+- Every Kafka message has a key. **Messages with the same key go to the same partition, and order within a partition is guaranteed.**
+- So the envelope's `orderId` is the key: events for one order arrive in order (design rule 5). Different orders have no ordering guarantee, and don't need one.
+
+### 2.8 Gradle multi-project build
+- `include 'contracts'` in `settings.gradle` makes Gradle see the module; `implementation project(':contracts')` lets delivery compile against its classes.
+- A build fix along the way: on Chinese-locale Windows, javac reads sources as GBK by default and Chinese comments fail to compile, so the root `build.gradle` sets `UTF-8` for every module.
+
+---
+
+## 3. Request path
+
+Kafka is not wired up yet (that is wave 2), so this is the path messages **will** take, with this step's code marked:
 
 ```
-store 的业务事务
-  └─ new EventEnvelope(...)            ← 紧凑构造器检查（写的一方被保护）
-  └─ EventCodec.write(event)           ← 转成 JSON，存进 event_outbox
+store business transaction
+  └─ new EventEnvelope(...)            ← compact constructor checks (protects the writer)
+  └─ EventCodec.write(event)           ← to JSON, stored in event_outbox
         │
-store 的事件投递程序 ── 发到 Kafka，key = orderId
+store event publisher ── sends to Kafka, key = orderId
         │
-Kafka topic: order-events（同一 orderId → 同一分区 → 有序）
+Kafka topic: order-events (same orderId → same partition → ordered)
         │
-delivery 的消费者
-  └─ EventCodec.parse(json)            ← Jackson 读 JSON（关掉了类型自动转换）
-        └─ 调 EventEnvelope 构造器     ← 检查 5 个字段
-        ├─ 抛 InvalidEventException → 送进 order-events.DLT + 告警，继续下一条
-        └─ 正常 → EventCodec.payload(event, OrderPaidPayload.class) → 业务逻辑建配送单
+delivery consumer
+  └─ EventCodec.parse(json)            ← Jackson reads JSON (coercion turned off)
+        └─ calls EventEnvelope ctor    ← checks the 5 fields
+        ├─ throws InvalidEventException → order-events.DLT + alert, continue with next
+        └─ ok → EventCodec.payload(event, OrderPaidPayload.class) → business logic creates the delivery
 ```
 
 ---
 
-## 4. 为什么这样用
+## 4. Why this way
 
-| 选择 | 替代方案 | 取舍 |
+| Choice | Alternatives | Trade-off |
 |---|---|---|
-| 🤖 检查写在 record 的**构造器**里 | ① 在 `EventCodec.parse` 里逐个字段检查 ② 用 Bean Validation（`@NotNull` + `Validator`） | 构造器检查对"读"和"写"都生效，不会被绕过。① 只保护读的一方；② 要额外引入依赖，而且要记得手动调用 `validate()`，忘了就不检查 |
-| 🤖 关掉 Jackson 的数字→字符串转换 | 保持默认，靠 Go 那边自己报错 | 默认更宽松、更"能用"，但会让 Java 和 Go 对同一条消息给出不同的结果。契约就应该两边一样严格 |
-| 🤖 共享 Java 模块 | 每个服务各写一份 DTO（原来的做法）；或者用 JSON Schema / Avro 生成代码 | 一个仓库里写一份最省事，改了字段编译器会提醒。代价：服务之间多了一点耦合，所以只放格式、不放逻辑 |
-| 🤖 orderId、金额用字符串 | 用 JSON 数字 | 字符串在 Java、Go、JavaScript 里都不会丢精度；Kafka 的 key 本来就是字节/字符串 |
-| 🤖 不认识的 eventType 忽略，不算坏消息 | 当成坏消息送 DLT | 以后新增事件时，旧的消费者不会把它们全部扔进 DLT |
+| 🤖 Checks in the record's **constructor** | ① check each field inside `EventCodec.parse` ② Bean Validation (`@NotNull` + `Validator`) | A constructor check applies to both reading and writing and can't be bypassed. ① only protects the reader; ② adds a dependency and only runs if someone remembers to call `validate()` |
+| 🤖 Turn off Jackson's number→string coercion | keep the default and let Go fail on its own | The default is more forgiving, but then Java and Go disagree about the same message. A contract should be equally strict on both sides |
+| 🤖 Shared Java module | each service writes its own DTOs (the original approach); or generate code from JSON Schema / Avro | One copy in one repo is simplest, and the compiler flags changed fields. Cost: a little coupling between services, so only formats go here, never logic |
+| 🤖 orderId and amounts as strings | JSON numbers | Strings never lose precision in Java, Go or JavaScript; Kafka keys are bytes/strings anyway |
+| 🤖 Unknown eventType is ignored, not sent to the DLT | treat it as a broken message | When a new event type is added later, older consumers won't dump it all into the DLT |
 
 ---
 
-## 5. 面试追问链
+## 5. Interview follow-up chains
 
-**链 A：契约**
-1. 服务之间的消息格式怎么保证两边一致？→ 共享 contracts 模块 + 两种语言读同一批示例 JSON 的契约测试。
-2. 为什么不让每个服务自己写 DTO？→ 可以，但没有东西检查两份是否一致。
-3. 共享模块不会让服务耦合吗？→ 会一点。所以只放格式，不放业务逻辑；改格式只加字段，不删不改。
-4. 那如果要删一个字段呢？→ 先让所有消费者不再读它，部署完，再让生产者不再写。（这次没做版本号，属于已知的取舍。）
+**Chain A: the contract**
+1. How do you keep message formats consistent between services? → A shared contracts module, plus contract tests in both languages that read the same example JSON.
+2. Why not let each service write its own DTOs? → You can, but nothing checks that the copies match.
+3. Doesn't a shared module couple the services? → A little. So it holds formats only, no business logic, and changes only add fields.
+4. What if you need to remove a field? → First make every consumer stop reading it and deploy, then make the producer stop writing it. (No version field this time; a known trade-off.)
 
-**链 B：Jackson**
-1. 缺字段时 Jackson 怎么处理 record？→ 传 null，不报错。
-2. 那你怎么拦？→ 紧凑构造器里检查。Jackson 一定会调构造器，所以读的时候自动检查。
-3. 为什么 `orderId: 42` 能通过构造器检查？→ Jackson 在调构造器**之前**就把 42 转成了 `"42"`，构造器看到的是正常字符串。
-4. 怎么关？→ `coercionConfigFor(LogicalType.Textual).setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)`。
+**Chain B: Jackson**
+1. What does Jackson do with a missing field on a record? → Passes null, no error.
+2. How do you catch it? → Check in the compact constructor. Jackson always calls it, so every parse is checked.
+3. Why does `orderId: 42` pass the constructor check? → Jackson turns 42 into `"42"` **before** calling the constructor, so the constructor sees a normal string.
+4. How do you stop that? → `coercionConfigFor(LogicalType.Textual).setCoercion(CoercionInputShape.Integer, CoercionAction.Fail)`.
 
-**链 C：坏消息怎么处理**
-1. 读到坏消息怎么办？→ 抛 `InvalidEventException`，消费者把它送进 DLT 并告警，继续处理下一条。
-2. 为什么不重试？→ 消息本身坏了，重试一万次也一样，反而会堵住整个分区。
-3. 那数据库连不上呢？→ 那是暂时性失败，原地重试，卡住这个分区，保住顺序（ADR-08）。
-4. 怎么区分这两种？→ 不同的异常类型。`InvalidEventException` 是 checked 的，编译器逼你单独处理。
+**Chain C: handling bad messages**
+1. What happens to a broken message? → `InvalidEventException`; the consumer sends it to the DLT, raises an alert, and moves on.
+2. Why not retry? → The message itself is broken; retrying forever gives the same result and blocks the whole partition.
+3. And if the database is down? → That's a transient failure: retry in place and hold the partition so ordering is kept (ADR-08).
+4. How do you tell them apart? → Different exception types. `InvalidEventException` is checked, so the compiler forces separate handling.
 
 ---
 
-## 6. 英文说法
+## 6. How to say it
 
 > "Services talk through Kafka events, so I put the event formats in one shared contracts module. Every event has the same envelope: an event ID for de-duplication, the type, the order ID as the Kafka key, a timestamp, and the payload."
 
@@ -126,56 +128,56 @@ delivery 的消费者
 
 ---
 
-## 7. 资料
+## 7. References
 
-- Java record 和紧凑构造器（Oracle 官方，Java 17）："The Canonical Constructor of a Record Class"一节
+- Java records and compact constructors (Oracle, Java 17), section "The Canonical Constructor of a Record Class"
   https://docs.oracle.com/en/java/javase/17/language/records.html
-- Jackson 2.12 发布说明：`CoercionConfig` 系统、record 支持
+- Jackson 2.12 release notes: the `CoercionConfig` system and record support
   https://github.com/FasterXML/jackson/wiki/Jackson-Release-2.12
-- 引入 `CoercionConfig` 的 Jackson issue（`CoercionAction` 四种取值的来源）
+- The Jackson issue that introduced `CoercionConfig` (where the four `CoercionAction` values come from)
   https://github.com/FasterXML/jackson-databind/issues/2113
-- Go `encoding/json` 的 `Unmarshal`：类型不匹配时返回 `UnmarshalTypeError`
+- Go `encoding/json` `Unmarshal`: returns `UnmarshalTypeError` on a type mismatch
   https://pkg.go.dev/encoding/json#Unmarshal
-- Kafka 官方介绍：同一个 key 进同一个分区，分区内有序
+- Kafka introduction: same key → same partition, ordered within a partition
   https://kafka.apache.org/intro
-- microservices.io：Transactional Outbox（第 2 波会用到，这里的 `EventCodec.write` 就是写进 outbox 的那一步）
+- microservices.io: Transactional Outbox (used in wave 2; `EventCodec.write` is the step that writes into the outbox)
   https://microservices.io/patterns/data/transactional-outbox.html
 
 ---
 
-## 8. 自测题
+## 8. Self-check
 
-**1. 把 `EventEnvelope` 的紧凑构造器整段删掉，哪些测试会变红？`orderId_sentAsJsonNumber_isRejected` 会红吗？**
+**1. If you delete `EventEnvelope`'s compact constructor, which tests go red? Does `orderId_sentAsJsonNumber_isRejected` go red?**
 
-<details><summary>答案</summary>
+<details><summary>Answer</summary>
 
-缺字段（5 个）、null 字段（5 个）、payload 不是对象（1 个）会变红。
-`orderId_sentAsJsonNumber_isRejected` **不会红**：它是在 `EventCodec` 里靠关掉类型自动转换拦下来的，跟构造器无关。这两道防线各管各的。
+Missing field (5), null field (5) and payload-not-an-object (1) go red.
+`orderId_sentAsJsonNumber_isRejected` **stays green**: it is caught in `EventCodec` by turning off coercion, which has nothing to do with the constructor. The two defences are independent.
 </details>
 
-**2. 为什么 `"payload": null` 不能只写 `payload == null` 来检查？**
+**2. Why can't you check `"payload": null` with just `payload == null`?**
 
-<details><summary>答案</summary>
+<details><summary>Answer</summary>
 
-payload 的类型是 `JsonNode`。JSON 里显式写 null 时，Jackson 给的是 `NullNode` 对象，不是 Java 的 `null`，所以 `== null` 判断不出来。要用 `isObject()`。
+payload is a `JsonNode`. For an explicit JSON null, Jackson gives a `NullNode` object, not Java `null`, so `== null` misses it. Use `isObject()`.
 </details>
 
-**3.（要真懂才答得出）消费者读到一条 `orderId` 是数字的消息。它应该重试，还是送进 DLT？如果是数据库连不上，又该怎么办？两种处理为什么不一样？**
+**3. (Needs real understanding) A consumer reads a message whose `orderId` is a number. Retry, or send to the DLT? What if the database is down instead? Why are the two handled differently?**
 
-<details><summary>答案</summary>
+<details><summary>Answer</summary>
 
-`orderId` 是数字：抛 `InvalidEventException`，**送进 DLT**。消息本身坏了，重试多少次结果都一样，留着会堵住整个分区。
-数据库连不上：**原地重试**，不提交 offset。这是暂时性失败，等一会儿就好；而且卡住这个分区才能保证同一个订单的事件不乱序。
-区别就在于"重试有没有可能成功"（设计 ADR-08、规则 6）。
+`orderId` is a number: throw `InvalidEventException` and **send it to the DLT**. The message itself is broken; no number of retries will change it, and keeping it would block the partition.
+Database down: **retry in place** without committing the offset. It is transient and will recover, and holding the partition keeps one order's events in sequence.
+The difference is whether a retry can ever succeed (design ADR-08, rule 6).
 </details>
 
 ---
 
-## 9. 预计回放时间
+## 9. Replay time
 
-**30 分钟**：checkout 红 → 跑 → checkout 绿 → 跑 → 读第 2 节 → 改坏练习（删掉构造器检查，或者删掉 coercion 那一行，各跑一次）→ 讲英文说法 → 做题。
+**30 minutes**: checkout red → run → checkout green → run → read section 2 → break-it exercise (remove the constructor check, or the coercion line, and run each time) → say the English lines → self-check.
 
-回放命令（在 `backend`，PowerShell）：
+Replay commands (from `backend`, PowerShell):
 
 ```
 git checkout dc19398
