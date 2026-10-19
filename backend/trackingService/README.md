@@ -34,6 +34,7 @@ Plus `GET /healthz` (process is up) and `GET /readyz` (database answers) for Doc
 | Valid event | `INSERT … ON CONFLICT (event_id) DO NOTHING`; the offset is committed only after the write | rule 4 |
 | Duplicate eventId (any letter case) | nothing changes | rule 4 |
 | Broken message (not JSON, missing fields, eventId not a UUID, event on the wrong topic) | written unchanged to `<topic>.DLT` with the reason in headers; move on | rule 6, ADR-08 |
+| Valid envelope the database permanently rejects (Postgres error class 22, e.g. a NUL character, invalid UTF-8) | dead-lettered like a broken message; move on | rule 6, failure scenario #40 |
 | Unknown eventType | logged and skipped, not dead-lettered | contracts §2 |
 | Database or DLT temporarily unavailable | retried in place with backoff (200 ms doubling to 10 s); not committed, not skipped | rule 6, ADR-08 |
 | SIGTERM | stop taking records; the one in hand gets up to 10 s to finish and commit; leave the group; HTTP finishes in-flight requests, then closes the port | design, "Go service" |

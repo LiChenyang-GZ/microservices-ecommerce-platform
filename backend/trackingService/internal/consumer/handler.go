@@ -3,6 +3,7 @@ package consumer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -74,12 +75,23 @@ func (h *Handler) Handle(ctx context.Context, m Message) error {
 		}
 	}
 	if err != nil {
-		h.Log.Warn("dead-lettering message", "topic", m.Topic, "partition", m.Partition, "offset", m.Offset, "reason", err)
-		return h.retry(ctx, "publish to DLT", func() error { return h.DLT.Publish(ctx, m, err) })
+		return h.deadLetter(ctx, m, err)
 	}
 
 	rec := store.Record{Envelope: env, Topic: m.Topic, Partition: m.Partition, Offset: m.Offset}
-	return h.retry(ctx, "store event", func() error { return h.Sink.Insert(ctx, rec) })
+	err = h.retry(ctx, "store event", func() error { return h.Sink.Insert(ctx, rec) })
+	if errors.Is(err, store.ErrRejected) {
+		// The envelope was fine but the database will never accept the data
+		// (e.g. a NUL character): just as broken as an unparseable message.
+		return h.deadLetter(ctx, m, err)
+	}
+	return err
+}
+
+// deadLetter sends m to its DLT, retrying until Kafka confirms.
+func (h *Handler) deadLetter(ctx context.Context, m Message, reason error) error {
+	h.Log.Warn("dead-lettering message", "topic", m.Topic, "partition", m.Partition, "offset", m.Offset, "reason", reason)
+	return h.retry(ctx, "publish to DLT", func() error { return h.DLT.Publish(ctx, m, reason) })
 }
 
 // retry runs op until it succeeds, doubling the wait each time up to RetryMax.
@@ -96,6 +108,9 @@ func (h *Handler) retry(ctx context.Context, what string, op func() error) error
 		err := op()
 		if err == nil {
 			return nil
+		}
+		if errors.Is(err, store.ErrRejected) {
+			return err // permanent: retrying cannot help, the caller dead-letters it
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()

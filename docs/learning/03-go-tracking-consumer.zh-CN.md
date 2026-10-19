@@ -57,6 +57,7 @@
 ### 2.6 两种失败（规则 6 / ADR-08）
 - **消息本身坏了**（解析不了、缺字段、放错 topic）：重试一万次也一样 → 原样写进 `<topic>.DLT`，原因放 header，然后继续：[handler.go:62](../../backend/trackingService/internal/consumer/handler.go#L62)、[dlt.go:27](../../backend/trackingService/internal/consumer/dlt.go#L27)
 - **暂时性失败**（数据库连不上、DLT 写不进去）：等一会儿就好 → 原地退避重试，200 毫秒翻倍到 10 秒，不提交、不跳过。这个分区会卡住，但同一个订单的事件不会乱序：[handler.go:87](../../backend/trackingService/internal/consumer/handler.go#L87)
+- **第三种：外壳合法，但数据库永远存不进去**（审查补充，失败场景表 #40）：payload 里有 `\u0000`（jsonb 拒收，SQLSTATE `22P05`）、orderId 里有 NUL（`22021`）、payload 里有非法 UTF-8 字节（`22021`）。原来所有 `Insert` 错误都当暂时失败，这种消息会被**无限重试**，整个消费者卡死。现在 `store.Insert` 看 Postgres 的错误码：**22 类（data exception，数据本身不合法）** 包成 `store.ErrRejected`，handler 把它当坏消息送 DLT；连接被拒、超时等其他错误照旧原地重试：[store.go](../../backend/trackingService/internal/store/store.go)（`ErrRejected`、`Insert`）、[handler.go](../../backend/trackingService/internal/consumer/handler.go)（`Handle`、`retry`）。测试：[review_test.go](../../backend/trackingService/internal/integration/review_test.go)（红 `598c78a`）
 - **不认识的 eventType** 两种都不是：跳过。以后生产者加了新事件，老的 tracking 不会把它们全扔进 DLT；升级 tracking 后重放就能补回来。
 - DLT 的 header 照抄 Spring Kafka（`kafka_dlt-original-topic`、partition 是 4 字节大端整数……），第 2 波的 Java 消费者用默认的 `DeadLetterPublishingRecoverer` 就是同一个格式。⚠️ 但 Spring Kafka 3.3 默认的 DLT **名字**是 `<topic>-dlt`，契约是 `<topic>.DLT`，Java 那边要配置目标 topic。
 
@@ -136,6 +137,7 @@ GET /api/tracking/orders/42/timeline
 | 设计指定：数据库唯一约束去重 | 内存里记最近的 eventId | 内存去重重启就没了，多实例之间也不共享；数据库唯一约束是唯一靠得住的 |
 | 🤖 事件放错 topic → DLT | 照存；或者忽略 | 照存会让 source 显示错；放错说明生产者有 bug，需要人看 |
 | 🤖 DLT 写不进去 → 重试、卡住分区 | 记日志后提交（丢掉坏消息） | 宁可卡住也不让坏消息无声消失；代价是 Kafka 整个出问题时这个分区停住 |
+| 🤖 数据库永久拒绝：按 SQLSTATE 分类（22 类 → DLT） | 在 `Parse` 阶段就拒绝 NUL、非法 UTF-8 | Parse 只能挡住**已知的**几种输入，以后 Postgres 因为别的数据问题拒绝（比如某个值超出范围），消费者又会卡死；按错误码分类能兜住整类问题。代价：要知道哪些错误码是"永久的"。只选了 22 类（数据本身不合法），没选 23 类（约束冲突，主键重复已经被 `ON CONFLICT` 吃掉了）和 42 类（SQL 写错，是我们的 bug，不该让消息背锅）。Parse 保持和 Java EventCodec 一样的规则 |
 | 🤖 优雅退出给 10 秒 | 不限时；或者立刻退出 | Kubernetes 默认 30 秒后 SIGKILL，10 秒留了余量；立刻退出的话，写了一半的事务要靠重投兜底 |
 | 🤖 归属检查回 404 不回 403 | 403 | 403 等于告诉对方"这个订单存在"，404 不泄露 |
 | 🤖 表由服务启动时建 | golang-migrate 等迁移工具 | 只有一张表，暂时不值得引入工具；表结构要改的时候再加 |

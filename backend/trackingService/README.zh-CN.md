@@ -34,6 +34,7 @@ Authorization: Bearer <store 签发的 token>
 | 正常事件 | `INSERT … ON CONFLICT (event_id) DO NOTHING`，写成功后才提交 offset | 规则 4 |
 | 重复的 eventId（大小写不同也算） | 什么都不改 | 规则 4 |
 | 坏消息（不是 JSON、缺字段、eventId 不是 UUID、事件放错 topic） | 原样写进 `<topic>.DLT`，原因放在 header，继续下一条 | 规则 6、ADR-08 |
+| 外壳合法但数据库永久拒收（Postgres 错误码 22 类，例如 NUL 字符、非法 UTF-8） | 当坏消息写进 `<topic>.DLT`，继续下一条 | 规则 6、失败场景 #40 |
 | 不认识的 eventType | 记日志、跳过，不进 DLT | 契约 §2 |
 | 数据库或 DLT 暂时不可用 | 原地退避重试（200 ms 翻倍到 10 s），不提交、不跳过 | 规则 6、ADR-08 |
 | 收到 SIGTERM | 不再取新消息，手上那条最多再给 10 秒写完并提交，离开消费者组；HTTP 处理完正在进行的请求再关端口 | 设计"Go 服务"一节 |

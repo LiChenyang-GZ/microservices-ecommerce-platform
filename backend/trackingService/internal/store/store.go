@@ -4,9 +4,12 @@ package store
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/LiChenyang-GZ/microservices-ecommerce-platform/backend/trackingService/internal/event"
@@ -70,8 +73,20 @@ func (s *Store) Migrate(ctx context.Context) error {
 	return err
 }
 
+// ErrRejected marks an event Postgres can never store, however often it is retried:
+// the data itself is unacceptable (failure-scenario row 40). The consumer treats it
+// as a broken message and dead-letters it instead of retrying.
+var ErrRejected = errors.New("database rejected the event")
+
 // Insert saves one event. Saving an event that is already there succeeds and
 // changes nothing: the first copy is kept.
+//
+// Errors fall into two groups (rule 6 / ADR-08):
+//   - SQLSTATE class 22, "data exception" (e.g. 22P05 NUL in jsonb, 22021 invalid
+//     byte sequence for UTF-8 or a NUL in text): the value is the problem, so a retry
+//     gives the same answer. Returned wrapped in ErrRejected.
+//   - everything else (connection refused, timeout, too many connections, ...):
+//     the database may come back, so the caller retries.
 func (s *Store) Insert(ctx context.Context, r Record) error {
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO tracking_events
@@ -79,6 +94,10 @@ INSERT INTO tracking_events
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (event_id) DO NOTHING`,
 		r.EventID, r.OrderID, r.EventType, r.Topic, r.Partition, r.Offset, r.OccurredAt, []byte(r.Payload))
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && strings.HasPrefix(pgErr.Code, "22") {
+		return fmt.Errorf("%w: %s (SQLSTATE %s)", ErrRejected, pgErr.Message, pgErr.Code)
+	}
 	return err
 }
 
