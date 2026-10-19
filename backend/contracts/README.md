@@ -168,4 +168,4 @@ When you add or change an event, update its example too, or `examples_coverEvery
 2. Java event types live in this shared module and every service uses the same copy; Go stays in sync through the example JSON. Cost: changing the contract recompiles every service, which is why only formats live here, never business logic.
 3. The exact payload fields and the `reason` values (the design only names the events).
 4. gRPC has two outcomes, SUCCEEDED / REJECTED; refunds carry no amount.
-5. No version field. Format changes only **add** fields and never rename or remove existing ones, so older consumers keep working.
+5. No version field. Format changes only **add** fields and never rename or remove existing ones, so older consumers keep working. `EventCodec` ignores unknown fields, and `newFieldAddedByProducer_isIgnoredByOlderConsumer` guards this (until that fix, Jackson rejected them; found by the Go tracking agent).

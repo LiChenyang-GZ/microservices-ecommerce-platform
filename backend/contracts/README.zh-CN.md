@@ -168,4 +168,4 @@ try {
 2. Java 的事件类放在共享模块里，各服务引用同一份；Go 靠示例 JSON 对齐。代价：改契约时所有服务都要重新编译。所以这里只放格式，不放业务逻辑。
 3. 各个 payload 的具体字段，以及 `reason` 的取值（设计只写了事件名）。
 4. gRPC 只有 SUCCEEDED / REJECTED 两种结果；退款不带金额。
-5. 没有加版本号字段。以后改格式只**加字段**，不改、不删已有字段，旧的消费者照样能读。
+5. 没有加版本号字段。以后改格式只**加字段**，不改、不删已有字段，旧的消费者照样能读。`EventCodec` 会忽略多出来的字段，由测试 `newFieldAddedByProducer_isIgnoredByOlderConsumer` 保证（修复前 Jackson 会拒绝它们，是写 Go tracking 的 agent 发现的）。
