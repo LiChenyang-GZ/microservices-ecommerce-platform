@@ -5,7 +5,11 @@ public enum PaymentStatus {
     SUCCESS,
     FAILED,
     REFUNDED,
-    DELIVERY_FAILED
+    DELIVERY_FAILED,
+    // Step 2 shells (test(red)): declared so the tests compile; no code sets them yet
+    PAY_UNKNOWN,
+    REFUND_PENDING,
+    REFUND_UNKNOWN
 }
 
 

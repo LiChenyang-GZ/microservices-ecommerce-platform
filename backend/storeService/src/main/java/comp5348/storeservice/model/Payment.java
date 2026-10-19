@@ -40,6 +40,9 @@ public class Payment {
     
     private LocalDateTime paymentDate;  // 记录支付成功的时间
 
+    // Step 2 shell (test(red)): part of the idempotency key PAY-{paymentId}-{attempt}; nothing changes it yet
+    private Integer attempt = 1;
+
     @PrePersist
     protected void onCreate() {
         createdAt = LocalDateTime.now();
