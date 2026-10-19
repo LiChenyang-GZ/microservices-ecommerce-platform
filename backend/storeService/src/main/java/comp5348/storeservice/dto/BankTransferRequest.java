@@ -6,15 +6,16 @@ import lombok.AllArgsConstructor;
 
 import java.math.BigDecimal;
 
+/**
+ * Field names follow contracts/bank.proto (TransferRequest).
+ */
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
 public class BankTransferRequest {
-    
+
+    private String idempotencyKey; // PAY-{paymentId}-{attempt}-{random}
     private String fromAccount;
     private String toAccount;
     private BigDecimal amount;
-    private String transactionRef;
 }
-
-

@@ -12,6 +12,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long> 
     Optional<Transaction> findByTransactionRef(String transactionRef);
     
     boolean existsByTransactionRef(String transactionRef);
+
+    Optional<Transaction> findFirstByOriginalTransactionIdAndTypeAndStatus(
+            Long originalTransactionId, Transaction.TransactionType type, Transaction.TransactionStatus status);
 }
-
-

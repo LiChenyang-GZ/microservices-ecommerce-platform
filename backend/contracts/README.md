@@ -110,8 +110,13 @@ Design: store calls bank over gRPC (ADR-10); idempotency keys in ADR-04; timeout
 
 | Method | Request | Idempotency key |
 |---|---|---|
-| `Transfer` | `idempotency_key`, `from_account`, `to_account`, `amount` | `PAY-{paymentId}-{attempt}` |
-| `Refund` | `idempotency_key`, `original_transaction_id`, `reason` | `REFUND-{paymentId}` |
+| `Transfer` | `idempotency_key`, `from_account`, `to_account`, `amount` | `PAY-{paymentId}-{attempt}-{random}` |
+| `Refund` | `idempotency_key`, `original_transaction_id`, `reason` | `REFUND-{paymentId}-{random}` |
+
+**Keys are opaque to bank, and must not be guessable** (changed 2026-10-19 after the step-2 review, findings 1 and 2):
+- `{random}` is 16 hex characters from `SecureRandom`, stored on store's payment and never returned by any API. A new one for each charge attempt; retries of the same attempt reuse the same key.
+- bank compares a reused key with what it was first used for: transfer = type, from, to, amount; refund = type, original transaction. Same request → the first result. **Different request → `REJECTED` ("idempotency key conflict"), never `SUCCEEDED`**, and no money moves.
+- Why: with `PAY-{paymentId}-{attempt}` anyone who could see a paymentId could use the next key first (for example a 0.01 transfer to themselves), and store's real charge would then get "already succeeded".
 
 **How to read the result** (the most important rule here):
 

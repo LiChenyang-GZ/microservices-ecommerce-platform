@@ -40,7 +40,8 @@ public class CompensationService {
             logger.info("Starting compensation for orderId={}, reason={}", orderId, reason);
             
             // 1. Get order information
-            Order order = orderRepository.findById(orderId)
+            // Order row first, then the payment row (inside requestRefund): same lock order everywhere
+            Order order = orderRepository.findByIdForUpdate(orderId)
                     .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
 
             // 2. Release inventory (critical step - must release the reserved stock)
@@ -68,10 +69,10 @@ public class CompensationService {
                 // Continue with refund and status update even if inventory release fails
             }
 
-            // 3. Process refund
+            // 3. Refund: write a REFUND task in this transaction; OutboxProcessor calls bank
             String refundReason = (reason != null && !reason.isEmpty()) ? reason : "Delivery service failed to create shipment.";
-            paymentService.refundPayment(orderId, refundReason);
-            logger.info("Refund processed for orderId={}", orderId);
+            paymentService.requestRefund(orderId, refundReason);
+            logger.info("Refund task written for orderId={}", orderId);
 
             // 4. Update order status to CANCELLED_SYSTEM
             orderService.updateOrderStatus(orderId, OrderStatus.CANCELLED_SYSTEM);

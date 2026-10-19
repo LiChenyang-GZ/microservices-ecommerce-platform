@@ -36,8 +36,12 @@ public class Transaction {
     @Column(nullable = false)
     private TransactionStatus status;
     
+    // The caller's idempotency key (PAY-… / REFUND-…). Unique: a key can only ever produce one transaction.
     @Column(unique = true, nullable = false)
     private String transactionRef;
+
+    // For a REFUND: the transfer it reverses. Lets bank refuse to refund the same transfer twice under different keys.
+    private Long originalTransactionId;
     
     private String errorMessage;
     

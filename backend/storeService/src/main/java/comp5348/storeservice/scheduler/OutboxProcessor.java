@@ -2,7 +2,11 @@ package comp5348.storeservice.scheduler;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
+import comp5348.storeservice.adapter.BankAdapter;
+import comp5348.storeservice.adapter.BankCallResult;
 import comp5348.storeservice.adapter.DeliveryAdapter;
+import comp5348.storeservice.dto.BankRefundRequest;
+import comp5348.storeservice.dto.BankTransferRequest;
 import comp5348.storeservice.dto.DeliveryRequestDTO;
 import comp5348.storeservice.dto.DeliveryResponseDTO;
 import comp5348.storeservice.model.*;
@@ -22,9 +26,10 @@ import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.*;
@@ -65,6 +70,22 @@ public class OutboxProcessor {
 
     @Autowired
     private WarehouseService warehouseService;
+
+    @Autowired
+    private BankAdapter bankAdapter;
+
+    @Autowired
+    private TransactionTemplate transactionTemplate;
+
+    @Autowired
+    private Clock clock;
+
+    // Rule 7: on no answer, retry the same key quickly up to this many times, then mark it unknown
+    @Value("${payment.bank.fast-retries:5}")
+    private int fastRetries;
+
+    @Value("${payment.bank.fast-retry-backoff-ms:500}")
+    private long fastRetryBackoffMs;
     
     @Value("${outbox.processor.max-retries:3}")
     private int maxRetries;
@@ -93,53 +114,136 @@ public class OutboxProcessor {
     }
 
     /**
-     * Scheduled processing of Outbox messages - executed every 5 seconds
+     * Every 5 seconds: run every pending task, oldest first.
+     *
+     * Deliberately NOT one big @Transactional. Each step below opens its own short transaction, so no database
+     * lock is held while we wait for bank. (Otherwise a user cancelling during a slow charge would wait for bank,
+     * and the "charge succeeded but the order was cancelled meanwhile" check could read a stale order.)
      */
     @Scheduled(fixedDelay = 5000)
-    @Transactional
     public void processOutbox() {
         if (!enabled) {
             return;
         }
 
-        try {
-            // Query pending Outbox records (PENDING status and retry count less than max)
-            List<PaymentOutbox> pendingOutboxes = outboxRepository.findByStatusAndRetryCountLessThan("PENDING", maxRetries);
+        List<PaymentOutbox> pending = outboxRepository.findByStatusOrderByIdAsc("PENDING");
+        if (pending.isEmpty()) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now(clock);
+        logger.info("Processing {} pending outbox tasks", pending.size());
 
-            if (pendingOutboxes.isEmpty()) {
-                return;
+        for (PaymentOutbox task : pending) {
+            if (task.getNextAttemptAt() != null && task.getNextAttemptAt().isAfter(now)) {
+                continue; // a slow retry that is not due yet
             }
-
-            logger.info("Processing {} pending outbox messages", pendingOutboxes.size());
-
-            for (PaymentOutbox outbox : pendingOutboxes) {
-                processOutboxMessage(outbox);
+            try {
+                switch (task.getEventType()) {
+                    // "PENDING" / "PAYMENT_PENDING": PAY tasks written before step 2
+                    case OutboxService.TASK_PAY, "PENDING", "PAYMENT_PENDING" -> runPayTask(task.getId());
+                    case OutboxService.TASK_REFUND -> runRefundTask(task.getId());
+                    default -> {
+                        if (task.getRetryCount() < maxRetries) {
+                            transactionTemplate.executeWithoutResult(status ->
+                                    outboxRepository.findById(task.getId()).ifPresent(this::processOutboxMessage));
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                // A database problem in one task must not stop the others. The task stays PENDING and is retried
+                logger.error("Error processing outbox task id={}: {}", task.getId(), e.getMessage(), e);
             }
-
-        } catch (Exception e) {
-            logger.error("Error in outbox processor: {}", e.getMessage(), e);
         }
     }
-    
+
     /**
-     * Process a single Outbox message
+     * One PAY task: call bank with the task's key, at most fastRetries times in a row while there is no answer.
+     * A task that is already PAY_UNKNOWN gets one try per slow round (every 10 minutes).
+     */
+    private void runPayTask(Long taskId) {
+        String lastError = null;
+        for (int i = 0; i < fastRetries; i++) {
+            Optional<PaymentService.PayCall> next = paymentService.startPayAttempt(taskId);
+            if (next.isEmpty()) {
+                return; // nothing (left) to send
+            }
+            PaymentService.PayCall call = next.get();
+            BankCallResult result = bankAdapter.transfer(new BankTransferRequest(
+                    call.idempotencyKey(), call.fromAccount(), call.toAccount(), call.amount()));
+            switch (result.outcome()) {
+                case SUCCEEDED -> {
+                    paymentService.onPaySucceeded(taskId, result.transactionId());
+                    return;
+                }
+                case REJECTED -> {
+                    paymentService.onPayRejected(taskId, result.message());
+                    return;
+                }
+                case UNKNOWN -> lastError = result.message();
+            }
+            if (call.slowRetry()) {
+                break;
+            }
+            pause();
+        }
+        paymentService.onPayStillUnknown(taskId, lastError);
+    }
+
+    /** One REFUND task. Same shape as runPayTask; key REFUND-{paymentId}-{random}. */
+    private void runRefundTask(Long taskId) {
+        String lastError = null;
+        for (int i = 0; i < fastRetries; i++) {
+            Optional<PaymentService.RefundCall> next = paymentService.startRefundAttempt(taskId);
+            if (next.isEmpty()) {
+                return;
+            }
+            PaymentService.RefundCall call = next.get();
+            BankCallResult result = bankAdapter.refund(new BankRefundRequest(
+                    call.idempotencyKey(), call.originalTransactionId(), call.reason()));
+            switch (result.outcome()) {
+                case SUCCEEDED -> {
+                    paymentService.onRefundSucceeded(taskId, result.transactionId());
+                    return;
+                }
+                case REJECTED -> {
+                    paymentService.onRefundRejected(taskId, result.message());
+                    return;
+                }
+                case UNKNOWN -> lastError = result.message();
+            }
+            if (call.slowRetry()) {
+                break;
+            }
+            pause();
+        }
+        paymentService.onRefundStillUnknown(taskId, lastError);
+    }
+
+    private void pause() {
+        try {
+            Thread.sleep(fastRetryBackoffMs);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    /**
+     * Process one non-money event (delivery creation, emails, compensation). Runs inside a transaction.
      */
     private void processOutboxMessage(PaymentOutbox outbox) {
-        logger.info("Processing outbox message: id={}, eventType={}, orderId={}", 
+        logger.info("Processing outbox message: id={}, eventType={}, orderId={}",
                 outbox.getId(), outbox.getEventType(), outbox.getOrderId());
-        
+
         try {
             boolean success = false;
 
-            // Compatible with historical/async message event names: e.g., PAYMENT_PENDING/PAYMENT_SUCCESS/REFUND_SUCCESS
+            // Compatible with historical/async message event names: e.g., PAYMENT_SUCCESS/REFUND_SUCCESS
             String rawEventType = outbox.getEventType();
             String normalized;
             if (rawEventType == null) {
                 throw new IllegalArgumentException("Outbox eventType is null");
             }
             switch (rawEventType) {
-                case "PAYMENT_PENDING":
-                    normalized = "PENDING"; break;
                 case "PAYMENT_SUCCESS":
                     normalized = "SUCCESS"; break;
                 case "PAYMENT_FAILED":
@@ -153,10 +257,6 @@ public class OutboxProcessor {
 
             PaymentStatus eventType = PaymentStatus.valueOf(normalized); // Convert string to Enum
             switch (eventType) {
-                case PENDING:
-                    success = processPaymentPending(outbox);
-                    break;
-
                 case SUCCESS:
                     success = processPaymentSuccess(outbox);
                     break;
@@ -186,58 +286,38 @@ public class OutboxProcessor {
                     logger.warn("Unknown event type: {}", outbox.getEventType());
                     success = false; // Or throw exception directly
             }
-            
+
             if (success) {
                 outbox.setStatus("PROCESSED");
-                outbox.setProcessedAt(LocalDateTime.now());
+                outbox.setProcessedAt(LocalDateTime.now(clock));
                 logger.info("Outbox message processed successfully: id={}", outbox.getId());
             } else {
                 outbox.setRetryCount(outbox.getRetryCount() + 1);
-                
+
                 if (outbox.getRetryCount() >= maxRetries) {
                     outbox.setStatus("FAILED");
                     logger.error("Outbox message failed after {} retries: id={}", maxRetries, outbox.getId());
                 } else {
-                    logger.warn("Outbox message processing failed, will retry: id={}, retryCount={}", 
+                    logger.warn("Outbox message processing failed, will retry: id={}, retryCount={}",
                             outbox.getId(), outbox.getRetryCount());
                 }
             }
-            
+
             outboxRepository.save(outbox);
-            
+
         } catch (Exception e) {
             logger.error("Error processing outbox message: id={}, error={}", outbox.getId(), e.getMessage(), e);
-            
+
             outbox.setRetryCount(outbox.getRetryCount() + 1);
-            
+
             if (outbox.getRetryCount() >= maxRetries) {
                 outbox.setStatus("FAILED");
             }
-            
+
             outboxRepository.save(outbox);
         }
     }
-    
-    /**
-     * Process pending payment event - call PaymentService to process payment
-     */
-    private boolean processPaymentPending(PaymentOutbox outbox) {
-        try {
-            Map<String, Object> payload = objectMapper.readValue(
-                    outbox.getPayload(), new TypeReference<Map<String, Object>>() {});
-            Long orderId = Long.valueOf(payload.get("orderId").toString());
-            
-            logger.info("Processing payment for orderId={}", orderId);
-            paymentService.processPayment(orderId);
-            
-            return true;
-            
-        } catch (Exception e) {
-            logger.error("Failed to process PAYMENT_PENDING: {}", e.getMessage(), e);
-            return false;
-        }
-    }
-    
+
     /**
      * Process payment success event - create delivery request (call team member D's DeliveryService)
      */
@@ -248,14 +328,13 @@ public class OutboxProcessor {
 
             logger.info("Payment success for orderId={}", orderId);
 
-            // [New Step 1]: Update order status to PAID
-            // Place status update before calling external service, if update fails, don't continue
-            try {
-                orderService.updateOrderStatus(orderId, OrderStatus.PAID);
-                logger.info("Order status updated to PAID for orderId={}", orderId);
-            } catch (Exception e) {
-                logger.error("Failed to update order status to PAID for orderId={}. Will retry. Error: {}", orderId, e.getMessage(), e);
-                return false; // Updating order status is a critical step, must retry on failure
+            // The charge-result transaction already set the order to PAID (PaymentService.onPaySucceeded).
+            // If it is no longer PAID, the user cancelled in between: no delivery. Cancel already wrote the refund task.
+            Order current = orderRepository.findById(orderId).orElse(null);
+            if (current == null || current.getStatus() != OrderStatus.PAID) {
+                logger.info("Order {} is {} now, skipping delivery creation", orderId,
+                        current == null ? "missing" : current.getStatus());
+                return true;
             }
 
             // --- Subsequent logic remains mostly unchanged ---
@@ -441,7 +520,7 @@ public class OutboxProcessor {
     private boolean processDeliveryFailed(PaymentOutbox outbox) {
         Long orderId = outbox.getOrderId();
         LocalDateTime createdAt = outbox.getCreatedAt();
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(clock);
         
         // Calculate wait time (seconds)
         long waitSeconds = java.time.Duration.between(createdAt, now).getSeconds();

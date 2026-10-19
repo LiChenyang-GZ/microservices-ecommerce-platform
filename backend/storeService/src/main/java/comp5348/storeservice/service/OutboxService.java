@@ -25,32 +25,46 @@ public class OutboxService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /** Money task types. Only OutboxProcessor executes them, and only it calls bank (rule 1). */
+    public static final String TASK_PAY = "PAY";
+    public static final String TASK_REFUND = "REFUND";
+
     /**
-     * Create pending payment event
+     * Write a PAY task: "charge this payment with this key". Joins the caller's transaction,
+     * so the task exists exactly when the payment change that needs it is committed (rule 2).
+     * Not wrapped in try/catch: if the task cannot be written, the caller's transaction must roll back.
      */
-    @Transactional
-    public void createPaymentPendingEvent(Long orderId, BigDecimal amount) {
-        logger.info("Creating PAYMENT_PENDING event for orderId={}", orderId);
+    public PaymentOutbox createPayTask(Long orderId, Long paymentId, String idempotencyKey) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("orderId", orderId);
+        payload.put("paymentId", paymentId);
+        return saveTask(orderId, TASK_PAY, idempotencyKey, payload);
+    }
 
+    /** Write a REFUND task: "refund this payment with key REFUND-{paymentId}-{random}". Same rules as createPayTask. */
+    public PaymentOutbox createRefundTask(Long orderId, Long paymentId, String idempotencyKey, String reason) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("orderId", orderId);
+        payload.put("paymentId", paymentId);
+        payload.put("reason", reason);
+        return saveTask(orderId, TASK_REFUND, idempotencyKey, payload);
+    }
+
+    private PaymentOutbox saveTask(Long orderId, String type, String idempotencyKey, Map<String, Object> payload) {
+        PaymentOutbox task = new PaymentOutbox();
+        task.setOrderId(orderId);
+        task.setEventType(type);
+        task.setIdempotencyKey(idempotencyKey);
         try {
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("orderId", orderId);
-            payload.put("amount", amount.toString());
-
-            PaymentOutbox outbox = new PaymentOutbox();
-            outbox.setOrderId(orderId);
-            // Consistently use PaymentStatus enum name to avoid inconsistency with processor
-            outbox.setEventType(PaymentStatus.PENDING.name());
-            outbox.setPayload(objectMapper.writeValueAsString(payload));
-            outbox.setStatus("PENDING");
-            outbox.setRetryCount(0);
-
-            outboxRepository.save(outbox);
-            logger.info("PAYMENT_PENDING event created for orderId={}", orderId);
-
-        } catch (Exception e) {
-            logger.error("Failed to create PAYMENT_PENDING event: {}", e.getMessage(), e);
+            task.setPayload(objectMapper.writeValueAsString(payload));
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Cannot serialise " + type + " task payload", e);
         }
+        task.setStatus("PENDING");
+        task.setRetryCount(0);
+        PaymentOutbox saved = outboxRepository.save(task);
+        logger.info("{} task written: taskId={}, orderId={}, key={}", type, saved.getId(), orderId, idempotencyKey);
+        return saved;
     }
 
     /**

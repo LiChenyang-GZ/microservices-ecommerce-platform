@@ -135,8 +135,10 @@ public class StoreController {
         }
 
         try {
+            // Pay Now only queues the charge; the page polls the payment status until it settles
             OrderDTO order = orderProductService.retryOrderPayment(id, userEmail);
-            return ResponseEntity.ok(OrderResponse.success(order, "Payment processed successfully"));
+            String message = "PAID".equals(order.getStatus()) ? "Order already paid" : "Payment processing";
+            return ResponseEntity.ok(OrderResponse.success(order, message));
         } catch (Exception e) {
             logger.error("Error retrying payment for order {}: {}", id, e.getMessage(), e);
             return ResponseEntity.badRequest()

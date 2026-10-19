@@ -35,6 +35,15 @@ dependencies {
 	annotationProcessor 'org.projectlombok:lombok'
 	implementation 'com.fasterxml.jackson.core:jackson-databind'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
+	// Integration tests: a throwaway Postgres in Docker, never the local webuser database
+	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+	testImplementation 'org.testcontainers:junit-jupiter'
+	testImplementation 'org.testcontainers:postgresql'
+	// Fake bank over HTTP: timeouts, connection resets, scripted answers
+	testImplementation 'org.wiremock:wiremock-standalone:3.9.1'
+	// Architecture rule: only OutboxProcessor may move money
+	testImplementation 'com.tngtech.archunit:archunit-junit5:1.3.0'
+	testImplementation 'org.awaitility:awaitility'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 

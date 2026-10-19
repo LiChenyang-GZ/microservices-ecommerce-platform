@@ -152,30 +152,8 @@ public class OrderService {
         Order finalOrder = orderRepository.save(savedOrder);
         logger.info("[ORDER] Order finalized with id: {}, status: PLACED, inventoryTxIds: {}", finalOrder.getId(), inventoryTxIds);
 
-        // [New] Create and save Outbox message
-        try {
-            PaymentOutbox outboxMessage = new PaymentOutbox();
-            outboxMessage.setOrderId(finalOrder.getId());
-            outboxMessage.setEventType(PaymentStatus.PENDING.name());
-
-            // Create payload, a JSON string containing necessary information
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("orderId", finalOrder.getId());
-            payload.put("amount", finalOrder.getTotalAmount());
-            payload.put("userId", finalOrder.getUserId());
-            //... You can add any information needed by the payment service
-
-            outboxMessage.setPayload(objectMapper.writeValueAsString(payload));
-
-            // Save Outbox record
-            paymentOutboxRepository.save(outboxMessage);
-            logger.info("PAYMENT_PENDING event saved to outbox for orderId: {}", finalOrder.getId());
-
-        } catch (Exception e) {
-            // If serializing payload or saving Outbox fails, entire transaction should rollback
-            logger.error("Failed to save event to outbox for orderId: {}", finalOrder.getId(), e);
-            throw new RuntimeException("Failed to create outbox event, rolling back transaction.", e);
-        }
+        // No PAY task here: PaymentService.createPayment writes the one and only PAY task for this order.
+        // (This used to write a second one, and each ran with a fresh random reference: a double charge.)
 
         return convertToDTO(finalOrder);
     }
@@ -197,6 +175,25 @@ public class OrderService {
     }
 
     /**
+     * Auto-cancel for the 15-minute payment timeout (review finding 3).
+     * The caller read its list of unpaid orders earlier; a slow retry may have charged this order since then.
+     * So lock the row and look again: only an order that is still PENDING_PAYMENT is cancelled.
+     * (A user cancelling a PAID order on purpose goes through cancelOrder and gets a refund.)
+     *
+     * @return true if the order was cancelled, false if it was skipped
+     */
+    public boolean cancelIfStillUnpaid(Long orderId) {
+        Order order = orderRepository.findByIdForUpdate(orderId).orElse(null);
+        if (order == null || order.getStatus() != OrderStatus.PENDING_PAYMENT) {
+            logger.info("Auto-cancel skipped for order {}: status is now {}", orderId,
+                    order == null ? "missing" : order.getStatus());
+            return false;
+        }
+        cancelOrder(orderId); // same transaction; the row is already locked by us
+        return true;
+    }
+
+    /**
      * Cancel order (logic mostly unchanged, excellent)
      */
     public OrderDTO cancelOrder(Long orderId) {
@@ -204,7 +201,9 @@ public class OrderService {
         // I only made minor adjustments
         logger.info("Cancelling order: {}", orderId);
 
-        Order order = orderRepository.findById(orderId)
+        // Lock the order row first (then the payment row inside requestRefund): a charge result arriving
+        // at the same moment waits for us, then sees CANCELLED and writes the refund itself (rule 1).
+        Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
 
         // Cannot cancel if already picked up, in transit, delivered, or cancelled
@@ -252,25 +251,11 @@ public class OrderService {
         order.setStatus(OrderStatus.CANCELLED);
         Order savedOrder = orderRepository.save(order);
 
-        // Handle payment cancellation
-        try {
-            Optional<Payment> paymentOpt = paymentService.getPaymentByOrderId(order.getId());
-            if (paymentOpt.isPresent()) {
-                Payment payment = paymentOpt.get();
-                
-                if (payment.getStatus() == PaymentStatus.SUCCESS) {
-                    // If payment was successful, process refund
-                    paymentService.refundPayment(order.getId(), "Order cancelled by user");
-                } else if (payment.getStatus() == PaymentStatus.PENDING) {
-                    // If payment is still pending, mark as FAILED (will not be retried)
-                    payment.setStatus(PaymentStatus.FAILED);
-                    payment.setErrorMessage("Order cancelled by user");
-                    paymentService.updatePayment(payment);
-                    logger.info("Payment marked as FAILED due to order cancellation: orderId={}", order.getId());
-                }
-            }
-        } catch (Exception e) {
-            logger.warn("Payment cancellation skipped or failed for order {}: {}", order.getId(), e.getMessage());
+        // Money: only write a REFUND task (same transaction as the cancel). OutboxProcessor calls bank.
+        // A payment that is still PENDING / PAY_UNKNOWN is left alone: the money may be moving right now.
+        // If that charge succeeds later, its result transaction sees CANCELLED and writes the refund.
+        if (paymentService.getPaymentByOrderId(order.getId()).isPresent()) {
+            paymentService.requestRefund(order.getId(), "Order cancelled by user");
         }
 
         // Email notification
@@ -343,13 +328,8 @@ public class OrderService {
             // If delivery service reports LOST (we map to CANCELLED), trigger refund
             if ("LOST".equalsIgnoreCase(incomingStatus)) {
                 try {
-                    Optional<Payment> payOpt = paymentService.getPaymentByOrderId(orderId);
-                    if (payOpt.isPresent() && payOpt.get().getStatus() != PaymentStatus.REFUNDED) {
-                        paymentService.refundPayment(orderId, "Auto refund: package lost during delivery");
-                        logger.info("Refund triggered for LOST delivery, orderId={}", orderId);
-                    } else {
-                        logger.info("Refund already done or payment missing for orderId={}, skip.", orderId);
-                    }
+                    // Only writes a REFUND task; does nothing if the payment is not SUCCESS (already refunding / refunded)
+                    paymentService.requestRefund(orderId, "Auto refund: package lost during delivery");
                 } catch (Exception e) {
                     logger.error("Refund on LOST failed for orderId={}: {}", orderId, e.getMessage(), e);
                 }
