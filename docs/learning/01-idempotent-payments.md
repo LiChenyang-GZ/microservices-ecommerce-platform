@@ -2,7 +2,7 @@
 
 **English** | [中文](01-idempotent-payments.zh-CN.md)
 
-> Commits: `49b4c70 test(red)` (rows 1–15), `67235f0 test(red)` (row 16) → `ce8d34d feat`
+> Commits: `49b4c70 test(red)` (rows 1–15), `67235f0 test(red)` (row 16) → `ce8d34d feat`; after the review: `1aafbbe test(red)` (rows 17–19) → `5194401 feat`
 > Replay time: **60 minutes**
 > The 16-row failure-scenario table lives in Obsidian: `开发/电商项目/03-第1波A-修钱-失败场景表.md`. This document covers **the concepts behind this step**.
 
@@ -27,7 +27,7 @@ The red commits reproduced 16 problems on the old code. The four most typical:
 
 ### 2.1 Idempotency key
 **In plain words**: give every "thing to do" a fixed name. However many times a request with that name arrives, bank does it once and answers every later copy with the first result.
-- Charge: `PAY-{paymentId}-{attempt}`; refund: `REFUND-{paymentId}`. The name is fixed **when the task is written**, stored in `payment_outbox.idempotency_key`, and reused by every retry: [PaymentService.java:76](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L76)
+- Charge: `PAY-{paymentId}-{attempt}-{random}`; refund: `REFUND-{paymentId}-{random}` (the random part was added after the review, see 2.12). The name is fixed **when the task is written**, stored in `payment_outbox.idempotency_key`, and reused by every retry: [PaymentService.java:76](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L76)
 - `attempt` only goes up when the user clicks Pay Now **after bank definitely said no**: [PaymentService.java:121](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L121)
 - On bank's side, `transactions.transaction_ref` holds the key and has a unique constraint. bank looks the key up first and returns the first result if it finds one: [BankService.java:53](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java#L53)
 
@@ -93,6 +93,19 @@ The red commits reproduced 16 problems on the old code. The four most typical:
 | A `TaskScheduler` that never fires | `@Scheduled` jobs don't run in the background; tests call `processOutbox()` themselves |
 | React Testing Library + jest fake timers | Frontend: click Pay Now → see "processing" → move time 3 s → the page refreshes to SUCCESS |
 
+
+### 2.12 Three fixes after the review (#17–#19)
+The independent review (Obsidian `07-第1波审查-A-修钱`) found problems the table did not have. All three got a red test first (`1aafbbe`), then the fix (`5194401`).
+
+- **Keys could be taken first (#17, #18)**: the old key `PAY-{paymentId}-{attempt}` was sequential and the paymentId is visible in the UI; bank answered a reused key with "the first result" without looking at the content. An attacker used the victim's next key for a 0.01 transfer to themselves, and store's real charge then got "already succeeded": a 0 order became PAID. Fixed on both sides:
+  - bank **compares the content** of a reused key (transfer: type, from, to, amount; refund: type, original transaction). Same → the first result; different → "key conflict", REJECTED, no money moves: [BankService.java](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java) (`previousTransferResult`, `previousRefundResult`)
+  - store's keys get a **random part**: `PAY-{paymentId}-{attempt}-{random}`, `REFUND-{paymentId}-{random}`. 16 hex characters from `SecureRandom`, stored on the payment with `@JsonIgnore` so no API returns it; a new one per charge attempt, and retries of the same attempt reuse the key stored on the task: [PaymentService.java](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java) (`payKey`, `newKeyNonce`)
+  - Contract README section 4 and the `bank.proto` comment were updated; no proto field changed, the key is still an opaque string.
+- **Auto-cancel cancelled a paid order (#19)**: the canceller read its list of unpaid orders, the charge succeeded in between, and `cancelOrder` accepts PAID. Auto-cancel now goes through `OrderService.cancelIfStillUnpaid`: **lock the order row, then look again**, and skip it if it is no longer pending. A user cancelling a paid order on purpose still works (refund). The test uses `@MockitoSpyBean` so `findByStatus` returns the stale list, which reproduces the window every time.
+- Not done: store checking the amount and accounts in bank's success answer. The proto `TransferResponse` has no such fields, and since bank compares content, "this key succeeded" already means "these from, to and amount".
+
+Lesson: every row in the table was right; the problem came from two of them together ("keys are guessable" + "bank deduplicates by key only"). An idempotency key must not only mean "same job, same key"; nobody else may be able to make your key, and the server must check that the same key really is the same job.
+
 ---
 
 ## 3. Request path walkthrough
@@ -121,7 +134,7 @@ OutboxProcessor.processOutbox()   every 5 s, no transaction
 ```
 POST /api/store/orders/{id}/cancel
  └ OrderService.cancelOrder               (one tx) lock order row → release stock → CANCELLED
-     └ PaymentService.requestRefund       lock payment row → only if SUCCESS: REFUND task (REFUND-{paymentId})
+     └ PaymentService.requestRefund       lock payment row → only if SUCCESS: REFUND task (REFUND-{paymentId}-{random})
 OutboxProcessor → runRefundTask → BankAdapter.refund {idempotencyKey, originalTransactionId, reason}
  └ bank: BankService.refund               check key → lock both accounts → check key again → already refunded? → refund
 ```
@@ -138,7 +151,7 @@ Frontend OrderDetailPage: "payment processing", re-read every 3 s until SUCCESS 
 ```
 
 ### 3.4 Evidence: logs from one real order
-Real bank + real store (throwaway Postgres; delivery deliberately not running, so compensation refunds the order):
+Real bank + real store (throwaway Postgres; delivery deliberately not running, so compensation refunds the order). These logs were recorded before the random part existed, so the key is `PAY-1-1`; today it is `PAY-1-1-` followed by 16 random characters:
 ```
 15:28:22.698 OutboxService       PAY task written: taskId=1, orderId=1, key=PAY-1-1
 15:28:25.567 BankAdapter         Calling bank transfer: key=PAY-1-1, amount=6999.00
@@ -220,13 +233,14 @@ Sending `PAY-1-1` to bank again by hand afterwards: `"Transaction already proces
 3. **Two requests with the same key reach bank at the same time?** → Neither finds the key. Both lock the account rows; the second waits for the first to commit, then checks the key again, finds it, and returns the first result. The unique constraint is the backstop.
 4. **Why pessimistic, not optimistic?** → The store account changes on every payment, so conflicts are normal; the locked section is two updates with no network call. Accounts are locked in account-number order to avoid deadlock.
 5. **What if you called bank while holding a lock?** → One slow call blocks everyone and ties up the connection pool. So `OutboxProcessor` has no big transaction and holds nothing while calling bank; the result is handled in a new short transaction that locks the order row.
-6. (Deeper) **Several store instances running OutboxProcessor?** → Not done yet. Money stays correct (keys), but a task could be processed twice. Next: claim tasks with `FOR UPDATE SKIP LOCKED`.
+6. **What is wrong with the key PAY-{paymentId}-{attempt}?** → It can be guessed. Someone uses it first for a tiny transfer; if bank only deduplicates by key, my charge gets "already succeeded". So the key gets a random part, and bank also compares the content: different content is a key conflict.
+7. (Deeper) **Several store instances running OutboxProcessor?** → Not done yet. Money stays correct (keys), but a task could be processed twice. Next: claim tasks with `FOR UPDATE SKIP LOCKED`.
 
 ---
 
 ## 7. How to say it
 
-> Payments go through one place. The API only writes a task, and one processor calls the bank with a fixed key, like PAY-12-1.
+> Payments go through one place. The API only writes a task, and one processor calls the bank with a fixed key, like PAY-12-1 plus a random part.
 > A timeout means unknown, not failed. I retry with the same key. After five tries I mark it unknown, alert, and retry every ten minutes.
 > On the bank side, I lock the two account rows in a fixed order, then check the key again. That fixed a lost update I reproduced with ten concurrent transfers.
 

@@ -2,7 +2,7 @@
 
 [English](01-idempotent-payments.md) | **中文**
 
-> 对应 commit：`49b4c70 test(red)`（15 行）、`67235f0 test(red)`（第 16 行）→ `ce8d34d feat`
+> 对应 commit：`49b4c70 test(red)`（15 行）、`67235f0 test(red)`（第 16 行）→ `ce8d34d feat`；审查之后：`1aafbbe test(red)`（第 17–19 行）→ `5194401 feat`
 > 预计回放时间：**60 分钟**
 > 失败场景表（16 行）在 Obsidian：`开发/电商项目/03-第1波A-修钱-失败场景表.md`。这份文档讲**这一步学到的概念**。
 
@@ -27,7 +27,7 @@
 
 ### 2.1 幂等键（idempotency key）
 **大白话**：给每一笔"要做的事"起一个固定的名字。同一个名字的请求，不管来几次，bank 只做一次，后面几次都回答"第一次的结果"。
-- 扣款：`PAY-{paymentId}-{attempt}`；退款：`REFUND-{paymentId}`。名字在**写任务的时候**就定下来，存在 `payment_outbox.idempotency_key` 里，之后每次重试都用它：[PaymentService.java:76](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L76)
+- 扣款：`PAY-{paymentId}-{attempt}-{随机段}`；退款：`REFUND-{paymentId}-{随机段}`（随机段是审查之后加的，见 2.12）。名字在**写任务的时候**就定下来，存在 `payment_outbox.idempotency_key` 里，之后每次重试都用它：[PaymentService.java:76](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L76)
 - `attempt` 只在 bank **明确拒绝**之后、用户点 Pay Now 时才加 1：[PaymentService.java:121](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L121)
 - bank 那边：`transactions.transaction_ref` 有唯一约束，存的就是这个键。先查键，查到就返回第一次的结果：[BankService.java:53](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java#L53)
 
@@ -93,6 +93,19 @@
 | 不触发的 `TaskScheduler` | 测试里 `@Scheduled` 任务不在后台自己跑，测试自己调 `processOutbox()` |
 | React Testing Library + jest 假时钟 | 前端：点 Pay Now → 看到"处理中" → 拨 3 秒 → 自动刷新出 SUCCESS |
 
+
+### 2.12 审查之后补的三处（#17–#19）
+独立审查（Obsidian `07-第1波审查-A-修钱`）找到了表里没有的问题。三条都先写了红灯（`1aafbbe`），再修（`5194401`）。
+
+- **键能被抢先占用（#17、#18）**：旧键 `PAY-{paymentId}-{attempt}` 是连号，paymentId 页面上看得到；bank 见到用过的键只回"第一次的结果"，不看内容。攻击者先用受害订单的下一个键给自己转 0.01，store 真正的扣款就拿到"已成功"，订单 0 元变 PAID。两处都改：
+  - bank 见到用过的键，先**比对内容**（转账：类型、付款人、收款人、金额；退款：类型、原交易）。一样才返回第一次的结果；不一样就是"键冲突"，回 REJECTED，钱不动：[BankService.java](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java)（`previousTransferResult`、`previousRefundResult`）
+  - store 的键加**随机段**：`PAY-{paymentId}-{attempt}-{随机}`、`REFUND-{paymentId}-{随机}`。随机段是 `SecureRandom` 的 16 位十六进制，存在 Payment 上，加了 `@JsonIgnore`，任何接口都不返回；每次新的扣款尝试换一个，同一次尝试的重试用任务里存好的同一个键：[PaymentService.java](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)（`payKey`、`newKeyNonce`）
+  - 契约 README 第 4 节和 `bank.proto` 的注释同步改了；proto 的字段没动，键还是不透明的字符串。
+- **自动取消取消了已付款的订单（#19）**：取消器先读"待支付"列表，期间扣款成功；`cancelOrder` 不拒绝 PAID。现在自动取消走 `OrderService.cancelIfStillUnpaid`：**锁住订单行之后再看一眼**，不是待支付就跳过。用户自己取消已付款的订单仍然允许（会退款）。测试用 `@MockitoSpyBean` 让 `findByStatus` 返回旧列表，稳定复现时间窗。
+- 没做：store 收到成功时核对 bank 回来的金额和账户。proto 的 `TransferResponse` 没有这些字段；而且 bank 已经按内容比对，"这个键成功"就等于"这笔付款人、收款人、金额都对"。
+
+教训：表里每一行都对，组合在一起才出问题（"键能猜" + "bank 只按键去重"）。幂等键不只要"同一件事同一个键"，还要"别人造不出你的键"，服务端还要确认"同一个键是同一件事"。
+
 ---
 
 ## 3. 请求路径导读
@@ -121,7 +134,7 @@ OutboxProcessor.processOutbox()   每 5 秒，无事务
 ```
 POST /api/store/orders/{id}/cancel
  └ OrderService.cancelOrder               （一个事务）锁订单行 → 释放库存 → CANCELLED
-     └ PaymentService.requestRefund       锁 Payment 行 → SUCCESS 才写 REFUND 任务（REFUND-{paymentId}）
+     └ PaymentService.requestRefund       锁 Payment 行 → SUCCESS 才写 REFUND 任务（REFUND-{paymentId}-{随机段}）
 OutboxProcessor → runRefundTask → BankAdapter.refund {idempotencyKey, originalTransactionId, reason}
  └ bank: BankService.refund               查键 → 锁两个账户 → 再查键 → 这笔转账退过没有 → 退钱
 ```
@@ -138,7 +151,7 @@ POST /api/store/orders/{id}/retry-payment
 ```
 
 ### 3.4 证据：一次真实下单的日志
-真的 bank + 真的 store（临时 Postgres，delivery 故意不开，所以会走到补偿退款）：
+真的 bank + 真的 store（临时 Postgres，delivery 故意不开，所以会走到补偿退款）。这份日志是加随机段之前录的，所以键是 `PAY-1-1`；现在会是 `PAY-1-1-` 后面跟 16 位随机字符：
 ```
 15:28:22.698 OutboxService       PAY task written: taskId=1, orderId=1, key=PAY-1-1
 15:28:25.567 BankAdapter         Calling bank transfer: key=PAY-1-1, amount=6999.00
@@ -220,13 +233,14 @@ POST /api/store/orders/{id}/retry-payment
 3. **同一个键的两个请求同时到 bank 呢？** → 两个都查不到键。都去锁账户行，第二个等第一个提交；拿到锁后再查一次键，看到了，返回第一次的结果。唯一约束是兜底。
 4. **为什么用悲观锁，不用乐观锁？** → 商店账户每笔付款都改，冲突是常态；锁的范围只有两次更新，没有网络调用。按账号排序加锁防死锁。
 5. **锁住的时候调 bank 会怎样？** → 一个慢请求卡住所有人，连接池也会被占满。所以 `OutboxProcessor` 不加大事务，调 bank 时手里没有任何锁；结果回来再开一个短事务、锁订单行判断。
-6. （更深）**多个 store 实例同时跑 OutboxProcessor 呢？** → 现在没做。钱不会错（幂等键），但任务会被处理两次。下一步用 `FOR UPDATE SKIP LOCKED` 领任务。
+6. **键是 PAY-{paymentId}-{attempt}，有什么问题？** → 能猜。别人抢先用这个键做一笔小转账，bank 只按键去重，我的扣款就拿到"已成功"。所以键加随机段，bank 还要比对内容，不一样就是键冲突。
+7. （更深）**多个 store 实例同时跑 OutboxProcessor 呢？** → 现在没做。钱不会错（幂等键），但任务会被处理两次。下一步用 `FOR UPDATE SKIP LOCKED` 领任务。
 
 ---
 
 ## 7. 英文说法
 
-> Payments go through one place. The API only writes a task, and one processor calls the bank with a fixed key, like PAY-12-1.
+> Payments go through one place. The API only writes a task, and one processor calls the bank with a fixed key, like PAY-12-1 plus a random part.
 > A timeout means unknown, not failed. I retry with the same key. After five tries I mark it unknown, alert, and retry every ten minutes.
 > On the bank side, I lock the two account rows in a fixed order, then check the key again. That fixed a lost update I reproduced with ten concurrent transfers.
 
