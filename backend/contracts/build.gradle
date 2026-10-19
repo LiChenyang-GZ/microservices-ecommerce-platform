@@ -1,0 +1,61 @@
+// Shared contracts: Kafka event envelope + payloads, and the bank gRPC .proto.
+// Every service that produces or consumes these depends on this module, so
+// both sides of a contract compile against the same classes.
+plugins {
+	id 'java-library'
+	id 'io.spring.dependency-management' version '1.1.7'
+	id 'com.google.protobuf' version '0.9.4'
+}
+
+group = 'comp5348'
+version = '0.0.1-SNAPSHOT'
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(17)
+	}
+}
+
+repositories {
+	mavenCentral()
+}
+
+ext {
+	protobufVersion = '3.25.5'
+	grpcVersion = '1.68.1'
+}
+
+dependencyManagement {
+	imports {
+		mavenBom 'org.springframework.boot:spring-boot-dependencies:3.5.6'
+	}
+}
+
+dependencies {
+	api 'com.fasterxml.jackson.core:jackson-databind'
+	api 'com.fasterxml.jackson.datatype:jackson-datatype-jsr310'
+
+	api "com.google.protobuf:protobuf-java:${protobufVersion}"
+	api "io.grpc:grpc-protobuf:${grpcVersion}"
+	api "io.grpc:grpc-stub:${grpcVersion}"
+	compileOnly 'org.apache.tomcat:annotations-api:6.0.53'
+
+	testImplementation 'org.junit.jupiter:junit-jupiter'
+	testImplementation 'org.junit.jupiter:junit-jupiter-params'
+	testImplementation 'org.assertj:assertj-core'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+protobuf {
+	protoc { artifact = "com.google.protobuf:protoc:${protobufVersion}" }
+	plugins {
+		grpc { artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}" }
+	}
+	generateProtoTasks {
+		all()*.plugins { grpc {} }
+	}
+}
+
+tasks.named('test') {
+	useJUnitPlatform()
+}

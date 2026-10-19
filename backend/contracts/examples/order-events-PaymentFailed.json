@@ -1,0 +1,7 @@
+{
+  "eventId": "3f1c2a6e-0000-4000-8000-000000000003",
+  "eventType": "PaymentFailed",
+  "orderId": "42",
+  "occurredAt": "2026-10-19T02:03:00Z",
+  "payload": { "paymentId": 11, "attempt": 1, "reason": "INSUFFICIENT_FUNDS" }
+}

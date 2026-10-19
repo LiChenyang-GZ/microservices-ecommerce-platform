@@ -1,0 +1,61 @@
+// store -> bank money operations (ADR-10). Only store's OutboxProcessor calls this (rule 1).
+//
+// How the caller must read the result (ADR-05, rule 7):
+//   outcome = SUCCEEDED            -> done; transaction_id is the bank's id
+//   outcome = REJECTED             -> definite business failure (e.g. insufficient funds,
+//                                     refund not allowed); reason says why
+//   gRPC status DEADLINE_EXCEEDED,
+//   UNAVAILABLE or any other error -> result UNKNOWN. Retry with the SAME idempotency_key.
+//                                     Never treat it as REJECTED.
+//
+// Idempotency (ADR-04): bank stores idempotency_key with a unique constraint.
+// A repeated key returns the first call's response and moves no money.
+// Keys: Transfer = "PAY-{paymentId}-{attempt}", Refund = "REFUND-{paymentId}".
+syntax = "proto3";
+
+package bank.v1;
+
+option java_multiple_files = true;
+option java_package = "com.comp5348.contracts.bank.v1";
+option java_outer_classname = "BankProto";
+
+service BankService {
+  rpc Transfer(TransferRequest) returns (TransferResponse);
+  rpc Refund(RefundRequest) returns (RefundResponse);
+}
+
+enum Outcome {
+  OUTCOME_UNSPECIFIED = 0;
+  SUCCEEDED = 1;
+  REJECTED = 2;
+}
+
+message TransferRequest {
+  string idempotency_key = 1;
+  string from_account = 2;
+  string to_account = 3;
+  // Decimal as a string, e.g. "129.90". Never a float.
+  string amount = 4;
+}
+
+message TransferResponse {
+  Outcome outcome = 1;
+  // Set when outcome = SUCCEEDED. Store keeps it as Payment.bankTxnId.
+  string transaction_id = 2;
+  // Set when outcome = REJECTED, e.g. "INSUFFICIENT_FUNDS".
+  string reason = 3;
+}
+
+message RefundRequest {
+  string idempotency_key = 1;
+  // transaction_id from the successful TransferResponse. Refund is always the full amount.
+  string original_transaction_id = 2;
+  // ORDER_CANCELLED | DELIVERY_LOST | PAID_AFTER_CANCEL (same values as OrderRefunded.reason)
+  string reason = 3;
+}
+
+message RefundResponse {
+  Outcome outcome = 1;
+  string refund_transaction_id = 2;
+  string reason = 3;
+}

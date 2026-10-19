@@ -1,0 +1,7 @@
+{
+  "eventId": "3f1c2a6e-0000-4000-8000-000000000004",
+  "eventType": "OrderCancelled",
+  "orderId": "42",
+  "occurredAt": "2026-10-19T02:04:00Z",
+  "payload": { "reason": "USER_REQUEST" }
+}
