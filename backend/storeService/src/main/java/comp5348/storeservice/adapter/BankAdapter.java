@@ -9,30 +9,30 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 
-import java.time.Duration;
-
 @Component
 public class BankAdapter {
-    
+
     private static final Logger logger = LoggerFactory.getLogger(BankAdapter.class);
-    private static final int MAX_RETRIES = 3;
-    private static final long RETRY_DELAY_MS = 1000;
-    
+
     private final RestTemplate restTemplate;
-    
+
     @Value("${bank.service.url:http://localhost:8084}")
     private String bankServiceUrl;
-    
-    public BankAdapter(RestTemplateBuilder builder) {
+
+    public BankAdapter(RestTemplateBuilder builder,
+                       @Value("${bank.client.connect-timeout-ms:5000}") int connectTimeoutMs,
+                       @Value("${bank.client.read-timeout-ms:5000}") int readTimeoutMs) {
         this.restTemplate = builder
                 .requestFactory(() -> {
                     SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-                    factory.setConnectTimeout((int) Duration.ofSeconds(5).toMillis());
-                    factory.setReadTimeout((int) Duration.ofSeconds(5).toMillis());
+                    factory.setConnectTimeout(connectTimeoutMs);
+                    factory.setReadTimeout(readTimeoutMs);
                     return factory;
                 })
                 .build();
@@ -56,89 +56,71 @@ public class BankAdapter {
         }
         return null;
     }
-    
+
     /**
-     * Transfer interface - with retry mechanism
+     * One transfer call. No retry here: OutboxProcessor decides whether and when to retry (same key).
+     * Only OutboxProcessor may call this (rule 1, checked by BankAccessArchitectureTest).
      */
-    public BankTransferResponse transfer(BankTransferRequest request) {
-        logger.info("Calling Bank transfer API: ref={}", request.getTransactionRef());
-        
-        String url = bankServiceUrl + "/api/bank/transfer";
-        
-        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            try {
-                HttpHeaders headers = new HttpHeaders();
-                headers.setContentType(MediaType.APPLICATION_JSON);
-                HttpEntity<BankTransferRequest> entity = new HttpEntity<>(request, headers);
-                
-                ResponseEntity<BankTransferResponse> response = restTemplate.postForEntity(url, entity, BankTransferResponse.class);
-                
-                BankTransferResponse result = response.getBody();
-                if (result != null) {
-                    logger.info("Bank transfer response: success={}, txnId={}, message={}", 
-                            result.isSuccess(), result.getTransactionId(), result.getMessage());
-                    return result;
-                }
-                
-            } catch (Exception e) {
-                logger.error("Bank transfer attempt {} failed: {}", attempt, e.getMessage());
-                
-                if (attempt == MAX_RETRIES) {
-                    logger.error("Bank transfer failed after {} attempts", MAX_RETRIES);
-                    return new BankTransferResponse(false, null, "Bank service unavailable: " + e.getMessage());
-                }
-                
-                try {
-                    Thread.sleep(RETRY_DELAY_MS);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-        }
-        
-        return new BankTransferResponse(false, null, "Bank transfer failed after retries");
+    public BankCallResult transfer(BankTransferRequest request) {
+        logger.info("Calling bank transfer: key={}, amount={}", request.getIdempotencyKey(), request.getAmount());
+        BankCallResult result = post("/api/bank/transfer", request, BankTransferResponse.class);
+        logger.info("Bank transfer result: key={}, outcome={}, txnId={}, message={}",
+                request.getIdempotencyKey(), result.outcome(), result.transactionId(), result.message());
+        return result;
     }
-    
+
     /**
-     * Refund interface - with retry mechanism
+     * One refund call. Same rules as transfer.
      */
-    public BankRefundResponse refund(BankRefundRequest request) {
-        logger.info("Calling Bank refund API: transactionId={}", request.getTransactionId());
-        
-        String url = bankServiceUrl + "/api/bank/refund";
-        
-        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    public BankCallResult refund(BankRefundRequest request) {
+        logger.info("Calling bank refund: key={}, originalTransactionId={}",
+                request.getIdempotencyKey(), request.getOriginalTransactionId());
+        BankCallResult result = post("/api/bank/refund", request, BankRefundResponse.class);
+        logger.info("Bank refund result: key={}, outcome={}, refundTxnId={}, message={}",
+                request.getIdempotencyKey(), result.outcome(), result.transactionId(), result.message());
+        return result;
+    }
+
+    /**
+     * Turn one HTTP call into SUCCEEDED / REJECTED / UNKNOWN.
+     * - 2xx with success=true          → SUCCEEDED
+     * - bank's own "no" (success=false) → REJECTED. Bank sends it as HTTP 400 with a JSON body.
+     * - anything else: timeout, connection reset, 5xx, a 4xx without bank's JSON → UNKNOWN.
+     *   We cannot tell whether the money moved, so this is never a failure.
+     */
+    private <T> BankCallResult post(String path, Object request, Class<T> responseType) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        try {
+            ResponseEntity<T> response = restTemplate.postForEntity(
+                    bankServiceUrl + path, new HttpEntity<>(request, headers), responseType);
+            return fromBody(response.getBody());
+        } catch (HttpClientErrorException e) {
             try {
-                HttpHeaders headers = new HttpHeaders();
-                headers.setContentType(MediaType.APPLICATION_JSON);
-                HttpEntity<BankRefundRequest> entity = new HttpEntity<>(request, headers);
-                
-                ResponseEntity<BankRefundResponse> response = restTemplate.postForEntity(url, entity, BankRefundResponse.class);
-                
-                BankRefundResponse result = response.getBody();
-                if (result != null) {
-                    logger.info("Bank refund response: success={}, refundTxnId={}, message={}", 
-                            result.isSuccess(), result.getRefundTransactionId(), result.getMessage());
+                T body = e.getResponseBodyAs(responseType);
+                BankCallResult result = fromBody(body);
+                if (result.outcome() == BankCallResult.Outcome.REJECTED) {
                     return result;
                 }
-                
-            } catch (Exception e) {
-                logger.error("Bank refund attempt {} failed: {}", attempt, e.getMessage());
-                
-                if (attempt == MAX_RETRIES) {
-                    logger.error("Bank refund failed after {} attempts", MAX_RETRIES);
-                    return new BankRefundResponse(false, null, "Bank service unavailable: " + e.getMessage());
-                }
-                
-                try {
-                    Thread.sleep(RETRY_DELAY_MS);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                }
+            } catch (Exception parseError) {
+                // not bank's JSON: fall through to UNKNOWN
             }
+            return BankCallResult.unknown("HTTP " + e.getStatusCode().value() + " without a bank answer");
+        } catch (RestClientException e) {
+            return BankCallResult.unknown(e.getClass().getSimpleName() + ": " + e.getMessage());
         }
-        
-        return new BankRefundResponse(false, null, "Bank refund failed after retries");
+    }
+
+    private static BankCallResult fromBody(Object body) {
+        if (body instanceof BankTransferResponse t) {
+            return t.isSuccess() ? BankCallResult.succeeded(t.getTransactionId(), t.getMessage())
+                    : BankCallResult.rejected(t.getMessage());
+        }
+        if (body instanceof BankRefundResponse r) {
+            return r.isSuccess() ? BankCallResult.succeeded(r.getRefundTransactionId(), r.getMessage())
+                    : BankCallResult.rejected(r.getMessage());
+        }
+        return BankCallResult.unknown("Empty response from bank");
     }
 
     /**
@@ -186,5 +168,3 @@ public class BankAdapter {
         return null;
     }
 }
-
-

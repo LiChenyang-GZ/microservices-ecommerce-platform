@@ -30,8 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 【层】集成测试：真的 bank 代码 + 真的 Postgres（Testcontainers）。直接调 BankService，不经过 HTTP。
  * 【为什么一定要真数据库】去重靠的是 transactions.transaction_ref 的唯一约束，并发时靠数据库挡住第二个插入。
  *   H2 / Mockito 都测不出"两个请求同时到达"时数据库到底怎么表现。
- * 【字段名】规格要求 bank 的字段按 bank.proto 起名（idempotencyKey、originalTransactionId）。
- *   现在还叫 transactionRef / transactionId；绿灯阶段改名时，这里跟着改 setter，断言不变。
+ * 【字段名】按 bank.proto 起名：idempotencyKey、originalTransactionId。
  */
 @SpringBootTest(properties = {
         "DB_USERNAME=unused-overridden-by-testcontainers",
@@ -72,7 +71,7 @@ class BankIdempotencyIntegrationTest {
         request.setFromAccount(from);
         request.setToAccount(to);
         request.setAmount(PRICE);
-        request.setTransactionRef(key); // 规格里叫 idempotencyKey
+        request.setIdempotencyKey(key);
         return request;
     }
 
@@ -157,7 +156,8 @@ class BankIdempotencyIntegrationTest {
 
         // 同一笔退款发两次（store 退款超时后重试就是这样）
         RefundRequest refund = new RefundRequest();
-        refund.setTransactionId(paid.getTransactionId()); // 规格里叫 originalTransactionId，键是 REFUND-{paymentId}
+        refund.setIdempotencyKey("REFUND-" + UUID.randomUUID()); // store 用 REFUND-{paymentId}
+        refund.setOriginalTransactionId(paid.getTransactionId());
         refund.setReason("Order cancelled by user");
         RefundResponse first = bankService.refund(refund);
         String second;

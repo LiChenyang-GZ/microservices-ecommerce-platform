@@ -40,8 +40,13 @@ public class Payment {
     
     private LocalDateTime paymentDate;  // 记录支付成功的时间
 
-    // Step 2 shell (test(red)): part of the idempotency key PAY-{paymentId}-{attempt}; nothing changes it yet
+    // Part of the charge key PAY-{paymentId}-{attempt}. Only Pay Now after a definite failure (FAILED) adds 1.
+    // Nullable so ddl-auto=update can add the column to an existing table; read it through currentAttempt().
     private Integer attempt = 1;
+
+    public int currentAttempt() {
+        return attempt == null ? 1 : attempt;
+    }
 
     @PrePersist
     protected void onCreate() {

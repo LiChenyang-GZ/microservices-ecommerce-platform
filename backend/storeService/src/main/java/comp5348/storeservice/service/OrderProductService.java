@@ -192,116 +192,42 @@ public class OrderProductService {
     }
 
     /**
-     * Process payment for an existing order with PENDING_PAYMENT status
-     * This is called when user clicks "Pay Now" on an unpaid order
+     * Pay Now on an unpaid order (rule 8). Never calls bank: it only asks PaymentService to queue a new attempt,
+     * and only if the last one definitely failed. The page then shows "payment processing" and polls the status.
      */
     public OrderDTO retryOrderPayment(Long orderId, String userEmail) {
-        logger.info("Processing payment for order: {}, user: {}", orderId, userEmail);
+        logger.info("Pay Now for order: {}, user: {}", orderId, userEmail);
 
-        // 1. Get order
         OrderDTO order = orderService.getOrderById(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
 
-        // 2. Check order status - must be PENDING_PAYMENT
+        Account userAcc = accountRepository.findByEmail(userEmail)
+                .orElseThrow(() -> new IllegalStateException("User account not found for email: " + userEmail));
+        // The charge always comes from the order owner's bank account, so only the owner may trigger it
+        if (!userAcc.getId().equals(order.getUserId())) {
+            throw new IllegalStateException("Order " + orderId + " does not belong to the current user");
+        }
+
+        if (OrderStatus.PAID.name().equals(order.getStatus())) {
+            return order;
+        }
         if (!OrderStatus.PENDING_PAYMENT.name().equals(order.getStatus())) {
             throw new IllegalStateException("Order is not awaiting payment. Current status: " + order.getStatus());
         }
 
-        // 3. Get user's bank account from email
-        Optional<Account> userAccOpt = accountRepository.findByEmail(userEmail);
-        if (!userAccOpt.isPresent()) {
-            throw new IllegalStateException("User account not found for email: " + userEmail);
-        }
-
-        Account userAcc = userAccOpt.get();
-        String fromAccount;
-
-        // If bank account number is not stored in Store Service, fetch it from Bank Service
+        // OutboxProcessor charges the bank account stored here; look it up once if it is missing (no money moves)
         if (userAcc.getBankAccountNumber() == null || userAcc.getBankAccountNumber().isEmpty()) {
-            logger.info("Bank account number not found in Store Service for user: {}. Querying Bank Service...", userEmail);
             String bankAccountNumber = bankAdapter.getAccountByOwnerEmail(userEmail);
-
             if (bankAccountNumber == null || bankAccountNumber.isEmpty()) {
                 throw new IllegalStateException("User has no linked bank account. Please go to 'Add Money' page to create your bank account first.");
             }
-
-            // Update Store Service's Account table with the bank account number
             userAcc.setBankAccountNumber(bankAccountNumber);
             accountRepository.save(userAcc);
-            logger.info("Updated Store Service account with bank account number: {}", bankAccountNumber);
-            fromAccount = bankAccountNumber;
-        } else {
-            fromAccount = userAcc.getBankAccountNumber();
         }
 
-        // 4. Check balance
-        BigDecimal balance = bankAdapter.getBalance(fromAccount);
-        if (balance == null) {
-            throw new IllegalStateException("Bank service unavailable");
-        }
-        if (balance.compareTo(order.getTotalAmount()) < 0) {
-            throw new IllegalArgumentException("Insufficient balance. Available: $" + balance + ", Required: $" + order.getTotalAmount());
-        }
-
-        // 5. Process payment through bank
-        String storeAccount = "STORE_ACCOUNT_001";
-        String bankTxnId = null;
-        try {
-            BankTransferRequest transferRequest = new BankTransferRequest();
-            transferRequest.setFromAccount(fromAccount);
-            transferRequest.setToAccount(storeAccount);
-            transferRequest.setAmount(order.getTotalAmount());
-            transferRequest.setTransactionRef("ORDER-PAYMENT-" + orderId + "-" + System.currentTimeMillis());
-
-            BankTransferResponse transferResponse = bankAdapter.transfer(transferRequest);
-
-            if (transferResponse == null || !transferResponse.isSuccess()) {
-                String errorMsg = transferResponse != null ? transferResponse.getMessage() : "No response from bank";
-                throw new RuntimeException("Bank transfer failed: " + errorMsg);
-            }
-
-            // Store transaction ID from successful transfer
-            bankTxnId = transferResponse.getTransactionId();
-            logger.info("Bank transfer successful for order: {}, txnId: {}", orderId, bankTxnId);
-
-        } catch (Exception e) {
-            logger.error("Payment failed for order {}: {}", orderId, e.getMessage());
-            // Update payment status to FAILED
-            Optional<Payment> paymentOpt = paymentService.getPaymentByOrderId(orderId);
-            if (paymentOpt.isPresent()) {
-                Payment payment = paymentOpt.get();
-                payment.setStatus(PaymentStatus.FAILED);
-                payment.setErrorMessage(e.getMessage());
-                paymentRepository.save(payment);
-            }
-            throw new RuntimeException("Payment failed: " + e.getMessage());
-        }
-
-        // 6. Update payment status to SUCCESS
-        Optional<Payment> paymentOpt = paymentService.getPaymentByOrderId(orderId);
-        if (paymentOpt.isPresent()) {
-            Payment payment = paymentOpt.get();
-            payment.setStatus(PaymentStatus.SUCCESS);
-            payment.setErrorMessage(null);
-            payment.setBankTxnId(bankTxnId);
-            paymentRepository.save(payment);
-            logger.info("Payment status updated to SUCCESS for order: {}", orderId);
-        }
-
-        // 7. Update order status to PAID
-        OrderDTO updatedOrder = orderService.updateOrderStatus(orderId, OrderStatus.PAID);
-        logger.info("Order {} status updated to PAID after successful payment", orderId);
-
-        // 8. Create PAYMENT_SUCCESS outbox event to trigger delivery creation
-        try {
-            outboxService.createPaymentSuccessEvent(orderId, bankTxnId);
-            logger.info("PAYMENT_SUCCESS event created for order: {}, will trigger delivery creation", orderId);
-        } catch (Exception e) {
-            logger.error("Failed to create PAYMENT_SUCCESS event for order {}: {}", orderId, e.getMessage());
-            // Don't fail the payment, just log the error - outbox processor will handle it
-        }
-
-        return updatedOrder;
+        PaymentService.PayNowResult result = paymentService.payNow(orderId);
+        logger.info("Pay Now for order {}: {}", orderId, result);
+        return orderService.getOrderById(orderId).orElse(order);
     }
 
 

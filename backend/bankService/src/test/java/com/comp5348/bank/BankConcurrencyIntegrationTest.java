@@ -75,7 +75,7 @@ class BankConcurrencyIntegrationTest {
             request.setFromAccount(customer);
             request.setToAccount(store);
             request.setAmount(new BigDecimal("50.00"));
-            request.setTransactionRef("PAY-" + UUID.randomUUID() + "-1"); // 每笔不同的键：不是重复请求，是 10 笔真的订单
+            request.setIdempotencyKey("PAY-" + UUID.randomUUID() + "-1"); // 每笔不同的键：不是重复请求，是 10 笔真的订单
             results.add(pool.submit(() -> {
                 startGun.await();
                 return bankService.transfer(request);

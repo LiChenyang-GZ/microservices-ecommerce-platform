@@ -10,6 +10,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -28,6 +29,9 @@ public class UnpaidOrderCanceller {
     @Autowired
     private OrderService orderService;
 
+    @Autowired
+    private Clock clock;
+
     /**
      * Run every minute to check for expired unpaid orders
      */
@@ -43,7 +47,7 @@ public class UnpaidOrderCanceller {
 
             logger.info("Checking {} pending payment orders for expiration", pendingOrders.size());
 
-            LocalDateTime now = LocalDateTime.now();
+            LocalDateTime now = LocalDateTime.now(clock);
             int cancelledCount = 0;
 
             for (Order order : pendingOrders) {

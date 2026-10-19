@@ -82,9 +82,10 @@ public class PaymentController {
         
         try {
             String refundReason = (reason != null && !reason.isEmpty()) ? reason : "Customer requested refund";
-            Payment payment = paymentService.refundPayment(orderId, refundReason);
-            
-            return ResponseEntity.ok(new PaymentResponse(true, payment, "Refund processed successfully"));
+            // Writes a REFUND task; the refund itself happens in the background (status REFUND_PENDING → REFUNDED)
+            Payment payment = paymentService.requestRefund(orderId, refundReason);
+
+            return ResponseEntity.ok(new PaymentResponse(true, payment, "Refund requested"));
             
         } catch (IllegalArgumentException | IllegalStateException e) {
             logger.error("Refund validation failed: {}", e.getMessage());

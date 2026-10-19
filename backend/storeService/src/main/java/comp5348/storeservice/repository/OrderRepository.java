@@ -61,4 +61,13 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     Optional<Order> findByDeliveryId(Long deliveryId);
 
+    /**
+     * SELECT ... FOR UPDATE on the order row. Used when a charge result arrives and when an order is cancelled,
+     * so "is this order still waiting for payment?" is answered by one of them at a time (rule 1).
+     * Lock order: always the order row first, then the payment row.
+     */
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT o FROM Order o WHERE o.id = :orderId")
+    Optional<Order> findByIdForUpdate(@Param("orderId") Long orderId);
+
 }

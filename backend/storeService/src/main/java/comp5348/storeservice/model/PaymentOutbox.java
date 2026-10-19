@@ -22,7 +22,7 @@ public class PaymentOutbox {
     private Long orderId;
     
     @Column(nullable = false)
-    private String eventType; // PAYMENT_PENDING, PAYMENT_SUCCESS, PAYMENT_FAILED
+    private String eventType; // Money tasks: PAY, REFUND. Other events: SUCCESS, REFUNDED, DELIVERY_FAILED, FAILED
     
     @Column(columnDefinition = "TEXT")
     private String payload; // JSON formatted data
@@ -37,6 +37,12 @@ public class PaymentOutbox {
     private LocalDateTime createdAt;
     
     private LocalDateTime processedAt;
+
+    // PAY / REFUND only: the key bank deduplicates on. Fixed when the task is written; every retry reuses it.
+    private String idempotencyKey;
+
+    // PAY / REFUND only: do not try before this time (set after 5 fast retries got no answer: retry every 10 minutes)
+    private LocalDateTime nextAttemptAt;
     
     @PrePersist
     protected void onCreate() {

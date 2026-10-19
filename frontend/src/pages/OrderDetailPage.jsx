@@ -1,9 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import BackButton from '../components/BackButton';
 import { orderAPI, paymentAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import './OrderDetailPage.css';
+
+// Pay Now only queues the charge; the bank call happens in the background (OutboxProcessor).
+// While the payment is PENDING the page re-reads the order every few seconds until it settles.
+export const PAYMENT_POLL_INTERVAL_MS = 3000;
 
 function OrderDetailPage() {
     const [order, setOrder] = useState(null);
@@ -16,9 +20,10 @@ function OrderDetailPage() {
     const navigate = useNavigate();
     const { isLoggedIn, userId, isLoading: authLoading } = useAuth();
 
-    const fetchOrderDetails = async () => {
+    // silent = background refresh while waiting for the payment: keep the page on screen, no loading spinner
+    const fetchOrderDetails = useCallback(async ({ silent = false } = {}) => {
         try {
-            setIsLoading(true);
+            if (!silent) setIsLoading(true);
             const response = await orderAPI.getOrderWithPayment(id);
 
             // Transform the nested structure to flat structure
@@ -50,9 +55,9 @@ function OrderDetailPage() {
                 setError(err.formattedMessage || 'Unable to load order details, please try again later.');
             }
         } finally {
-            setIsLoading(false);
+            if (!silent) setIsLoading(false);
         }
-    };
+    }, [id, navigate]);
 
     useEffect(() => {
         if (!authLoading && !isLoggedIn) {
@@ -62,7 +67,16 @@ function OrderDetailPage() {
         if (isLoggedIn) {
             fetchOrderDetails();
         }
-    }, [isLoggedIn, authLoading, id, navigate]);
+    }, [isLoggedIn, authLoading, id, navigate, fetchOrderDetails]);
+
+    // Poll while the charge is still in progress (just placed, or right after Pay Now).
+    // Stops by itself once the status is SUCCESS / FAILED / PAY_UNKNOWN, or when the page closes.
+    const currentPaymentStatus = order?.payment?.status?.toUpperCase() || '';
+    useEffect(() => {
+        if (currentPaymentStatus !== 'PENDING') return undefined;
+        const timer = setInterval(() => fetchOrderDetails({ silent: true }), PAYMENT_POLL_INTERVAL_MS);
+        return () => clearInterval(timer);
+    }, [currentPaymentStatus, fetchOrderDetails]);
 
     const handleCancelOrder = async () => {
         if (!window.confirm('Are you sure you want to cancel this order? This will process a refund if payment was made.')) {
@@ -72,7 +86,7 @@ function OrderDetailPage() {
         try {
             setIsCancelling(true);
             await orderAPI.cancelOrder(id);
-            alert('Order successfully cancelled! Refund has been processed.');
+            alert('Order successfully cancelled! Any payment will be refunded shortly.');
             await fetchOrderDetails(); // Refresh order details
         } catch (err) {
             console.error('Cancellation failed:', err);
@@ -99,7 +113,7 @@ function OrderDetailPage() {
         try {
             setIsRefunding(true);
             await paymentAPI.refundPayment(id, 'Customer requested refund');
-            alert('Refund request submitted successfully!');
+            alert('Refund requested. It will be processed shortly.');
             await fetchOrderDetails(); // Refresh order details
         } catch (err) {
             console.error('Refund failed:', err);
@@ -117,31 +131,20 @@ function OrderDetailPage() {
 
         try {
             setIsPaying(true);
-
-            // Call the retry payment API for this order
-            const result = await orderAPI.retryPayment(order.orderId);
-
-            if (result && result.success) {
-                alert('Payment successful! Your order has been confirmed.');
-                await fetchOrderDetails(); // Refresh to show updated status
-            }
+            // Queues a new payment attempt. The result arrives later: the polling above picks it up.
+            await orderAPI.retryPayment(order.orderId);
+            await fetchOrderDetails({ silent: true });
         } catch (err) {
-            console.error('Payment failed:', err);
-            let errorMessage = 'Payment failed. ';
-
+            console.error('Pay Now failed:', err);
+            let errorMessage = 'Could not start the payment. ';
             if (err.formattedMessage) {
                 errorMessage += err.formattedMessage;
             } else if (err.message) {
                 errorMessage += err.message;
             }
-
-            // Add helpful hints
-            if (errorMessage.toLowerCase().includes('insufficient balance') || errorMessage.toLowerCase().includes('balance')) {
-                errorMessage += '\n\nPlease add money to your account first (Home > Add Money).';
-            } else if (errorMessage.toLowerCase().includes('no linked bank account')) {
+            if (errorMessage.toLowerCase().includes('no linked bank account')) {
                 errorMessage += '\n\nPlease go to "Add Money" page to create your bank account first.';
             }
-
             alert(errorMessage);
         } finally {
             setIsPaying(false);
@@ -162,7 +165,7 @@ function OrderDetailPage() {
         const statusLower = status?.toLowerCase();
         if (statusLower === 'completed' || statusLower === 'delivered' || statusLower === 'success') return 'status-completed';
         if (statusLower === 'cancelled' || statusLower === 'canceled' || statusLower === 'refunded') return 'status-cancelled';
-        if (statusLower === 'pending') return 'status-pending';
+        if (['pending', 'pay_unknown', 'refund_pending', 'refund_unknown'].includes(statusLower)) return 'status-pending';
         if (statusLower === 'processing' || statusLower === 'confirmed') return 'status-processing';
         return 'status-default';
     };
@@ -184,11 +187,12 @@ function OrderDetailPage() {
 
     const paymentStatusNormalized = order?.payment?.status?.toUpperCase() || '';
 
-    // Determine if payment is needed (pending payment or failed/pending payment) but hide if already cancelled by system
-    const needsPayment = order && !isCancelledStatus && (
-        normalizedOrderStatus === 'PENDING_PAYMENT' ||
-        (order.payment && ['FAILED', 'PENDING'].includes(paymentStatusNormalized))
-    );
+    // Pay Now only makes sense after a definite failure (rule 8). While the charge is PENDING or its result is
+    // unknown, another attempt could charge twice, so the button is hidden and a status message is shown instead.
+    const awaitingPayment = order && !isCancelledStatus && normalizedOrderStatus === 'PENDING_PAYMENT';
+    const needsPayment = awaitingPayment && (!order.payment || paymentStatusNormalized === 'FAILED');
+    const paymentInProgress = awaitingPayment && paymentStatusNormalized === 'PENDING';
+    const paymentUnknown = awaitingPayment && paymentStatusNormalized === 'PAY_UNKNOWN';
 
     if (isLoading) {
         return <div className="loading-container">Loading order details...</div>;
@@ -317,13 +321,28 @@ function OrderDetailPage() {
                 </div>
             )}
 
+            {paymentInProgress && (
+                <div className="payment-alert" role="status">
+                    <p className="alert-message">⏳ Payment processing… This page updates automatically.</p>
+                </div>
+            )}
+
+            {paymentUnknown && (
+                <div className="payment-alert" role="status">
+                    <p className="alert-message">
+                        🏦 The bank is still processing this payment. Please check back later — you will not be charged twice.
+                    </p>
+                </div>
+            )}
+
             {needsPayment && (
                 <div className="payment-alert">
                     <p className="alert-message">
                         ⚠️ This order is awaiting payment. Please complete the payment to confirm your order.
                     </p>
-                    {order.payment?.status === 'FAILED' && (
+                    {paymentStatusNormalized === 'FAILED' && (
                         <p className="alert-hint">
+                            {order.payment?.errorMessage ? `Last attempt failed: ${order.payment.errorMessage}. ` : ''}
                             Make sure you have sufficient balance in your account. You can add money from the home page.
                         </p>
                     )}
@@ -337,7 +356,7 @@ function OrderDetailPage() {
                         className="btn btn-primary btn-pay"
                         disabled={isPaying}
                     >
-                        {isPaying ? 'Processing Payment...' : '💳 Pay Now'}
+                        {isPaying ? 'Starting payment...' : '💳 Pay Now'}
                     </button>
                 )}
                 {canCancel && (

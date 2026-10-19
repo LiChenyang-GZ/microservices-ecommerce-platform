@@ -6,9 +6,11 @@ public enum PaymentStatus {
     FAILED,
     REFUNDED,
     DELIVERY_FAILED,
-    // Step 2 shells (test(red)): declared so the tests compile; no code sets them yet
+    // No answer from bank after 5 fast retries. Not a failure: keep retrying the same key every 10 minutes (rule 7)
     PAY_UNKNOWN,
+    // Charged, refund task written, waiting for bank
     REFUND_PENDING,
+    // No answer from bank to the refund after 5 fast retries; keep retrying every 10 minutes
     REFUND_UNKNOWN
 }
 

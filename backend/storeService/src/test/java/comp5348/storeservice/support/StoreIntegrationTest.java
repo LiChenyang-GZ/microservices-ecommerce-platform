@@ -115,6 +115,8 @@ public abstract class StoreIntegrationTest {
         FAKE_BANK.stubFor(post(urlPathMatching("/api/deliveries/cancel-by-order/.*")).willReturn(ok()));
         // OutboxProcessor 每一轮会处理表里所有待办任务，所以清掉别的测试留下的，只留本测试自己的
         jdbc.update("DELETE FROM payment_outbox");
+        // 别的测试留下的"待支付"订单直接标成已取消：否则 #14 拨表 16 分钟跑自动取消时，会把它们也取消、触发它们的退款
+        jdbc.update("UPDATE orders SET status = 'CANCELLED' WHERE status = 'PENDING_PAYMENT'");
         // 表拨回"现在"
         clock.set(Instant.now());
     }

@@ -9,11 +9,9 @@ import java.util.List;
 @Repository
 public interface PaymentOutboxRepository extends JpaRepository<PaymentOutbox, Long> {
     
-    List<PaymentOutbox> findByStatusAndRetryCountLessThan(String status, Integer maxRetries);
+    List<PaymentOutbox> findByStatusOrderByIdAsc(String status);
     
     List<PaymentOutbox> findByEventTypeAndStatus(String eventType, String status);
     
     List<PaymentOutbox> findByStatus(String status);
 }
-
-

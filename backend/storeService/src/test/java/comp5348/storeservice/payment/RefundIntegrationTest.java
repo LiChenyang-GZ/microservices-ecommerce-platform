@@ -6,6 +6,9 @@ import comp5348.storeservice.model.PaymentStatus;
 import comp5348.storeservice.service.OrderService;
 import comp5348.storeservice.support.StoreIntegrationTest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.Duration;
@@ -18,6 +21,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 【层】集成测试（真 Postgres + 假 bank）。
  * 【准备】先走一遍真实的下单 + 扣款成功（订单 PAID），再让用户取消订单，触发退款。
  */
+@ExtendWith(OutputCaptureExtension.class) // 把控制台输出（日志）抓下来，测试里可以检查有没有打出告警
 class RefundIntegrationTest extends StoreIntegrationTest {
 
     @Autowired OrderService orderService;
@@ -59,7 +63,7 @@ class RefundIntegrationTest extends StoreIntegrationTest {
      * 设计（支付状态机）：拒绝退款是异常情况，不自动重试。
      */
     @Test
-    void refundRejected_stopsTask_raisesAlert() {
+    void refundRejected_stopsTask_raisesAlert(CapturedOutput output) {
         PlacedOrder order = placePaidOrder();
         // 剧本：bank 明确拒绝退款（HTTP 400 + success=false）
         bankRejectsRefund("Insufficient balance for refund");
@@ -76,6 +80,8 @@ class RefundIntegrationTest extends StoreIntegrationTest {
                 .isEqualTo("FAILED");
         // 断言 3：钱没退成，Payment 不能写成 REFUNDED
         assertThat(paymentOf(order).getStatus()).isNotEqualTo(PaymentStatus.REFUNDED);
-        // 告警怎么断言：等 Christy 定"告警"在 store 里是什么（日志？告警表？），见红灯报告
+        // 断言 4：发出了告警，等人工处理（告警 = 带固定标记的日志）
+        assertThat(output.getAll())
+                .contains("ALERT refund_rejected orderId=" + order.orderId() + " paymentId=" + order.paymentId());
     }
 }

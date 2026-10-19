@@ -5,6 +5,9 @@ import comp5348.storeservice.model.Payment;
 import comp5348.storeservice.model.PaymentStatus;
 import comp5348.storeservice.support.StoreIntegrationTest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.time.Duration;
 import java.util.List;
@@ -19,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 【怎么数"扣了几次钱"】真 bank 按幂等键去重：同一个键只扣一次，不同的键各扣一次。
  *   所以"bank 收到了几个不同的键"就等于"最坏情况下扣了几次钱"。
  */
+@ExtendWith(OutputCaptureExtension.class) // 把控制台输出（日志）抓下来，测试里可以检查有没有打出告警
 class PaymentTimeoutIntegrationTest extends StoreIntegrationTest {
 
     /**
@@ -53,7 +57,7 @@ class PaymentTimeoutIntegrationTest extends StoreIntegrationTest {
      * 设计（规则 7、ADR-05）：结果未知 ≠ 失败。钱可能已经扣了，换新键再扣就会扣两次。
      */
     @Test
-    void payStillUnknownAfter5Retries_marksPayUnknown_keepsAttempt() {
+    void payStillUnknownAfter5Retries_marksPayUnknown_keepsAttempt(CapturedOutput output) {
         PlacedOrder order = placeOrder();
         // 剧本：bank 一直没有回答（连接被重置，相当于超时）
         bankTransferResultUnknown();
@@ -73,7 +77,9 @@ class PaymentTimeoutIntegrationTest extends StoreIntegrationTest {
         // 断言 4：PAY 任务没有结束（之后还要每 10 分钟再试），订单还是待支付
         assertThat(openTasksOf(order, "PAY")).as("任务不结束，等低频重试").isNotEmpty();
         assertThat(orderOf(order).getStatus()).isEqualTo(OrderStatus.PENDING_PAYMENT);
-        // 告警怎么断言：等 Christy 定"告警"在 store 里是什么（日志？告警表？），见红灯报告
+        // 断言 5：发出了告警。告警 = 带固定标记的日志（Christy 2026-10-19 定的），运维按 "ALERT payment_unknown" 搜
+        assertThat(output.getAll())
+                .contains("ALERT payment_unknown orderId=" + order.orderId() + " paymentId=" + order.paymentId());
     }
 
     /**
