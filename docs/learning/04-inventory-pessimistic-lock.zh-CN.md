@@ -83,10 +83,11 @@ POST /api/store/orders/create-with-payment → StoreController.createOrderWithPa
 1. 悲观锁而不是"乐观锁 + 重试"。
 2. SQL 按 id 锁、内存按数量排。
 3. `@Version` 留着：管理员改库存那条路径（`updateProductQuantity`）还靠它，悲观锁的路径也会让版本号 +1，两边互不干扰。
-4. `unholdProduct`（取消时还库存）这次**没改**，单独记进待办，要先有红灯。
+4. `unholdProduct`（取消时还库存）这次**没改**，单独记进待办，要先有红灯（后来在 #15 修了，见下面）。
 
 已知、没修（记在 Obsidian 待办）：
-- `unholdProduct` 仍是普通读 + `@Version`，和同商品的下单撞上会冲突。冲突在 flush / 提交时才抛，而 unhold 加入的是调用方（`cancelOrder`、`CompensationService`）的事务 → 可能整个取消回滚，也可能被某层 `catch` 吞掉、库存没还。哪一种要先写红灯测试确认。
+- `unholdProduct` 仍是普通读 + `@Version`，和同商品的下单撞上会冲突。冲突在 flush / 提交时才抛，而 unhold 加入的是调用方（`cancelOrder`、`CompensationService`）的事务 → 可能整个取消回滚，也可能被某层 `catch` 吞掉、库存没还。
+  **已确认（#15 的红灯测试）：整个取消回滚**，订单没取消、库存没还，日志却已打出成功；不是被 `catch` 吞掉，因为 UPDATE 在方法返回、外层事务提交时才执行，已经不在 try 里了。已在 #15 修复：unhold 也先 `FOR UPDATE` 锁行再读，锁的顺序和扣库存一样。
 - `updateProductQuantity` 用 `@Async` + `CompletableFuture.supplyAsync`：里面的代码跑在另一个线程上，方法上的 `@Transactional` 管不到它（事务绑定在线程上）。
 
 ---

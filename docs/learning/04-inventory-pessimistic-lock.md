@@ -83,10 +83,11 @@ POST /api/store/orders/create-with-payment → StoreController.createOrderWithPa
 1. Pessimistic lock instead of "optimistic + retry".
 2. Lock by id in SQL, sort by quantity in memory.
 3. Keep `@Version`: the admin path (`updateProductQuantity`) still relies on it. The pessimistic path also bumps the version, so they don't interfere.
-4. `unholdProduct` (returning stock on cancel) is **not** changed here. It's in the backlog and needs its own red test first.
+4. `unholdProduct` (returning stock on cancel) is **not** changed here. It's in the backlog and needs its own red test first (later fixed in #15, see below).
 
 Known, not fixed (in the Obsidian backlog):
-- `unholdProduct` still uses a plain read + `@Version`, so it can conflict with an order for the same product. The conflict is thrown at flush/commit, and unhold joins the caller's transaction (`cancelOrder`, `CompensationService`) → the whole cancel may roll back, or a `catch` may swallow it and the stock is not returned. Which one needs a red test first.
+- `unholdProduct` still uses a plain read + `@Version`, so it can conflict with an order for the same product. The conflict is thrown at flush/commit, and unhold joins the caller's transaction (`cancelOrder`, `CompensationService`) → the whole cancel may roll back, or a `catch` may swallow it and the stock is not returned. 
+  **Confirmed by the red test in #15: the whole cancel rolls back.** The order is not cancelled and stock is not returned, while the logs already said success. It is not swallowed by a `catch`, because the UPDATE runs at commit, after the method has returned and left the try. Fixed in #15: unhold also locks with `FOR UPDATE` before reading, in the same order as holding.
 - `updateProductQuantity` uses `@Async` + `CompletableFuture.supplyAsync`. The code inside runs on another thread, so the method's `@Transactional` doesn't cover it (transactions are bound to a thread).
 
 ---
