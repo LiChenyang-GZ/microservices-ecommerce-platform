@@ -288,7 +288,7 @@ public class OutboxProcessor {
             deliveryRequest.setFromAddress(Collections.singletonList("Warehouse-1, 456 Storage Rd"));
             deliveryRequest.setProductName(productName);
             deliveryRequest.setQuantity(quantity);
-            deliveryRequest.setNotificationUrl("http://localhost:8082/api/delivery-webhook");
+            deliveryRequest.setNotificationUrl(deliveryNotificationUrl);
 
             // 5. [Optimized] Confirm inventory reservation (Saga pattern "Confirm")
             // The purpose of this step is to mark inventory transactions in HOLD status as COMMITTED/CONFIRMED
