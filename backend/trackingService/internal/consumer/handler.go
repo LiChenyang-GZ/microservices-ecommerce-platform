@@ -38,6 +38,10 @@ type Handler struct {
 	Log      *slog.Logger
 	RetryMin time.Duration // first backoff after a transient failure
 	RetryMax time.Duration // backoff never grows past this
+
+	// Stopping, if set, is closed when the service is shutting down. A retry wait
+	// ends as soon as it closes, even though the work context is still alive.
+	Stopping <-chan struct{}
 }
 
 // Defaults when RetryMin / RetryMax are zero.
@@ -100,6 +104,8 @@ func (h *Handler) retry(ctx context.Context, what string, op func() error) error
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-h.Stopping: // nil channel when unset: never ready
+			return context.Canceled
 		case <-time.After(wait):
 		}
 		wait = min(wait*2, maxWait)
