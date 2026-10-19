@@ -51,6 +51,60 @@ services:
       timeout: 10s
       retries: 10
 
+  # Single-node Kafka in KRaft mode (no ZooKeeper): one process is both broker
+  # and controller. Config and topic list: docs/wave2-config-contract.md
+  kafka:
+    image: apache/kafka:3.9.1
+    environment:
+      KAFKA_NODE_ID: '1'
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@localhost:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      # INTERNAL: other containers (kafka:9092). EXTERNAL: this machine, for
+      # services run with bootRun / go run (localhost:9094).
+      KAFKA_LISTENERS: INTERNAL://:9092,EXTERNAL://:9094,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,EXTERNAL://localhost:9094
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      # One broker, so every internal topic can only have one copy.
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: '1'
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: '1'
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: '1'
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: '0'
+      # Topics come only from kafka-init. A typo in a topic name then fails at
+      # once instead of silently creating a new, empty topic.
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
+    ports:
+      - '9094:9094'
+    # No volume: `stop` keeps the data, `down` throws it away. Events are not
+    # lost with it: they are still in each service's event_outbox in Postgres.
+    healthcheck:
+      test: ['CMD-SHELL', '/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null']
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 20s
+
+  # Creates the topics, then exits. Safe to run again (--if-not-exists).
+  # 3 partitions: one orderId always lands on the same partition (ordered),
+  # different orders spread over three. Each .DLT has the same partition
+  # count as its topic, because Spring sends a broken record to the DLT
+  # partition with the same number it came from.
+  kafka-init:
+    image: apache/kafka:3.9.1
+    depends_on:
+      kafka:
+        condition: service_healthy
+    entrypoint: ['/bin/sh', '-c']
+    command:
+      - |
+        set -e
+        for t in order-events delivery-events order-events.DLT delivery-events.DLT; do
+          /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
+            --create --if-not-exists --topic "$$t" --partitions 3 --replication-factor 1
+        done
+    restart: 'no'
+
   store:
     build:
       context: .
@@ -73,11 +127,16 @@ services:
       DELIVERY_SERVICE_URL: http://delivery:8081
       DELIVERY_NOTIFICATION_URL: http://store:8082/api/delivery-webhook
       EMAIL_SERVICE_URL: http://email:8083
+      # Wave 2 (docs/wave2-config-contract.md). Unused until the code reads them.
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      BANK_GRPC_ADDRESS: bank:9090
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     healthcheck:
       <<: *java-healthcheck
       test: ['CMD', 'curl', '-fsS', 'http://localhost:8082/actuator/health']
@@ -90,11 +149,13 @@ services:
     image: shop-bank
     ports:
       - '8084:8084'
+      - '9090:9090' # gRPC, for store; published so grpcurl can reach it
     environment:
       DB_HOST: postgres
       DB_PORT: '5432'
       BANK_DB_PASSWORD: ${BANK_DB_PASSWORD}
       STORE_SERVICE_URL: http://store:8082
+      BANK_GRPC_PORT: '9090'
     depends_on:
       postgres:
         condition: service_healthy
@@ -120,11 +181,14 @@ services:
       STORE_SERVICE_URL: http://store:8082
       STORE_AUTH_URL: http://store:8082/api/user/login
       EMAIL_SERVICE_URL: http://email:8083
+      SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
       postgres:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
     healthcheck:
       <<: *java-healthcheck
       test: ['CMD', 'curl', '-fsS', 'http://localhost:8081/actuator/health']
@@ -155,6 +219,23 @@ services:
     healthcheck:
       <<: *java-healthcheck
       test: ['CMD', 'curl', '-fsS', 'http://localhost:8083/actuator/health']
+
+  # Go read service (ADR-11). Healthcheck is built into the image (Dockerfile).
+  tracking:
+    build: ./trackingService
+    image: shop-tracking
+    ports:
+      - '8085:8085'
+    environment:
+      DATABASE_URL: postgres://tracking_user:${TRACKING_DB_PASSWORD}@postgres:5432/tracking_db?sslmode=disable
+      KAFKA_BROKERS: kafka:9092
+      KAFKA_GROUP: tracking
+      STORE_URL: http://store:8082
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
 
   frontend:
     build: ../frontend
