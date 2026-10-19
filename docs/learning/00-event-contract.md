@@ -37,6 +37,7 @@ They live in a separate Gradle module, `contracts`, and every service references
 - **When a field is missing from the JSON, Jackson does not fail; it passes null.** That is the cause of the first group of red tests.
 - Because Jackson always goes through the constructor, a check in the compact constructor **runs automatically on every parse**. Jackson wraps the constructor's exception in a `JsonProcessingException`, and `EventCodec` turns that into an `InvalidEventException`: [EventCodec.java:37](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java#L37)
 - Gotcha: for `"payload": null`, a `JsonNode` field receives a `NullNode` object, not Java `null`. So the check is `payload == null || !payload.isObject()`: [EventEnvelope.java:34](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventEnvelope.java#L34)
+- **Added later (PR #9)**: by default Jackson **also rejects extra fields** (`FAIL_ON_UNKNOWN_PROPERTIES`). That contradicts the contract rule "only add fields; older consumers keep working". The first version missed it; the agent writing the Go tracking service caught it by checking its parser against the README. Fix: turn that switch off. It is separate from "required fields must be present": missing fields are caught by the constructor, extra fields are ignored. Test: `newFieldAddedByProducer_isIgnoredByOlderConsumer`.
 
 ### 2.4 Jackson coercion
 - Coercion = "the type is wrong, so convert it for you". By default Jackson turns the number `42` into the string `"42"` for a `String` field.

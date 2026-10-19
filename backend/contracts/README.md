@@ -18,7 +18,7 @@ Items marked 🤖 are not in the design; Claude decided them and Christy confirm
 contracts/
 ├── src/main/java/com/comp5348/contracts/events/
 │   ├── EventEnvelope.java       event envelope (5 fields, checked on construction)
-│   ├── EventCodec.java          the only way to read/write event JSON
+│   ├── EventCodec.java          the only way to read/write event JSON (uses Jackson, see below)
 │   ├── InvalidEventException    the message itself is broken → consumer sends it to the DLT
 │   ├── Topics.java              topic names
 │   ├── OrderEventType.java      the 5 events on order-events
@@ -168,4 +168,5 @@ When you add or change an event, update its example too, or `examples_coverEvery
 2. Java event types live in this shared module and every service uses the same copy; Go stays in sync through the example JSON. Cost: changing the contract recompiles every service, which is why only formats live here, never business logic.
 3. The exact payload fields and the `reason` values (the design only names the events).
 4. gRPC has two outcomes, SUCCEEDED / REJECTED; refunds carry no amount.
-5. No version field. Format changes only **add** fields and never rename or remove existing ones, so older consumers keep working.
+5. No version field. Format changes only **add** fields and never rename or remove existing ones, so older consumers keep working. To make that true, `EventCodec` **skips fields it doesn't know**; `newFieldAddedByProducer_isIgnoredByOlderConsumer` guards this.
+   - Background: `EventCodec` reads and writes JSON with **Jackson**, Spring Boot's default JSON library, which turns JSON text into Java objects and back. Its default rule is "a field that is in the JSON but not in the Java class is an error", so before the fix, one extra field made the whole message count as broken and go to the DLT. The agent writing the Go tracking service found this by checking its parser against this README.

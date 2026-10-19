@@ -1,6 +1,7 @@
 package com.comp5348.contracts.events;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -21,7 +22,10 @@ public final class EventCodec {
         ObjectMapper mapper = new ObjectMapper()
                 .registerModule(new JavaTimeModule())
                 // Instant as "2026-10-19T02:00:00Z", not as a number of seconds.
-                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                // Producers may add fields before every consumer is upgraded (README §7).
+                // Jackson's default is to reject unknown fields; ignore them instead.
+                .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
         // By default Jackson turns the number 42 into the String "42". Go would reject
         // that event, so reject it here too: a String field must receive a JSON string.
         mapper.coercionConfigFor(LogicalType.Textual)
