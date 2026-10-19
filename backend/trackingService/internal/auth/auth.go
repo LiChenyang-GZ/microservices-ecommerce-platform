@@ -2,7 +2,9 @@
 package auth
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 )
@@ -26,7 +28,37 @@ type Client struct {
 	HTTP    *http.Client // nil = http.DefaultClient
 }
 
-// Validate asks store who owns token.
+// Validate asks store who owns token. Same behaviour as the Java services'
+// TokenValidationClient: anything that is not a clear "valid" counts as unauthorized.
 func (c *Client) Validate(ctx context.Context, token string) (User, error) {
-	return User{}, ErrUnauthorized
+	if token == "" {
+		return User{}, ErrUnauthorized
+	}
+	body, _ := json.Marshal(map[string]string{"token": token})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/user/validate-token", bytes.NewReader(body))
+	if err != nil {
+		return User{}, ErrUnauthorized
+	}
+	req.Header.Set("Content-Type", "application/json")
+	client := c.HTTP
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return User{}, ErrUnauthorized
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return User{}, ErrUnauthorized
+	}
+	var out struct {
+		Valid  bool   `json:"valid"`
+		UserID int64  `json:"userId"`
+		Email  string `json:"email"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || !out.Valid {
+		return User{}, ErrUnauthorized
+	}
+	return User{ID: out.UserID, Email: out.Email}, nil
 }

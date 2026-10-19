@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/LiChenyang-GZ/microservices-ecommerce-platform/backend/trackingService/internal/event"
 	"github.com/LiChenyang-GZ/microservices-ecommerce-platform/backend/trackingService/internal/store"
 )
 
@@ -41,5 +42,15 @@ type Handler struct {
 // Handle processes one message. It returns nil once the message is done with
 // (stored, skipped or dead-lettered) and its offset may be committed.
 func (h *Handler) Handle(ctx context.Context, m Message) error {
+	env, err := event.Parse(m.Value)
+	if err != nil {
+		h.Log.Warn("skipping unreadable message", "topic", m.Topic, "offset", m.Offset, "err", err)
+		return nil
+	}
+	rec := store.Record{Envelope: env, Topic: m.Topic, Partition: m.Partition, Offset: m.Offset}
+	if err := h.Sink.Insert(ctx, rec); err != nil {
+		h.Log.Error("could not store event", "eventId", env.EventID, "err", err)
+		return nil
+	}
 	return nil
 }

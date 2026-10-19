@@ -3,8 +3,11 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/LiChenyang-GZ/microservices-ecommerce-platform/backend/trackingService/internal/auth"
 	"github.com/LiChenyang-GZ/microservices-ecommerce-platform/backend/trackingService/internal/store"
@@ -30,5 +33,24 @@ type Entry struct {
 
 // New builds the HTTP handler.
 func New(repo Repository, v Validator, log *slog.Logger) http.Handler {
-	return http.NotFoundHandler()
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/tracking/orders/{orderId}/timeline", func(w http.ResponseWriter, r *http.Request) {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if _, err := v.Validate(r.Context(), token); err != nil {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		entries, err := repo.Timeline(r.Context(), r.PathValue("orderId"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		var out []Entry
+		for _, e := range entries {
+			out = append(out, Entry{EventType: e.EventType, Source: e.Source, OccurredAt: e.OccurredAt.Format(time.RFC3339)})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(out)
+	})
+	return mux
 }

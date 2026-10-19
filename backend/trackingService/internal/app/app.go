@@ -5,7 +5,15 @@ import (
 	"context"
 	"log/slog"
 	"net"
+	"net/http"
+	"strings"
 	"time"
+
+	"github.com/LiChenyang-GZ/microservices-ecommerce-platform/backend/trackingService/internal/auth"
+	"github.com/LiChenyang-GZ/microservices-ecommerce-platform/backend/trackingService/internal/consumer"
+	"github.com/LiChenyang-GZ/microservices-ecommerce-platform/backend/trackingService/internal/event"
+	"github.com/LiChenyang-GZ/microservices-ecommerce-platform/backend/trackingService/internal/httpapi"
+	"github.com/LiChenyang-GZ/microservices-ecommerce-platform/backend/trackingService/internal/store"
 )
 
 // Config comes from environment variables (no passwords in code or images).
@@ -24,11 +32,53 @@ type Config struct {
 
 // LoadConfig reads Config from getenv (os.Getenv in production).
 func LoadConfig(getenv func(string) string) (Config, error) {
-	return Config{}, nil
+	cfg := Config{
+		DatabaseURL: getenv("DATABASE_URL"),
+		StoreURL:    getenv("STORE_URL"),
+		HTTPAddr:    getenv("HTTP_ADDR"),
+		Group:       getenv("KAFKA_GROUP"),
+	}
+	if b := getenv("KAFKA_BROKERS"); b != "" {
+		cfg.Brokers = strings.Split(b, ",")
+	}
+	if d, err := time.ParseDuration(getenv("KAFKA_SESSION_TIMEOUT")); err == nil {
+		cfg.SessionTimeout = d
+	}
+	if cfg.HTTPAddr == "" {
+		cfg.HTTPAddr = ":8085"
+	}
+	if cfg.Group == "" {
+		cfg.Group = "tracking"
+	}
+	return cfg, nil
 }
 
 // Run starts everything and blocks until ctx is cancelled.
 func Run(ctx context.Context, cfg Config, log *slog.Logger) error {
-	<-ctx.Done()
-	return nil
+	db, err := store.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	if err := db.Migrate(ctx); err != nil {
+		return err
+	}
+
+	ln, err := net.Listen("tcp", cfg.HTTPAddr)
+	if err != nil {
+		return err
+	}
+	if cfg.OnListening != nil {
+		cfg.OnListening(ln.Addr())
+	}
+	api := httpapi.New(db, &auth.Client{BaseURL: cfg.StoreURL}, log)
+	go http.Serve(ln, api)
+
+	return consumer.Run(ctx, consumer.Config{
+		Brokers:        cfg.Brokers,
+		Group:          cfg.Group,
+		Topics:         []string{event.OrderEvents, event.DeliveryEvents},
+		SessionTimeout: cfg.SessionTimeout,
+		Hooks:          crashHooks(),
+	}, db, log)
 }

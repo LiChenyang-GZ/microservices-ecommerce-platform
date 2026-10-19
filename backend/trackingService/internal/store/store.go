@@ -3,8 +3,10 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/LiChenyang-GZ/microservices-ecommerce-platform/backend/trackingService/internal/event"
@@ -45,22 +47,63 @@ func (s *Store) Close() { s.pool.Close() }
 // Ping checks the database is reachable.
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
+const schema = `
+CREATE TABLE IF NOT EXISTS tracking_events (
+    event_id        text        NOT NULL,
+    order_id        text        NOT NULL,
+    event_type      text        NOT NULL,
+    source_topic    text        NOT NULL,
+    kafka_partition integer     NOT NULL,
+    kafka_offset    bigint      NOT NULL,
+    occurred_at     timestamptz NOT NULL,
+    payload         jsonb       NOT NULL,
+    received_at     timestamptz NOT NULL DEFAULT now()
+)`
+
 // Migrate creates the table if it does not exist yet.
 func (s *Store) Migrate(ctx context.Context) error {
-	return nil
+	_, err := s.pool.Exec(ctx, schema)
+	return err
 }
 
 // Insert saves one event.
 func (s *Store) Insert(ctx context.Context, r Record) error {
-	return nil
+	_, err := s.pool.Exec(ctx, `
+INSERT INTO tracking_events
+    (event_id, order_id, event_type, source_topic, kafka_partition, kafka_offset, occurred_at, payload)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		r.EventID, r.OrderID, r.EventType, r.Topic, r.Partition, r.Offset, r.OccurredAt, []byte(r.Payload))
+	return err
 }
 
 // Timeline returns an order's events in display order.
 func (s *Store) Timeline(ctx context.Context, orderID string) ([]Entry, error) {
-	return nil, nil
+	rows, err := s.pool.Query(ctx, `
+SELECT event_type, source_topic, occurred_at
+FROM tracking_events
+WHERE order_id = $1`, orderID)
+	if err != nil {
+		return nil, err
+	}
+	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Entry, error) {
+		var e Entry
+		err := row.Scan(&e.EventType, &e.Source, &e.OccurredAt)
+		return e, err
+	})
 }
 
 // Owner returns the userId from the order's OrderPlaced event; found is false if it has not arrived.
 func (s *Store) Owner(ctx context.Context, orderID string) (userID int64, found bool, err error) {
-	return 0, false, nil
+	err = s.pool.QueryRow(ctx, `
+SELECT (payload->>'userId')::bigint
+FROM tracking_events
+WHERE order_id = $1 AND event_type = 'OrderPlaced'
+LIMIT 1`, orderID).Scan(&userID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, err
+	}
+	return userID, true, nil
 }

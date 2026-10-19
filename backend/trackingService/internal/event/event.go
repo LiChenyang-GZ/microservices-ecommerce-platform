@@ -60,5 +60,9 @@ func KnownTypes() []string {
 
 // Parse reads one Kafka message value. Any error wraps ErrInvalid.
 func Parse(data []byte) (Envelope, error) {
-	return Envelope{}, fmt.Errorf("%w: not implemented", ErrInvalid)
+	var env Envelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		return Envelope{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+	}
+	return env, nil
 }
