@@ -1,0 +1,7 @@
+# Only go.mod, go.sum, cmd/ and internal/ are needed to build.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+**/*_test.go
