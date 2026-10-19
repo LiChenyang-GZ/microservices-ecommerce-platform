@@ -1,0 +1,7 @@
+{
+  "eventId": "3f1c2a6e-0000-4000-8000-000000000008",
+  "eventType": "Delivering",
+  "orderId": "42",
+  "occurredAt": "2026-10-19T02:08:00Z",
+  "payload": { "deliveryId": 5, "status": "DELIVERING" }
+}

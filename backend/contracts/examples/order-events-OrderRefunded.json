@@ -1,0 +1,7 @@
+{
+  "eventId": "3f1c2a6e-0000-4000-8000-000000000005",
+  "eventType": "OrderRefunded",
+  "orderId": "42",
+  "occurredAt": "2026-10-19T02:05:00Z",
+  "payload": { "paymentId": 11, "amount": "259.80", "refundTxnId": "RFD-51aa", "reason": "ORDER_CANCELLED" }
+}

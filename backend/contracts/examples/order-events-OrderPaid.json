@@ -1,0 +1,7 @@
+{
+  "eventId": "3f1c2a6e-0000-4000-8000-000000000002",
+  "eventType": "OrderPaid",
+  "orderId": "42",
+  "occurredAt": "2026-10-19T02:02:00Z",
+  "payload": { "paymentId": 11, "amount": "259.80", "bankTxnId": "TXN-8c1d", "customerEmail": "customer@example.com", "customerName": "customer", "toAddress": "1 George St, Sydney NSW 2000", "fromAddresses": ["Warehouse A, 10 Pitt St"], "productName": "Keyboard", "quantity": 2 }
+}

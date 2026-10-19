@@ -1,0 +1,7 @@
+{
+  "eventId": "3f1c2a6e-0000-4000-8000-000000000001",
+  "eventType": "OrderPlaced",
+  "orderId": "42",
+  "occurredAt": "2026-10-19T02:01:00Z",
+  "payload": { "userId": 7, "productId": 3, "quantity": 2, "totalAmount": "259.80" }
+}

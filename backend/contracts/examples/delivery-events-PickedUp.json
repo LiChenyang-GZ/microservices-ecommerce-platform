@@ -1,0 +1,7 @@
+{
+  "eventId": "3f1c2a6e-0000-4000-8000-000000000007",
+  "eventType": "PickedUp",
+  "orderId": "42",
+  "occurredAt": "2026-10-19T02:07:00Z",
+  "payload": { "deliveryId": 5, "status": "PICKED_UP" }
+}
