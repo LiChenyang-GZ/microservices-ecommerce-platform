@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"github.com/LiChenyang-GZ/microservices-ecommerce-platform/backend/trackingService/internal/consumer"
@@ -52,7 +54,8 @@ func examplesFor(t *testing.T, orderID string) []examples.Example {
 }
 
 // produce 把一条消息同步发到 Kafka（等 broker 确认才返回），key = orderId（规则 5）。
-func produce(t *testing.T, topic, key string, value []byte) {
+// 返回的记录里有 Kafka 分配的分区和 offset。
+func produce(t *testing.T, topic, key string, value []byte) *kgo.Record {
 	t.Helper()
 	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers...))
 	if err != nil {
@@ -65,6 +68,69 @@ func produce(t *testing.T, topic, key string, value []byte) {
 	if err := cl.ProduceSync(ctx, r).FirstErr(); err != nil {
 		t.Fatalf("produce to %s: %v", topic, err)
 	}
+	return r // ProduceSync 成功后，r.Partition 和 r.Offset 已经被填好
+}
+
+// admin 返回一个 Kafka 管理客户端（查已提交的 offset、删消费者组）。
+func admin(t *testing.T) *kadm.Client {
+	t.Helper()
+	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(cl.Close)
+	return kadm.NewClient(cl)
+}
+
+// committedPast 判断消费者组 group 在 r 所在的分区上，已提交的 offset 是否已经越过 r。
+// Kafka 里"已提交 offset = N"的意思是"下次从 N 开始读"，所以越过 r 就是 N > r.Offset。
+func committedPast(t *testing.T, adm *kadm.Client, group string, r *kgo.Record) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	offs, err := adm.FetchOffsets(ctx, group)
+	if err != nil {
+		return false
+	}
+	o, ok := offs.Lookup(r.Topic, r.Partition)
+	return ok && o.Err == nil && o.At > r.Offset
+}
+
+// waitCommittedPast 等到组 group 已经提交过 r（说明 r 已经处理完）。
+func waitCommittedPast(t *testing.T, group string, recs ...*kgo.Record) {
+	t.Helper()
+	adm := admin(t)
+	for _, r := range recs {
+		waitFor(t, 60*time.Second, fmt.Sprintf("group %s to commit past %s/%d@%d", group, r.Topic, r.Partition, r.Offset),
+			func() bool { return committedPast(t, adm, group, r) })
+	}
+}
+
+// rowsFor 直接查库（不经过被测代码）：这个订单在表里一共几行。
+func rowsFor(t *testing.T, orderID string) int {
+	t.Helper()
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, dbURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	var n int
+	if err := conn.QueryRow(ctx, "SELECT count(*) FROM tracking_events WHERE order_id = $1", orderID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// exampleNamed 从 examplesFor 的结果里挑出一个样例。
+func exampleNamed(t *testing.T, all []examples.Example, name string) examples.Example {
+	t.Helper()
+	for _, ex := range all {
+		if ex.Name == name {
+			return ex
+		}
+	}
+	t.Fatalf("no example %s", name)
+	return examples.Example{}
 }
 
 // openStore 连上测试库并建表。

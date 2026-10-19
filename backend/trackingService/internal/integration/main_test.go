@@ -70,6 +70,18 @@ func run(m *testing.M) int {
 		return 1
 	}
 
+	// 4) 编译一个带崩溃开关的 tracking 程序，给崩溃测试用（见 binary_test.go）
+	dir, err := os.MkdirTemp("", "tracking-it-")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+	defer os.RemoveAll(dir)
+	if trackingBin, err = buildBinary(dir); err != nil {
+		fmt.Fprintln(os.Stderr, "build tracking:", err)
+		return 1
+	}
+
 	return m.Run()
 }
 

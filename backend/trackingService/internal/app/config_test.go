@@ -4,6 +4,7 @@ package app
 // 所以测试可以传一个假的环境（map），不用真的改电脑上的环境变量。
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -36,5 +37,27 @@ func TestLoadConfig_AllSet(t *testing.T) {
 	}
 	if cfg.Group != "tracking" { // 默认消费者组
 		t.Errorf("Group = %q, want tracking", cfg.Group)
+	}
+}
+
+// #37 缺必填的环境变量 → 启动时就报错退出。
+// 不然服务会"看起来启动成功"，直到第一条消息或第一个请求才莫名其妙地失败。
+func TestConfig_MissingRequired_FailsFast(t *testing.T) {
+	for _, missing := range []string{"DATABASE_URL", "KAFKA_BROKERS", "STORE_URL"} {
+		t.Run(missing, func(t *testing.T) {
+			env := map[string]string{
+				"DATABASE_URL":  "postgres://x@db/tracking_db",
+				"KAFKA_BROKERS": "kafka:9092",
+				"STORE_URL":     "http://store:8082",
+			}
+			delete(env, missing) // 每次去掉一个
+			_, err := LoadConfig(envFrom(env))
+			if err == nil {
+				t.Fatalf("LoadConfig accepted a config without %s", missing)
+			}
+			if !strings.Contains(err.Error(), missing) { // 错误信息要说清楚缺的是哪个
+				t.Errorf("error %q does not name %s", err, missing)
+			}
+		})
 	}
 }
