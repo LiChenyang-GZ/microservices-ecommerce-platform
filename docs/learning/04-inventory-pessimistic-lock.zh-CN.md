@@ -86,7 +86,7 @@ POST /api/store/orders/create-with-payment → StoreController.createOrderWithPa
 4. `unholdProduct`（取消时还库存）这次**没改**，单独记进待办，要先有红灯。
 
 已知、没修（记在 Obsidian 待办）：
-- `unholdProduct` 仍是普通读 + `@Version`，和下单撞上会冲突，外层 `catch Exception` 把它吞掉 → 库存没还回去。
+- `unholdProduct` 仍是普通读 + `@Version`，和同商品的下单撞上会冲突。冲突在 flush / 提交时才抛，而 unhold 加入的是调用方（`cancelOrder`、`CompensationService`）的事务 → 可能整个取消回滚，也可能被某层 `catch` 吞掉、库存没还。哪一种要先写红灯测试确认。
 - `updateProductQuantity` 用 `@Async` + `CompletableFuture.supplyAsync`：里面的代码跑在另一个线程上，方法上的 `@Transactional` 管不到它（事务绑定在线程上）。
 
 ---

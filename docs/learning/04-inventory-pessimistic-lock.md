@@ -86,7 +86,7 @@ POST /api/store/orders/create-with-payment → StoreController.createOrderWithPa
 4. `unholdProduct` (returning stock on cancel) is **not** changed here. It's in the backlog and needs its own red test first.
 
 Known, not fixed (in the Obsidian backlog):
-- `unholdProduct` still uses a plain read + `@Version`. If it races an order it conflicts, and the outer `catch Exception` swallows it → stock is not returned.
+- `unholdProduct` still uses a plain read + `@Version`, so it can conflict with an order for the same product. The conflict is thrown at flush/commit, and unhold joins the caller's transaction (`cancelOrder`, `CompensationService`) → the whole cancel may roll back, or a `catch` may swallow it and the stock is not returned. Which one needs a red test first.
 - `updateProductQuantity` uses `@Async` + `CompletableFuture.supplyAsync`. The code inside runs on another thread, so the method's `@Transactional` doesn't cover it (transactions are bound to a thread).
 
 ---
