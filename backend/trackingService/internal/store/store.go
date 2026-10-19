@@ -61,7 +61,8 @@ CREATE TABLE IF NOT EXISTS tracking_events (
     occurred_at     timestamptz NOT NULL,
     payload         jsonb       NOT NULL,
     received_at     timestamptz NOT NULL DEFAULT now()
-)`
+);
+CREATE INDEX IF NOT EXISTS tracking_events_order_time ON tracking_events (order_id, occurred_at)`
 
 // Migrate creates the table if it does not exist yet.
 func (s *Store) Migrate(ctx context.Context) error {
@@ -81,18 +82,26 @@ ON CONFLICT (event_id) DO NOTHING`,
 	return err
 }
 
-// Timeline returns an order's events in display order.
+// Timeline returns an order's events in display order (rule 5):
+// by occurredAt; at the same instant order-events before delivery-events
+// (an order happens before its delivery, G4); then by Kafka offset.
+// Arrival order is not used: the two topics have no order between them.
 func (s *Store) Timeline(ctx context.Context, orderID string) ([]Entry, error) {
 	rows, err := s.pool.Query(ctx, `
 SELECT event_type, source_topic, occurred_at
 FROM tracking_events
-WHERE order_id = $1`, orderID)
+WHERE order_id = $1
+ORDER BY occurred_at,
+         CASE source_topic WHEN 'order-events' THEN 0 ELSE 1 END,
+         kafka_offset`, orderID)
 	if err != nil {
 		return nil, err
 	}
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (Entry, error) {
 		var e Entry
 		err := row.Scan(&e.EventType, &e.Source, &e.OccurredAt)
+		// pgx returns timestamptz in the machine's local zone; events are defined in UTC.
+		e.OccurredAt = e.OccurredAt.UTC()
 		return e, err
 	})
 }
