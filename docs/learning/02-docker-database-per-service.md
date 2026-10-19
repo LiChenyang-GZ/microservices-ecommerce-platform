@@ -65,6 +65,7 @@ An image is the package: the app and everything it needs (JRE, jar). A container
 - `healthcheck`: Docker runs a command inside the container on a schedule; success means healthy. The Java services run `curl -fsS http://localhost:8082/actuator/health` ([compose.yml:79](../../backend/compose.yml#L79)).
 - `depends_on: condition: service_healthy` ([compose.yml:74](../../backend/compose.yml#L74)): start the service only after Postgres and RabbitMQ are **actually usable**, not just "the container started".
 - `start_period: 120s`: Spring Boot needs tens of seconds to start; failures in that window don't count.
+- Trap (found in the independent review): the Postgres check was first `pg_isready -U postgres`. Without `-h` it uses the Unix socket. On the first start with an empty volume, the temporary server that runs the init script listens **on the socket only, not on TCP**, so the container was reported healthy before the databases existed. `pg_isready -h 127.0.0.1` ([compose.yml:35](../../backend/compose.yml#L35)) checks the path the other containers actually use. Measured with the init stretched to 20 seconds: before the fix, healthy at 5.3 s while TCP was refused; after, healthy at 25.6 s with bank_db reachable. **A health check should take the same path as the real clients.**
 - `docker compose up --wait`: returns only when every container is healthy, and fails if one isn't.
 - Note: compose does **not** restart a container because it is unhealthy. That comes with Kubernetes liveness probes in step 8.
 

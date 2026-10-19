@@ -28,7 +28,11 @@ services:
       - pgdata:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U postgres -d postgres']
+      # -h 127.0.0.1 checks over TCP, which is how the other containers connect.
+      # Without it pg_isready uses the Unix socket, and on the first start the
+      # temporary init server answers on the socket only, so the container would
+      # be reported healthy before the init script has created the databases.
+      test: ['CMD-SHELL', 'pg_isready -h 127.0.0.1 -U postgres -d postgres']
       interval: 5s
       timeout: 3s
       retries: 10

@@ -65,6 +65,7 @@ PASS: order paid and delivery updates reached store
 - `healthcheck`：Docker 定期在容器里跑一条命令，成功就是 healthy。Java 服务跑 `curl -fsS http://localhost:8082/actuator/health`（[compose.yml:79](../../backend/compose.yml#L79)）。
 - `depends_on: condition: service_healthy`（[compose.yml:74](../../backend/compose.yml#L74)）：等 Postgres 和 RabbitMQ **真的能用了**再启动服务，而不只是"容器起来了"。
 - `start_period: 120s`：Spring Boot 启动要几十秒，这段时间内检查失败不算数。
+- 坑（独立审查发现的）：Postgres 的检查一开始写成 `pg_isready -U postgres`，不带 `-h` 就走 Unix socket。空数据卷第一次启动时，跑建库脚本的临时服务器**只开 socket、不开 TCP**，所以建库还没完就报 healthy 了。改成 `pg_isready -h 127.0.0.1`（[compose.yml:35](../../backend/compose.yml#L35)），检查的就是别的容器真正用的那条路。实测（把初始化拉长到 20 秒）：改之前 5.3 秒就 healthy，这时 TCP 连不上；改之后 25.6 秒才 healthy，这时 bank_db 已经能连。**健康检查要走和真实客户端一样的路径。**
 - `docker compose up --wait`：等所有容器都 healthy 才返回，有一个不行就失败。
 - 注意：compose **不会**因为 unhealthy 自动重启容器。这一点到第 8 步 Kubernetes 的 liveness probe 才有。
 
