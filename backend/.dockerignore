@@ -1,0 +1,17 @@
+# Secrets must never reach the build context, or they end up in an image layer.
+**/.env
+**/.env.*
+
+# Build outputs and caches: the image builds its own.
+**/build/
+**/bin/
+**/out/
+**/.gradle/
+**/.idea/
+**/*.iml
+
+# Not needed to build the services.
+docker/
+compose.yml
+Dockerfile
+.dockerignore
