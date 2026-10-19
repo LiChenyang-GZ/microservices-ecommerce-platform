@@ -2,7 +2,7 @@
 
 [English](00-event-contract.md) | **中文**
 
-> 对应 commit：`dc19398 test(red)` → `41ecfc5 feat`
+> 对应 commit：`a504482 test(red)` → `b8c92d9 feat`
 > 预计回放时间：**30 分钟**
 > 契约本身的说明（每个字段、每种事件）见 [contracts/README.zh-CN.md](../../backend/contracts/README.zh-CN.md)。这份文档只讲**这一步学到的概念**。
 
@@ -180,9 +180,9 @@ payload 的类型是 `JsonNode`。JSON 里显式写 null 时，Jackson 给的是
 回放命令（在 `backend`，PowerShell）：
 
 ```
-git checkout dc19398
+git checkout a504482
 .\gradlew :contracts:test :deliveryService:test --tests "*DeliveryEventContractTest" --continue
-git checkout 41ecfc5
+git checkout b8c92d9
 .\gradlew :contracts:test :deliveryService:test --tests "*DeliveryEventContractTest" --continue
 git checkout contracts
 ```

@@ -2,7 +2,7 @@
 
 **English** | [中文](00-event-contract.zh-CN.md)
 
-> Commits: `dc19398 test(red)` → `41ecfc5 feat`
+> Commits: `a504482 test(red)` → `b8c92d9 feat`
 > Replay time: **30 minutes**
 > The contract itself (every field, every event) is described in [contracts/README.md](../../backend/contracts/README.md). This doc covers only **the concepts learned in this step**.
 
@@ -180,9 +180,9 @@ The difference is whether a retry can ever succeed (design ADR-08, rule 6).
 Replay commands (from `backend`, PowerShell):
 
 ```
-git checkout dc19398
+git checkout a504482
 .\gradlew :contracts:test :deliveryService:test --tests "*DeliveryEventContractTest" --continue
-git checkout 41ecfc5
+git checkout b8c92d9
 .\gradlew :contracts:test :deliveryService:test --tests "*DeliveryEventContractTest" --continue
 git checkout contracts
 ```
