@@ -27,7 +27,7 @@ class PaymentTimeoutIntegrationTest extends StoreIntegrationTest {
 
     /**
      * #1 调 bank 超时，重试时扣了两次。
-     * 设计（ADR-04、ADR-05、规则 7）：重试必须用同一个幂等键 PAY-{paymentId}-{attempt}。
+     * 设计（ADR-04、ADR-05、规则 7）：重试必须用同一个幂等键 PAY-{paymentId}-{attempt}-{随机段}。
      */
     @Test
     void payTimeout_retriesWithSameKey_neverChargesTwice() {
@@ -46,8 +46,8 @@ class PaymentTimeoutIntegrationTest extends StoreIntegrationTest {
         assertThat(distinctKeys)
                 .as("bank 收到的不同幂等键个数 = 最坏情况下扣了几次钱")
                 .hasSize(1);
-        // 断言 2：键的格式是规格定的 PAY-{paymentId}-1（第一次支付，attempt = 1）
-        assertThat(distinctKeys.get(0)).isEqualTo("PAY-" + order.paymentId() + "-1");
+        // 断言 2：用的是这次扣款的键 PAY-{paymentId}-1-{随机段}（第一次支付，attempt = 1）
+        assertThat(distinctKeys.get(0)).isEqualTo(payKeyOf(order)).startsWith("PAY-" + order.paymentId() + "-1-");
         // 断言 3：最后拿到了 bank 的成功回答，Payment 是 SUCCESS
         assertThat(paymentOf(order).getStatus()).isEqualTo(PaymentStatus.SUCCESS);
     }
@@ -73,7 +73,8 @@ class PaymentTimeoutIntegrationTest extends StoreIntegrationTest {
         // 断言 3：确实重试过，而且每一次都是同一个键
         assertThat(transferRequests()).hasSizeGreaterThan(1);
         assertThat(transferRequests()).extracting(StoreIntegrationTest::keyOf)
-                .containsOnly("PAY-" + order.paymentId() + "-1");
+                .containsOnly(payKeyOf(order));
+        assertThat(payKeyOf(order)).startsWith("PAY-" + order.paymentId() + "-1-");
         // 断言 4：PAY 任务没有结束（之后还要每 10 分钟再试），订单还是待支付
         assertThat(openTasksOf(order, "PAY")).as("任务不结束，等低频重试").isNotEmpty();
         assertThat(orderOf(order).getStatus()).isEqualTo(OrderStatus.PENDING_PAYMENT);
@@ -106,7 +107,8 @@ class PaymentTimeoutIntegrationTest extends StoreIntegrationTest {
 
         // 断言：用的还是最初那个键，支付成功，订单 PAID（走了正常成功流程）
         assertThat(transferRequests()).extracting(StoreIntegrationTest::keyOf)
-                .containsOnly("PAY-" + order.paymentId() + "-1");
+                .containsOnly(payKeyOf(order));
+        assertThat(payKeyOf(order)).startsWith("PAY-" + order.paymentId() + "-1-");
         assertThat(paymentOf(order).getStatus()).isEqualTo(PaymentStatus.SUCCESS);
         assertThat(orderOf(order).getStatus()).isEqualTo(OrderStatus.PAID);
     }

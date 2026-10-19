@@ -42,7 +42,7 @@ class PayNowIntegrationTest extends StoreIntegrationTest {
 
     /**
      * #11 Pay Now：FAILED → 重置为 PENDING、attempt + 1、写新 PAY 任务。
-     * 只有确定失败（钱肯定没扣）才换新键 PAY-{paymentId}-2。
+     * 只有确定失败（钱肯定没扣）才换新键 PAY-{paymentId}-2-{新的随机段}。
      */
     @Test
     void payNow_afterFailed_newAttemptNewKey() {
@@ -65,7 +65,8 @@ class PayNowIntegrationTest extends StoreIntegrationTest {
         // OutboxProcessor 执行这条任务：用的是新键
         runOutboxRounds(1);
         assertThat(transferRequests()).extracting(StoreIntegrationTest::keyOf)
-                .containsOnly("PAY-" + order.paymentId() + "-2");
+                .containsOnly(payKeyOf(order));
+        assertThat(payKeyOf(order)).startsWith("PAY-" + order.paymentId() + "-2-");
     }
 
     /**

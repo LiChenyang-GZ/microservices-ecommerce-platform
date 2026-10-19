@@ -19,9 +19,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.EnumSet;
+import java.util.HexFormat;
 import java.util.Optional;
 import java.util.Set;
 
@@ -72,14 +74,29 @@ public class PaymentService {
 
     // ------------------------------------------------------------------ keys
 
-    /** Charge key. Same payment + same attempt = same key, however many times it is retried. */
+    /**
+     * Charge key PAY-{paymentId}-{attempt}-{random}. Same attempt = same key, however many times it is retried.
+     * The random part stops anyone from computing another user's key and using it at bank first (review finding 1).
+     * Payments created before the random part existed keep their old key, so their retries stay idempotent.
+     */
     public static String payKey(Payment payment) {
-        return "PAY-" + payment.getId() + "-" + payment.currentAttempt();
+        String base = "PAY-" + payment.getId() + "-" + payment.currentAttempt();
+        return payment.getPayKeyNonce() == null ? base : base + "-" + payment.getPayKeyNonce();
     }
 
-    /** Refund key. One refund per payment. */
+    /** Refund key REFUND-{paymentId}-{random}. One refund per payment (review finding 2). */
     public static String refundKey(Payment payment) {
-        return "REFUND-" + payment.getId();
+        String base = "REFUND-" + payment.getId();
+        return payment.getRefundKeyNonce() == null ? base : base + "-" + payment.getRefundKeyNonce();
+    }
+
+    private static final SecureRandom RANDOM = new SecureRandom();
+
+    /** 16 hex characters = 64 random bits: not guessable, short enough to read in a log */
+    static String newKeyNonce() {
+        byte[] bytes = new byte[8];
+        RANDOM.nextBytes(bytes);
+        return HexFormat.of().formatHex(bytes);
     }
 
     // ------------------------------------------------------------------ placing an order, Pay Now
@@ -101,6 +118,7 @@ public class PaymentService {
         payment.setAmount(amount);
         payment.setStatus(PaymentStatus.PENDING);
         payment.setAttempt(1);
+        payment.setPayKeyNonce(newKeyNonce());
         Payment saved = paymentRepository.save(payment);
 
         outboxService.createPayTask(orderId, saved.getId(), payKey(saved));
@@ -126,6 +144,7 @@ public class PaymentService {
             case FAILED -> {
                 payment.setStatus(PaymentStatus.PENDING);
                 payment.setAttempt(payment.currentAttempt() + 1);
+                payment.setPayKeyNonce(newKeyNonce()); // new attempt, new key
                 payment.setErrorMessage(null);
                 paymentRepository.save(payment);
                 outboxService.createPayTask(orderId, payment.getId(), payKey(payment));
@@ -220,6 +239,7 @@ public class PaymentService {
 
         if (isCancelled(order)) {
             payment.setStatus(PaymentStatus.REFUND_PENDING);
+            payment.setRefundKeyNonce(newKeyNonce());
             paymentRepository.save(payment);
             outboxService.createRefundTask(order.getId(), payment.getId(), refundKey(payment),
                     "Paid after order was cancelled");
@@ -286,6 +306,7 @@ public class PaymentService {
             return payment;
         }
         payment.setStatus(PaymentStatus.REFUND_PENDING);
+        payment.setRefundKeyNonce(newKeyNonce());
         paymentRepository.save(payment);
         outboxService.createRefundTask(orderId, payment.getId(), refundKey(payment), reason);
         return payment;

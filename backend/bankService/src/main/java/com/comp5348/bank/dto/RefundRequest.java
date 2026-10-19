@@ -12,7 +12,7 @@ import lombok.AllArgsConstructor;
 @AllArgsConstructor
 public class RefundRequest {
 
-    // Same key = same refund. Store sends REFUND-{paymentId}.
+    // Same key = same refund. Store sends REFUND-{paymentId}-{random}. Bank treats keys as opaque strings.
     private String idempotencyKey;
     private String originalTransactionId;
     private String reason;

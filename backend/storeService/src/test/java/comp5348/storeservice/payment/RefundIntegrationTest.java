@@ -27,7 +27,7 @@ class RefundIntegrationTest extends StoreIntegrationTest {
     @Autowired OrderService orderService;
 
     /**
-     * #8 退款超时 → 走 outbox，用 REFUND-{paymentId} 重试；5 次后 REFUND_UNKNOWN。
+     * #8 退款超时 → 走 outbox，用 REFUND-{paymentId}-{随机段} 重试；5 次后 REFUND_UNKNOWN。
      * 设计（规则 2、规则 7）：退款也是任务，不在用户的取消请求里直接调 bank。
      */
     @Test
@@ -48,7 +48,8 @@ class RefundIntegrationTest extends StoreIntegrationTest {
         // 断言 2：确实重试了，而且每次都是同一个退款键
         assertThat(refundRequests()).hasSizeGreaterThan(1);
         assertThat(refundRequests()).extracting(StoreIntegrationTest::keyOf)
-                .containsOnly("REFUND-" + order.paymentId());
+                .containsOnly(refundKeyOf(order));
+        assertThat(refundKeyOf(order)).startsWith("REFUND-" + order.paymentId() + "-");
 
         // bank 恢复，过了 10 分钟，低频重试拿到成功
         bankRefundSucceeds();

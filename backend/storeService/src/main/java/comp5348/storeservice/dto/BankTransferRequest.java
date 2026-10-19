@@ -14,7 +14,7 @@ import java.math.BigDecimal;
 @AllArgsConstructor
 public class BankTransferRequest {
 
-    private String idempotencyKey; // PAY-{paymentId}-{attempt}
+    private String idempotencyKey; // PAY-{paymentId}-{attempt}-{random}
     private String fromAccount;
     private String toAccount;
     private BigDecimal amount;

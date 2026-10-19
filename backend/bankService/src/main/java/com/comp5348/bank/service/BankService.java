@@ -30,11 +30,15 @@ public class BankService {
     @Autowired
     private TransactionRepository transactionRepository;
 
+    /** Answer for a reused key with different content. A rejection, so store never records it as paid / refunded. */
+    static final String KEY_CONFLICT = "Idempotency key conflict: this key was already used for a different request";
+
     /**
      * Transfer, deduplicated by idempotency key.
      *
      * Order of steps matters:
-     * 1. Key already seen → return the first result, move no money.
+     * 1. Key already seen → same request: return the first result, move no money.
+     *    Different request under the same key (someone else used it first) → key conflict, never success.
      * 2. Lock both account rows (SELECT ... FOR UPDATE), in account-number order.
      * 3. Check the key again. A request with the same key may have committed while we waited for the lock;
      *    now we can see it and return its result instead of failing on the unique constraint.
@@ -50,7 +54,7 @@ public class BankService {
             return new TransferResponse(false, null, "idempotencyKey is required");
         }
 
-        Optional<TransferResponse> previous = previousTransferResult(key);
+        Optional<TransferResponse> previous = previousTransferResult(key, request);
         if (previous.isPresent()) {
             return previous.get();
         }
@@ -61,7 +65,7 @@ public class BankService {
 
         Map<String, BankAccount> locked = lockAccounts(request.getFromAccount(), request.getToAccount());
 
-        previous = previousTransferResult(key);
+        previous = previousTransferResult(key, request);
         if (previous.isPresent()) {
             return previous.get();
         }
@@ -99,7 +103,7 @@ public class BankService {
     }
 
     /**
-     * Full refund of an earlier transfer, deduplicated by idempotency key (store sends REFUND-{paymentId}).
+     * Full refund of an earlier transfer, deduplicated by idempotency key (store sends REFUND-{paymentId}-{random}).
      * Same steps as transfer: check key → lock both accounts → check key again → move money.
      * A rejected refund is not recorded, so the same key can be retried after someone fixes the cause.
      */
@@ -113,16 +117,16 @@ public class BankService {
             return new RefundResponse(false, null, "idempotencyKey is required");
         }
 
-        Optional<RefundResponse> previous = previousRefundResult(key);
-        if (previous.isPresent()) {
-            return previous.get();
-        }
-
         Long originalId;
         try {
             originalId = Long.parseLong(request.getOriginalTransactionId());
         } catch (NumberFormatException e) {
             return new RefundResponse(false, null, "Invalid originalTransactionId: " + request.getOriginalTransactionId());
+        }
+
+        Optional<RefundResponse> previous = previousRefundResult(key, originalId);
+        if (previous.isPresent()) {
+            return previous.get();
         }
         Optional<Transaction> originalOpt = transactionRepository.findById(originalId);
         if (originalOpt.isEmpty()) {
@@ -136,7 +140,7 @@ public class BankService {
 
         Map<String, BankAccount> locked = lockAccounts(original.getFromAccount(), original.getToAccount());
 
-        previous = previousRefundResult(key);
+        previous = previousRefundResult(key, originalId);
         if (previous.isPresent()) {
             return previous.get();
         }
@@ -195,26 +199,47 @@ public class BankService {
         return locked;
     }
 
-    private Optional<TransferResponse> previousTransferResult(String key) {
+    /**
+     * The key was used before. Only the same request gets the first result back.
+     * The same key with different content means someone else got to the key first (keys were guessable before:
+     * review finding 1). Answering "success" would tell store it was paid when nothing was taken, so it is a conflict.
+     */
+    private Optional<TransferResponse> previousTransferResult(String key, TransferRequest request) {
         return transactionRepository.findByTransactionRef(key).map(txn -> {
+            if (!sameTransfer(txn, request)) {
+                logger.warn("Idempotency key conflict: key={} was used for txnId={} ({} → {}, {}), now {} → {}, {}",
+                        key, txn.getId(), txn.getFromAccount(), txn.getToAccount(), txn.getAmount(),
+                        request.getFromAccount(), request.getToAccount(), request.getAmount());
+                return new TransferResponse(false, null, KEY_CONFLICT);
+            }
             logger.info("Transfer key already processed: key={}, txnId={}, status={}", key, txn.getId(), txn.getStatus());
-            if (txn.getType() == Transaction.TransactionType.TRANSFER
-                    && txn.getStatus() == Transaction.TransactionStatus.SUCCESS) {
+            if (txn.getStatus() == Transaction.TransactionStatus.SUCCESS) {
                 return new TransferResponse(true, txn.getId().toString(), "Transaction already processed successfully");
             }
-            return new TransferResponse(false, txn.getId().toString(),
-                    txn.getErrorMessage() != null ? txn.getErrorMessage() : "Key already used by another transaction");
+            return new TransferResponse(false, txn.getId().toString(), txn.getErrorMessage());
         });
     }
 
-    private Optional<RefundResponse> previousRefundResult(String key) {
+    private static boolean sameTransfer(Transaction txn, TransferRequest request) {
+        return txn.getType() == Transaction.TransactionType.TRANSFER
+                && Objects.equals(txn.getFromAccount(), request.getFromAccount())
+                && Objects.equals(txn.getToAccount(), request.getToAccount())
+                && request.getAmount() != null
+                && txn.getAmount().compareTo(request.getAmount()) == 0; // compareTo: 100.0 and 100.00 are the same amount
+    }
+
+    /** Same rule for refunds: the key must have been used to refund the same original transaction. */
+    private Optional<RefundResponse> previousRefundResult(String key, Long originalId) {
         return transactionRepository.findByTransactionRef(key).map(txn -> {
-            logger.info("Refund key already processed: key={}, txnId={}", key, txn.getId());
-            if (txn.getType() == Transaction.TransactionType.REFUND
-                    && txn.getStatus() == Transaction.TransactionStatus.SUCCESS) {
-                return new RefundResponse(true, txn.getId().toString(), "Refund already processed");
+            boolean sameRefund = txn.getType() == Transaction.TransactionType.REFUND
+                    && Objects.equals(txn.getOriginalTransactionId(), originalId);
+            if (!sameRefund) {
+                logger.warn("Idempotency key conflict: key={} was used for txnId={} (type={}, original={}), now refund of {}",
+                        key, txn.getId(), txn.getType(), txn.getOriginalTransactionId(), originalId);
+                return new RefundResponse(false, null, KEY_CONFLICT);
             }
-            return new RefundResponse(false, null, "Key already used by another transaction");
+            logger.info("Refund key already processed: key={}, txnId={}", key, txn.getId());
+            return new RefundResponse(true, txn.getId().toString(), "Refund already processed");
         });
     }
 
@@ -304,7 +329,7 @@ public class BankService {
 
     /**
      * Record a rejected transfer under its key, so a retry with the same key gets the same rejection.
-     * (Pay Now after a rejection uses a new key: PAY-{paymentId}-{attempt + 1}.)
+     * (Pay Now after a rejection uses a new key: PAY-{paymentId}-{attempt + 1}-{new random}.)
      */
     private TransferResponse createFailedTransaction(TransferRequest request, String errorMessage) {
         Transaction transaction = new Transaction();

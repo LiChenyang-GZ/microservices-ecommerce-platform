@@ -61,10 +61,11 @@ public class UnpaidOrderCanceller {
                             logger.info("Auto-cancelling expired unpaid order: orderId={}, createdAt={}",
                                     order.getId(), createdAt);
 
-                            orderService.cancelOrder(order.getId());
-                            cancelledCount++;
-
-                            logger.info("Successfully cancelled expired order: {}", order.getId());
+                            // Re-checks the status under a row lock: the list above may be stale
+                            if (orderService.cancelIfStillUnpaid(order.getId())) {
+                                cancelledCount++;
+                                logger.info("Successfully cancelled expired order: {}", order.getId());
+                            }
                         } catch (Exception e) {
                             logger.error("Failed to cancel expired order {}: {}", order.getId(), e.getMessage(), e);
                         }

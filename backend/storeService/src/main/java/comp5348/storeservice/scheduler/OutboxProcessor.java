@@ -189,7 +189,7 @@ public class OutboxProcessor {
         paymentService.onPayStillUnknown(taskId, lastError);
     }
 
-    /** One REFUND task. Same shape as runPayTask; key REFUND-{paymentId}. */
+    /** One REFUND task. Same shape as runPayTask; key REFUND-{paymentId}-{random}. */
     private void runRefundTask(Long taskId) {
         String lastError = null;
         for (int i = 0; i < fastRetries; i++) {

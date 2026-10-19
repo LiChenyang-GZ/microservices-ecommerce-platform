@@ -17,8 +17,8 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 【层】集成测试（真 Postgres + 假 bank）。
  * 【问题】paymentId、orderId 用户在页面和接口里都看得到；attempt 从 1 开始数。
  *   键如果就是 PAY-{paymentId}-{attempt} / REFUND-{paymentId}，攻击者能算出别人的下一个键，抢先去 bank 占用它。
- * 【只测性质，不定格式】这里只断言"发给 bank 的键不在能猜的那几个里"。键具体长什么样（比如加一段随机数），
- *   要改契约 README 第 4 节和设计 ADR-04，由 Christy 决定。
+ * 【只测性质】这里只断言"发给 bank 的键不在能猜的那几个里"。Christy 定的格式是
+ *   PAY-{paymentId}-{attempt}-{随机段} / REFUND-{paymentId}-{随机段}（契约 README 第 4 节），其他测试会检查这个前缀。
  */
 class PaymentKeyIntegrationTest extends StoreIntegrationTest {
 

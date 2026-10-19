@@ -13,6 +13,7 @@ import comp5348.storeservice.model.*;
 import comp5348.storeservice.repository.*;
 import comp5348.storeservice.scheduler.OutboxProcessor;
 import comp5348.storeservice.service.OrderProductService;
+import comp5348.storeservice.service.PaymentService;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -195,6 +196,19 @@ public abstract class StoreIntegrationTest {
 
     protected Order orderOf(PlacedOrder order) {
         return orderRepository.findById(order.orderId()).orElseThrow();
+    }
+
+    /**
+     * 这一单"当前这次扣款"的键：PAY-{paymentId}-{attempt}-{随机段}。随机段存在 Payment 上，所以从数据库读。
+     * （审查 #1 之后键里加了随机段，测试不能再自己拼出键来，攻击者也不能。）
+     */
+    protected String payKeyOf(PlacedOrder order) {
+        return PaymentService.payKey(paymentOf(order));
+    }
+
+    /** 这一单的退款键：REFUND-{paymentId}-{随机段} */
+    protected String refundKeyOf(PlacedOrder order) {
+        return PaymentService.refundKey(paymentOf(order));
     }
 
     /** 这一单在 payment_outbox 里的所有任务 */

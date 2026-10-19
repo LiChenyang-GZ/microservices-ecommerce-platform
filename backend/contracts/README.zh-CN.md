@@ -110,8 +110,13 @@ try {
 
 | 方法 | 请求 | 幂等键 |
 |---|---|---|
-| `Transfer` | `idempotency_key`, `from_account`, `to_account`, `amount` | `PAY-{paymentId}-{attempt}` |
-| `Refund` | `idempotency_key`, `original_transaction_id`, `reason` | `REFUND-{paymentId}` |
+| `Transfer` | `idempotency_key`, `from_account`, `to_account`, `amount` | `PAY-{paymentId}-{attempt}-{随机段}` |
+| `Refund` | `idempotency_key`, `original_transaction_id`, `reason` | `REFUND-{paymentId}-{随机段}` |
+
+**键对 bank 来说是不透明的字符串，而且不能被猜到**（2026-10-19 第 2 步审查发现 1、2 之后改的）：
+- `{随机段}` 是 `SecureRandom` 生成的 16 个十六进制字符，存在 store 的 Payment 上，任何接口都不返回它。每次新的扣款尝试换一个；同一次尝试的重试用同一个键。
+- bank 见到用过的键，会和第一次的内容比对：转账比类型、付款人、收款人、金额；退款比类型、原交易。内容一样 → 返回第一次的结果；**内容不一样 → `REJECTED`（"键冲突"），绝不回 `SUCCEEDED`**，钱不动。
+- 为什么：键是 `PAY-{paymentId}-{attempt}` 时，看得到 paymentId 的人就能抢先用下一个键（比如给自己转 0.01），store 真正的扣款就会拿到"已经成功"。
 
 **怎么读结果**（这是最重要的一条）：
 

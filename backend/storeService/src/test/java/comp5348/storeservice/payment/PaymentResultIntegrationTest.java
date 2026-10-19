@@ -113,9 +113,10 @@ class PaymentResultIntegrationTest extends StoreIntegrationTest {
         // 断言 2：订单还是已取消，没建配送单
         assertThat(orderOf(order).getStatus()).isEqualTo(OrderStatus.CANCELLED);
         assertThat(deliveryCreateRequests()).isEmpty();
-        // 断言 3：钱退了：bank 收到了退款请求，键是 REFUND-{paymentId}
+        // 断言 3：钱退了：bank 收到了退款请求，键是 REFUND-{paymentId}-{随机段}
         assertThat(refundRequests()).isNotEmpty();
         assertThat(refundRequests()).extracting(StoreIntegrationTest::keyOf)
-                .containsOnly("REFUND-" + order.paymentId());
+                .containsOnly(refundKeyOf(order));
+        assertThat(refundKeyOf(order)).startsWith("REFUND-" + order.paymentId() + "-");
     }
 }

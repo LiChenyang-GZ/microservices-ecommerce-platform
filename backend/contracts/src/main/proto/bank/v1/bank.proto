@@ -9,8 +9,10 @@
 //                                     Never treat it as REJECTED.
 //
 // Idempotency (ADR-04): bank stores idempotency_key with a unique constraint.
-// A repeated key returns the first call's response and moves no money.
-// Keys: Transfer = "PAY-{paymentId}-{attempt}", Refund = "REFUND-{paymentId}".
+// A repeated key with the same request returns the first call's response and moves no money.
+// A repeated key with a different request is REJECTED (key conflict), never SUCCEEDED.
+// Keys are opaque to bank. Store sends Transfer = "PAY-{paymentId}-{attempt}-{random}",
+// Refund = "REFUND-{paymentId}-{random}"; the random part makes them impossible to guess.
 syntax = "proto3";
 
 package bank.v1;

@@ -12,7 +12,7 @@ import lombok.AllArgsConstructor;
 @AllArgsConstructor
 public class BankRefundRequest {
 
-    private String idempotencyKey; // REFUND-{paymentId}
+    private String idempotencyKey; // REFUND-{paymentId}-{random}
     private String originalTransactionId;
     private String reason;
 }

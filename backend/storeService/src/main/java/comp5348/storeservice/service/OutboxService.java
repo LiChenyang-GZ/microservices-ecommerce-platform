@@ -41,7 +41,7 @@ public class OutboxService {
         return saveTask(orderId, TASK_PAY, idempotencyKey, payload);
     }
 
-    /** Write a REFUND task: "refund this payment with key REFUND-{paymentId}". Same rules as createPayTask. */
+    /** Write a REFUND task: "refund this payment with key REFUND-{paymentId}-{random}". Same rules as createPayTask. */
     public PaymentOutbox createRefundTask(Long orderId, Long paymentId, String idempotencyKey, String reason) {
         Map<String, Object> payload = new HashMap<>();
         payload.put("orderId", orderId);

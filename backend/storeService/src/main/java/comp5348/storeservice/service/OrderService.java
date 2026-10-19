@@ -175,6 +175,25 @@ public class OrderService {
     }
 
     /**
+     * Auto-cancel for the 15-minute payment timeout (review finding 3).
+     * The caller read its list of unpaid orders earlier; a slow retry may have charged this order since then.
+     * So lock the row and look again: only an order that is still PENDING_PAYMENT is cancelled.
+     * (A user cancelling a PAID order on purpose goes through cancelOrder and gets a refund.)
+     *
+     * @return true if the order was cancelled, false if it was skipped
+     */
+    public boolean cancelIfStillUnpaid(Long orderId) {
+        Order order = orderRepository.findByIdForUpdate(orderId).orElse(null);
+        if (order == null || order.getStatus() != OrderStatus.PENDING_PAYMENT) {
+            logger.info("Auto-cancel skipped for order {}: status is now {}", orderId,
+                    order == null ? "missing" : order.getStatus());
+            return false;
+        }
+        cancelOrder(orderId); // same transaction; the row is already locked by us
+        return true;
+    }
+
+    /**
      * Cancel order (logic mostly unchanged, excellent)
      */
     public OrderDTO cancelOrder(Long orderId) {

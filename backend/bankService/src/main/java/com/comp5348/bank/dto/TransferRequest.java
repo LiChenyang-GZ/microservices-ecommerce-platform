@@ -15,7 +15,7 @@ import java.math.BigDecimal;
 @AllArgsConstructor
 public class TransferRequest {
 
-    // Same key = same transfer. Store sends PAY-{paymentId}-{attempt}.
+    // Same key = same transfer. Store sends PAY-{paymentId}-{attempt}-{random}. Bank treats keys as opaque strings.
     // "transactionRef" is still accepted: the frontend's Add Money page sends that name.
     @JsonAlias("transactionRef")
     private String idempotencyKey;
