@@ -96,7 +96,36 @@ delivery 的消费者
 
 ---
 
-## 5. 面试追问链
+## 5. 八股在这里
+
+八股是按"题目"背的，面试是按"场景"问的。这一节从这一步**真写过的代码**出发，指出哪一行碰到了哪道题，并且回答：这里选了什么、什么时候要换成"优化版"、哪里**不需要**优化版。
+
+> 📒 = 你的《Macquarie-Round1-Java八股》里有，后面是题号。
+> ➕ = 笔记里没有，Claude 补的。以后深入学八股时建议补进笔记。
+>
+> **结论先说：这一步没有需要优化的性能问题。** 值得练的是"判断"：为什么现在不用优化版。
+
+| 八股 | 代码在哪 | 这里的判断 |
+|---|---|---|
+| 📒 **A2 HashMap / B2 ConcurrentHashMap** | `DeliveryEventType.fromStatus()`：逐个比较 6 个值（[DeliveryEventType.java:35](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java#L35)） | **现在**：6 个值，循环最简单。**什么时候换**：调用量非常大时，可以在类加载时建一个 `static final Map<String, DeliveryEventType>` 当索引，查找从逐个比较变成一次 hash。**不需要 ConcurrentHashMap**：这个 Map 建好后只读，多个线程只读是安全的。只有多个线程**同时写**（比如一个会不断加东西的缓存）才需要它 |
+| 📒 **B1 / D2 线程安全** + ➕ **ObjectMapper 线程安全** | `EventCodec` 里只有一个 `static final ObjectMapper`，所有线程共用（[EventCodec.java:15](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java#L15)） | ObjectMapper 创建很贵（要扫描类、建缓存），所以只建一个。**配置好以后**，多个线程同时用它读写 JSON 是安全的。坑：不能在用的过程中再改配置（比如某个请求里调 `MAPPER.configure(...)`），会影响所有线程。跟 D2 "singleton bean 是不是线程安全"是同一个道理：没有可变状态，才线程安全 |
+| 📒 **A1 equals / hashCode** | record 按所有字段自动生成 `equals` 和 `hashCode` | 所以 payload 可以直接当 HashMap 的 key，或者放进 HashSet 去重。手写的类如果只重写 `equals`、不重写 `hashCode`，放进 HashSet 去重会失效，这就是 A1 的经典坑。record 不会犯这个错 |
+| 📒 **A4 checked vs unchecked** | `InvalidEventException extends Exception`（checked） | 故意用 checked：编译器逼消费者单独处理"坏消息"（送 DLT），不会和"暂时失败"（要重试）混在一起。如果用 unchecked，忘了 catch 也能编译，坏消息就会被当成普通异常一直重试 |
+| 📒 **A6 Modern Java** | `record` + 紧凑构造器 | 被问"用过哪些新特性"时，能指着一行真代码说：用 record 定义不可变的消息格式，在紧凑构造器里做检查 |
+| 📒 **H1 secrets** | 第 1 步 `0d9ea54`：密码改成 `${DB_PASSWORD}`，真实值放在不进 git 的 `backend/.env` | 你在 Macquarie 被问倒的题，这次有了真实例子。还要能讲后半句：**旧密码已经在 git 历史里了，光改代码不够，要把它作废（rotate）** |
+| ➕ **BigDecimal 存金额** | payload 里的 `amount` 是 `BigDecimal`，JSON 里写成字符串 `"259.80"` | `double` 存不准小数：`0.1 + 0.2` 得到 `0.30000000000000004`。三个坑：① 用字符串构造 `new BigDecimal("0.1")`，不要用 `new BigDecimal(0.1)`（后者把 double 的误差带了进来）；② 比较大小用 `compareTo`，不要用 `equals`：`new BigDecimal("1.0").equals(new BigDecimal("1.00"))` 是 **false**，因为小数位数不同；③ JSON 里写成字符串，Go 和 JavaScript 读的时候也不会丢精度 |
+
+**场景锚点（英文，面试时直接用）**
+
+> "In my contracts module the status lookup is a plain loop over six values. A map would only help at very high call rates, and since it would be read-only after startup, I wouldn't need a ConcurrentHashMap. I'd only reach for that when several threads write to the same map."
+
+> "There's one shared ObjectMapper. It's expensive to build and thread-safe once it's configured, so the rule is: configure it once at startup and never change it afterwards."
+
+> "Money is BigDecimal, sent as a string in JSON. And I compare amounts with compareTo, not equals, because equals also compares the scale."
+
+---
+
+## 6. 面试追问链
 
 **链 A：契约**
 1. 服务之间的消息格式怎么保证两边一致？→ 共享 contracts 模块 + 两种语言读同一批示例 JSON 的契约测试。
@@ -118,7 +147,7 @@ delivery 的消费者
 
 ---
 
-## 6. 英文说法
+## 7. 英文说法
 
 > "Services talk through Kafka events, so I put the event formats in one shared contracts module. Every event has the same envelope: an event ID for de-duplication, the type, the order ID as the Kafka key, a timestamp, and the payload."
 
@@ -128,7 +157,7 @@ delivery 的消费者
 
 ---
 
-## 7. 资料
+## 8. 资料
 
 - Java record 和紧凑构造器（Oracle 官方，Java 17）："The Canonical Constructor of a Record Class"一节
   https://docs.oracle.com/en/java/javase/17/language/records.html
@@ -145,7 +174,7 @@ delivery 的消费者
 
 ---
 
-## 8. 自测题
+## 9. 自测题
 
 **1. 把 `EventEnvelope` 的紧凑构造器整段删掉，哪些测试会变红？`orderId_sentAsJsonNumber_isRejected` 会红吗？**
 
@@ -173,7 +202,7 @@ payload 的类型是 `JsonNode`。JSON 里显式写 null 时，Jackson 给的是
 
 ---
 
-## 9. 预计回放时间
+## 10. 预计回放时间
 
 **30 分钟**：checkout 红 → 跑 → checkout 绿 → 跑 → 读第 2 节 → 改坏练习（删掉构造器检查，或者删掉 coercion 那一行，各跑一次）→ 讲英文说法 → 做题。
 

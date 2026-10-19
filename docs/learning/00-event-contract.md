@@ -96,7 +96,36 @@ delivery consumer
 
 ---
 
-## 5. Interview follow-up chains
+## 5. Java fundamentals in this code
+
+Fundamentals are memorised as questions, but interviews ask them as scenarios. This section starts from **code actually written in this step**, points to the line that touches each classic question, and answers: what was chosen here, when you'd switch to the "optimised" version, and where you **don't** need it.
+
+> 📒 = in Christy's *Macquarie-Round1-Java八股* notes; the code after it is the question id.
+> ➕ = not in the notes; added by Claude. Worth adding to the notes later.
+>
+> **Bottom line: nothing in this step needs a performance fix.** What's worth practising is the judgement: why the optimised version isn't needed yet.
+
+| Question | Where in the code | The judgement |
+|---|---|---|
+| 📒 **A2 HashMap / B2 ConcurrentHashMap** | `DeliveryEventType.fromStatus()` loops over 6 values ([DeliveryEventType.java:35](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java#L35)) | **Now**: 6 values; a loop is simplest. **When to switch**: at very high call rates, build a `static final Map<String, DeliveryEventType>` index at class-load time so a lookup is one hash instead of a scan. **No ConcurrentHashMap needed**: the map is read-only once built, and concurrent reads are safe. You only need it when several threads **write** to the same map (e.g. a cache that keeps growing) |
+| 📒 **B1 / D2 thread safety** + ➕ **ObjectMapper thread safety** | `EventCodec` has a single `static final ObjectMapper` shared by all threads ([EventCodec.java:15](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java#L15)) | ObjectMapper is expensive to build (it scans classes and builds caches), so there's only one. **Once configured**, many threads can read and write JSON with it safely. Gotcha: never change its configuration while in use (e.g. calling `MAPPER.configure(...)` inside a request); that affects every thread. Same reasoning as D2 "is a singleton bean thread-safe": only if it has no mutable state |
+| 📒 **A1 equals / hashCode** | records generate `equals` and `hashCode` from all fields | So a payload can be a HashMap key or go into a HashSet for de-duplication. A hand-written class that overrides `equals` but not `hashCode` breaks HashSet de-duplication, the classic A1 trap. Records can't make that mistake |
+| 📒 **A4 checked vs unchecked** | `InvalidEventException extends Exception` (checked) | Checked on purpose: the compiler forces consumers to handle "broken message" (send to DLT) separately from "transient failure" (retry). With an unchecked exception, forgetting the catch still compiles and a broken message would be retried like any other error |
+| 📒 **A6 Modern Java** | `record` + compact constructor | When asked "which newer features do you use", point to real code: records define immutable message formats, validated in the compact constructor |
+| 📒 **H1 secrets** | Step 1 `0d9ea54`: passwords became `${DB_PASSWORD}`, real values live in the git-ignored `backend/.env` | The question that caught you out at Macquarie, now with a real example. Be ready for the second half too: **old passwords are already in git history, so changing the code isn't enough; rotate them** |
+| ➕ **BigDecimal for money** | payload `amount` is a `BigDecimal`, written as the string `"259.80"` in JSON | `double` can't hold decimals exactly: `0.1 + 0.2` gives `0.30000000000000004`. Three traps: ① build from a string, `new BigDecimal("0.1")`, never `new BigDecimal(0.1)` (that copies the double's error); ② compare with `compareTo`, not `equals`: `new BigDecimal("1.0").equals(new BigDecimal("1.00"))` is **false** because the scale differs; ③ as a JSON string, Go and JavaScript don't lose precision either |
+
+**Scenario anchors (say these in interviews)**
+
+> "In my contracts module the status lookup is a plain loop over six values. A map would only help at very high call rates, and since it would be read-only after startup, I wouldn't need a ConcurrentHashMap. I'd only reach for that when several threads write to the same map."
+
+> "There's one shared ObjectMapper. It's expensive to build and thread-safe once it's configured, so the rule is: configure it once at startup and never change it afterwards."
+
+> "Money is BigDecimal, sent as a string in JSON. And I compare amounts with compareTo, not equals, because equals also compares the scale."
+
+---
+
+## 6. Interview follow-up chains
 
 **Chain A: the contract**
 1. How do you keep message formats consistent between services? → A shared contracts module, plus contract tests in both languages that read the same example JSON.
@@ -118,7 +147,7 @@ delivery consumer
 
 ---
 
-## 6. How to say it
+## 7. How to say it
 
 > "Services talk through Kafka events, so I put the event formats in one shared contracts module. Every event has the same envelope: an event ID for de-duplication, the type, the order ID as the Kafka key, a timestamp, and the payload."
 
@@ -128,7 +157,7 @@ delivery consumer
 
 ---
 
-## 7. References
+## 8. References
 
 - Java records and compact constructors (Oracle, Java 17), section "The Canonical Constructor of a Record Class"
   https://docs.oracle.com/en/java/javase/17/language/records.html
@@ -145,7 +174,7 @@ delivery consumer
 
 ---
 
-## 8. Self-check
+## 9. Self-check
 
 **1. If you delete `EventEnvelope`'s compact constructor, which tests go red? Does `orderId_sentAsJsonNumber_isRejected` go red?**
 
@@ -173,7 +202,7 @@ The difference is whether a retry can ever succeed (design ADR-08, rule 6).
 
 ---
 
-## 9. Replay time
+## 10. Replay time
 
 **30 minutes**: checkout red → run → checkout green → run → read section 2 → break-it exercise (remove the constructor check, or the coercion line, and run each time) → say the English lines → self-check.
 
