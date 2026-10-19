@@ -18,7 +18,7 @@
 contracts/
 ├── src/main/java/com/comp5348/contracts/events/
 │   ├── EventEnvelope.java       事件外壳（5 个字段，构造时检查）
-│   ├── EventCodec.java          读写 JSON 的唯一入口
+│   ├── EventCodec.java          读写 JSON 的唯一入口（内部用 Jackson，见下）
 │   ├── InvalidEventException    消息本身坏了 → 消费者送进 DLT
 │   ├── Topics.java              topic 名字
 │   ├── OrderEventType.java      order-events 的 5 种事件
@@ -168,4 +168,5 @@ try {
 2. Java 的事件类放在共享模块里，各服务引用同一份；Go 靠示例 JSON 对齐。代价：改契约时所有服务都要重新编译。所以这里只放格式，不放业务逻辑。
 3. 各个 payload 的具体字段，以及 `reason` 的取值（设计只写了事件名）。
 4. gRPC 只有 SUCCEEDED / REJECTED 两种结果；退款不带金额。
-5. 没有加版本号字段。以后改格式只**加字段**，不改、不删已有字段，旧的消费者照样能读。`EventCodec` 会忽略多出来的字段，由测试 `newFieldAddedByProducer_isIgnoredByOlderConsumer` 保证（修复前 Jackson 会拒绝它们，是写 Go tracking 的 agent 发现的）。
+5. 没有加版本号字段。以后改格式只**加字段**，不改、不删已有字段，旧的消费者照样能读。为了做到这一点，`EventCodec` 会**跳过不认识的字段**，由测试 `newFieldAddedByProducer_isIgnoredByOlderConsumer` 保证。
+   - 背景：`EventCodec` 用 **Jackson** 读写 JSON。Jackson 是 Spring Boot 默认的 JSON 库，负责把 JSON 文字转成 Java 对象、再转回去。它的默认规则是"JSON 里有、Java 类里没有的字段就报错"，所以修复前，消息里只要多一个字段，整条消息就会被当成坏消息送进 DLT。这个问题是写 Go tracking 的 agent 拿 README 对照它的解析代码时发现的。
