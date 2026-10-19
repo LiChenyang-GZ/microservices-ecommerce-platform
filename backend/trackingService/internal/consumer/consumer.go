@@ -63,7 +63,11 @@ func Run(ctx context.Context, cfg Config, sink Sink, log *slog.Logger) error {
 	defer cl.Close()
 
 	var current Message
-	h := &Handler{Sink: &hookedSink{Sink: sink, hooks: cfg.Hooks, msg: &current}, Log: log}
+	h := &Handler{
+		Sink: &hookedSink{Sink: sink, hooks: cfg.Hooks, msg: &current},
+		DLT:  &kafkaDLT{cl: cl, group: cfg.Group}, // the same client can also produce
+		Log:  log,
+	}
 
 	for {
 		fetches := cl.PollFetches(ctx)
