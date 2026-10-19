@@ -90,6 +90,25 @@ class EventEnvelopeContractTest {
                 .isInstanceOf(InvalidEventException.class);
     }
 
+    // 契约 README 第 7 节承诺："以后改格式只加字段，旧的消费者照样能读"。
+    // 这个测试模拟"生产者已经升级、多发了字段，消费者还是旧版"：外壳和 payload 各多一个字段。
+    // 期望：照常解析，多出来的字段被忽略。如果消费者拒绝它，这条正常的消息就会被当成坏消息送进 DLT。
+    @Test
+    void newFieldAddedByProducer_isIgnoredByOlderConsumer() throws Exception {
+        ObjectNode event = (ObjectNode) json.readTree(Files.readString(EXAMPLES.resolve("order-events-OrderPaid.json")));
+        // 外壳多一个字段（比如以后加的 schemaVersion）。
+        event.put("schemaVersion", 2);
+        // payload 多一个字段（比如以后加的 couponCode）。
+        ((ObjectNode) event.get("payload")).put("couponCode", "SPRING10");
+
+        // 读外壳：不能抛异常。
+        EventEnvelope envelope = EventCodec.parse(event.toString());
+        // 读 payload：也不能抛异常，已有的字段照样读得到。
+        com.comp5348.contracts.events.payload.OrderPaidPayload payload =
+                EventCodec.payload(envelope, com.comp5348.contracts.events.payload.OrderPaidPayload.class);
+        assertThat(payload.paymentId()).isEqualTo(11L);
+    }
+
     // 安全网：每个示例文件都能被解析，解析出的 eventType 和文件名对得上，再写回去内容不变。
     // 这个测试本来就该是绿的（不是修 bug），它保证示例文件和 Java 类型一直同步。
     @ParameterizedTest(name = "{0}")
