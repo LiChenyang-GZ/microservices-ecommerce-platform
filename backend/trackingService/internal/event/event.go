@@ -2,11 +2,15 @@
 package event
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // Topic names, same as contracts Topics.java.
@@ -58,11 +62,56 @@ func KnownTypes() []string {
 	return out
 }
 
-// Parse reads one Kafka message value. Any error wraps ErrInvalid.
+// wire is the envelope as it arrives. Pointer fields stay nil when a field is
+// missing or null, which a plain struct cannot tell apart from an empty value:
+// encoding/json silently leaves zero values for missing fields.
+type wire struct {
+	EventID    *string         `json:"eventId"`
+	EventType  *string         `json:"eventType"`
+	OrderID    *string         `json:"orderId"`
+	OccurredAt *time.Time      `json:"occurredAt"` // RFC 3339; a timestamp without a zone is rejected
+	Payload    json.RawMessage `json:"payload"`
+}
+
+// Parse reads one Kafka message value with the same rules as Java's EventCodec:
+// all five fields present and non-null, eventId a 36-character UUID, orderId and
+// eventType not blank, payload a JSON object. Unknown extra fields are ignored
+// (contracts README §7-5). Any error wraps ErrInvalid.
 func Parse(data []byte) (Envelope, error) {
-	var env Envelope
-	if err := json.Unmarshal(data, &env); err != nil {
-		return Envelope{}, fmt.Errorf("%w: %v", ErrInvalid, err)
+	var w wire
+	if err := json.Unmarshal(data, &w); err != nil {
+		return Envelope{}, invalid("%v", err)
 	}
-	return env, nil
+	if w.EventID == nil {
+		return Envelope{}, invalid("eventId is required")
+	}
+	// uuid.Parse also accepts forms like "urn:uuid:…" and 32 hex digits; Java only takes the 36-character form.
+	id, err := uuid.Parse(*w.EventID)
+	if err != nil || len(*w.EventID) != 36 {
+		return Envelope{}, invalid("eventId %q is not a UUID", *w.EventID)
+	}
+	if w.EventType == nil || strings.TrimSpace(*w.EventType) == "" {
+		return Envelope{}, invalid("eventType is required")
+	}
+	if w.OrderID == nil || strings.TrimSpace(*w.OrderID) == "" {
+		return Envelope{}, invalid("orderId is required")
+	}
+	if w.OccurredAt == nil {
+		return Envelope{}, invalid("occurredAt is required")
+	}
+	// A missing payload leaves the slice empty; a JSON null arrives as the text "null".
+	if p := bytes.TrimSpace(w.Payload); len(p) == 0 || p[0] != '{' {
+		return Envelope{}, invalid("payload must be a JSON object")
+	}
+	return Envelope{
+		EventID:    id.String(), // canonical lower-case form
+		EventType:  *w.EventType,
+		OrderID:    *w.OrderID,
+		OccurredAt: *w.OccurredAt,
+		Payload:    w.Payload,
+	}, nil
+}
+
+func invalid(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", ErrInvalid, fmt.Sprintf(format, args...))
 }
