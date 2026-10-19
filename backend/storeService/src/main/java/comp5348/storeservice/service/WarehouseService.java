@@ -20,8 +20,13 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
@@ -261,6 +266,28 @@ public class WarehouseService {
         return responseDTO;
     }
 
+    /**
+     * SELECT ... FOR UPDATE on every stock row the HOLD transactions will put stock back into.
+     * Products in id order, and rows in id order within a product, so the lock order matches holding.
+     */
+    private Map<String, WarehouseProduct> lockStockToRelease(List<InventoryTransaction> transactions) {
+        Map<Long, Set<Long>> warehouseIdsByProduct = new TreeMap<>();
+        for (InventoryTransaction tx : transactions) {
+            if (tx.getType() != InventoryTransactionType.HOLD) continue;
+            warehouseIdsByProduct.computeIfAbsent(tx.getProduct().getId(), id -> new HashSet<>())
+                    .add(tx.getWarehouse().getId());
+        }
+        Map<String, WarehouseProduct> locked = new HashMap<>();
+        warehouseIdsByProduct.forEach((productId, warehouseIds) ->
+                warehouseProductRepository.findByProductIdAndWarehouseIdsForUpdate(productId, warehouseIds)
+                        .forEach(wp -> locked.put(stockKey(productId, wp.getWarehouse().getId()), wp)));
+        return locked;
+    }
+
+    private static String stockKey(Long productId, Long warehouseId) {
+        return productId + ":" + warehouseId;
+    }
+
     @Transactional
     public boolean unholdProduct(UnholdProductRequest request) {
         List<Long> ids = request.getInventoryTransactionIds();
@@ -271,6 +298,10 @@ public class WarehouseService {
         try {
             List<InventoryTransaction> transactions = inventoryTransactionRepository.findAllById(ids);
             logger.info("Found {} transactions to unhold", transactions.size());
+
+            // Lock the stock rows before reading them, like holding does. Without the lock we read the quantity
+            // and @Version from before a concurrent order commits, and the whole cancel fails on commit.
+            Map<String, WarehouseProduct> lockedStock = lockStockToRelease(transactions);
 
             int totalReleased = 0;
             for (InventoryTransaction tx : transactions) {
@@ -286,12 +317,11 @@ public class WarehouseService {
                     continue;
                 }
 
-                Optional<WarehouseProduct> wpOpt = warehouseProductRepository.findByWarehouseAndProduct(tx.getWarehouse(), tx.getProduct());
-                if (!wpOpt.isPresent()) {
+                WarehouseProduct wp = lockedStock.get(stockKey(tx.getProduct().getId(), tx.getWarehouse().getId()));
+                if (wp == null) {
                     logger.error("WarehouseProduct not found for transaction {}", tx.getId());
                     continue;
                 }
-                WarehouseProduct wp = wpOpt.get();
 
                 int stockBefore = wp.getQuantity();
                 logger.info("Releasing {} units for transaction {}, warehouse product {} (current: {})",

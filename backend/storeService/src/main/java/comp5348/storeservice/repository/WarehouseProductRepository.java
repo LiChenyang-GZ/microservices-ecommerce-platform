@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -25,6 +26,15 @@ public interface WarehouseProductRepository extends JpaRepository<WarehouseProdu
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     @Query("select wp from WarehouseProduct wp where wp.product.id = :productId and wp.quantity > 0 order by wp.id")
     List<WarehouseProduct> findByProductIdForUpdate(@Param("productId") Long productId);
+
+    /**
+     * Same lock for releasing stock: the rows of one product in the given warehouses, in id order
+     * (the same order as findByProductIdForUpdate, so a hold and a release never wait on each other in a circle).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select wp from WarehouseProduct wp where wp.product.id = :productId and wp.warehouse.id in :warehouseIds order by wp.id")
+    List<WarehouseProduct> findByProductIdAndWarehouseIdsForUpdate(@Param("productId") Long productId,
+                                                                    @Param("warehouseIds") Collection<Long> warehouseIds);
 
     @Query("select sum(wp.quantity) from WarehouseProduct wp where wp.product.id = :productId")
     Optional<Integer> findTotalQuantityByProductId(@Param("productId") Long productId);
