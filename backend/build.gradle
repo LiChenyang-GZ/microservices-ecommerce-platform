@@ -34,3 +34,10 @@ dependencies {
 tasks.named('test') {
 	useJUnitPlatform()
 }
+
+// Source files contain Chinese comments; do not depend on the OS default (GBK on Chinese Windows).
+allprojects {
+	tasks.withType(JavaCompile).configureEach {
+		options.encoding = 'UTF-8'
+	}
+}
