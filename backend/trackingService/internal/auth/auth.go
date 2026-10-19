@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"time"
 )
 
 var (
@@ -28,8 +30,20 @@ type Client struct {
 	HTTP    *http.Client // nil = http.DefaultClient
 }
 
-// Validate asks store who owns token. Same behaviour as the Java services'
-// TokenValidationClient: anything that is not a clear "valid" counts as unauthorized.
+// Timeout bounds a call to store when Client.HTTP is nil.
+// http.DefaultClient has no timeout at all: a hung store would hang every request.
+const Timeout = 2 * time.Second
+
+var defaultHTTP = &http.Client{Timeout: Timeout}
+
+// Validate asks store who owns token.
+//
+// Unlike the Java services' TokenValidationClient, which treats every failure as
+// "invalid token", it tells two cases apart (G7):
+//   - store answered "not valid" (401/403, or valid=false) → ErrUnauthorized → 401
+//   - store did not answer properly (down, timeout, 5xx)   → ErrUnavailable  → 503
+//
+// A 401 makes the frontend log the user out; a 503 says "try again later", which is the truth.
 func (c *Client) Validate(ctx context.Context, token string) (User, error) {
 	if token == "" {
 		return User{}, ErrUnauthorized
@@ -37,27 +51,34 @@ func (c *Client) Validate(ctx context.Context, token string) (User, error) {
 	body, _ := json.Marshal(map[string]string{"token": token})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/user/validate-token", bytes.NewReader(body))
 	if err != nil {
-		return User{}, ErrUnauthorized
+		return User{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	client := c.HTTP
 	if client == nil {
-		client = http.DefaultClient
+		client = defaultHTTP
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return User{}, ErrUnauthorized
+		return User{}, fmt.Errorf("%w: %v", ErrUnavailable, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusUnauthorized, http.StatusForbidden:
 		return User{}, ErrUnauthorized
+	default:
+		return User{}, fmt.Errorf("%w: store returned %d", ErrUnavailable, resp.StatusCode)
 	}
 	var out struct {
 		Valid  bool   `json:"valid"`
 		UserID int64  `json:"userId"`
 		Email  string `json:"email"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || !out.Valid {
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return User{}, fmt.Errorf("%w: unreadable store response: %v", ErrUnavailable, err)
+	}
+	if !out.Valid {
 		return User{}, ErrUnauthorized
 	}
 	return User{ID: out.UserID, Email: out.Email}, nil

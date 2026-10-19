@@ -4,6 +4,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -50,6 +51,21 @@ func LoadConfig(getenv func(string) string) (Config, error) {
 	}
 	if cfg.Group == "" {
 		cfg.Group = "tracking"
+	}
+	// Fail at startup, with every missing name at once, instead of starting
+	// "fine" and failing on the first message or request.
+	var missing []error
+	for name, value := range map[string]string{
+		"DATABASE_URL":  cfg.DatabaseURL,
+		"KAFKA_BROKERS": strings.Join(cfg.Brokers, ","),
+		"STORE_URL":     cfg.StoreURL,
+	} {
+		if strings.TrimSpace(value) == "" {
+			missing = append(missing, fmt.Errorf("%s is required", name))
+		}
+	}
+	if len(missing) > 0 {
+		return Config{}, errors.Join(missing...)
 	}
 	return cfg, nil
 }
