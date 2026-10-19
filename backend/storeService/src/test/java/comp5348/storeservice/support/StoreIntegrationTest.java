@@ -72,8 +72,11 @@ public abstract class StoreIntegrationTest {
     @ServiceConnection
     protected static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
 
-    /** 假 bank（顺便也当假 delivery）。dynamicPort：随便找一个空闲端口，不和本机的 8084 撞。 */
-    protected static final WireMockServer FAKE_BANK = new WireMockServer(wireMockConfig().dynamicPort());
+    /**
+     * 假 bank（顺便也当假 delivery）。先找一个空闲端口再固定下来，不和本机的 8084 撞；
+     * 固定端口是为了 bankUnreachableFor()：停掉再启动后还在同一个地址，store 的配置不用变。
+     */
+    protected static final WireMockServer FAKE_BANK = new WireMockServer(wireMockConfig().port(freePort()));
 
     static {
         POSTGRES.start();
@@ -305,6 +308,45 @@ public abstract class StoreIntegrationTest {
         FAKE_BANK.stubFor(post(urlEqualTo("/api/bank/transfer"))
                 .willReturn(aResponse().withStatus(400).withHeader("Content-Type", "application/json")
                         .withBody("{\"success\":false,\"transactionId\":\"9002\",\"message\":\"" + reason + "\"}")));
+    }
+
+    /** bank 自己出错了（比如它的数据库挂了）：HTTP 500，不是 bank 的"拒绝"回答。钱动没动，store 不知道。 */
+    protected void bankTransferFailsInternally() {
+        FAKE_BANK.stubFor(post(urlEqualTo("/api/bank/transfer"))
+                .willReturn(aResponse().withStatus(500).withBody("Internal Server Error")));
+    }
+
+    /** bank 说成功，但没给流水号（bank 写漏了字段）。 */
+    protected void bankTransferSucceedsWithoutTransactionId() {
+        FAKE_BANK.stubFor(post(urlEqualTo("/api/bank/transfer"))
+                .willReturn(okJson("{\"success\":true,\"message\":\"Transfer successful\"}")));
+    }
+
+    /**
+     * bank 重启了一下：现在停掉，过 downtime 之后在同一个端口重新启动（剧本不变）。
+     * 后台线程负责重启，测试线程同时去跑 OutboxProcessor。
+     */
+    protected void bankUnreachableFor(Duration downtime) {
+        FAKE_BANK.stop();
+        Thread restarter = new Thread(() -> {
+            try {
+                Thread.sleep(downtime.toMillis());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            FAKE_BANK.start();
+        });
+        restarter.setDaemon(true);
+        restarter.start();
+    }
+
+    /** 找一个现在没人用的端口：让操作系统分一个，记下号码，再关掉。 */
+    protected static int freePort() {
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            return socket.getLocalPort();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("no free port", e);
+        }
     }
 
     protected void bankRefundSucceeds() {
