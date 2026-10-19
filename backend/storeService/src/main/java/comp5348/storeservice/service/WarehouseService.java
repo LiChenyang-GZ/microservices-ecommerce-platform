@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -186,8 +187,12 @@ public class WarehouseService {
     public WarehouseDTO getAndUpdateAvailableWarehouse(long productId, int quantity, Long orderId) { // Suggest passing orderId
         logger.info("[WAREHOUSE] START: getAndUpdateAvailableWarehouse for productId={}, quantity={}, orderId={}", 
                 productId, quantity, orderId);
-        
-        List<WarehouseProduct> availableProducts = warehouseProductRepository.findByProductIdAndQuantity(productId);
+
+        // Lock the stock rows first (in id order), then take from the smallest stock first, as before.
+        // Locking instead of relying on @Version: a hot product has many orders at once, and with @Version
+        // all but one would fail even when there is enough stock.
+        List<WarehouseProduct> availableProducts = new ArrayList<>(warehouseProductRepository.findByProductIdForUpdate(productId));
+        availableProducts.sort(Comparator.comparing(WarehouseProduct::getQuantity));
         logger.info("[WAREHOUSE] Found {} warehouses with available stock for productId={}", 
                 availableProducts.size(), productId);
 
