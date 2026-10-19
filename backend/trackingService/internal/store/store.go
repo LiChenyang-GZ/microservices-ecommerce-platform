@@ -47,9 +47,12 @@ func (s *Store) Close() { s.pool.Close() }
 // Ping checks the database is reachable.
 func (s *Store) Ping(ctx context.Context) error { return s.pool.Ping(ctx) }
 
+// event_id is a uuid primary key: Kafka delivers at least once, so the same event
+// can arrive twice, and the key turns the second copy into a no-op (rule 4).
+// The uuid type (not text) makes "3F1C…" and "3f1c…" the same key.
 const schema = `
 CREATE TABLE IF NOT EXISTS tracking_events (
-    event_id        text        NOT NULL,
+    event_id        uuid        PRIMARY KEY,
     order_id        text        NOT NULL,
     event_type      text        NOT NULL,
     source_topic    text        NOT NULL,
@@ -66,12 +69,14 @@ func (s *Store) Migrate(ctx context.Context) error {
 	return err
 }
 
-// Insert saves one event.
+// Insert saves one event. Saving an event that is already there succeeds and
+// changes nothing: the first copy is kept.
 func (s *Store) Insert(ctx context.Context, r Record) error {
 	_, err := s.pool.Exec(ctx, `
 INSERT INTO tracking_events
     (event_id, order_id, event_type, source_topic, kafka_partition, kafka_offset, occurred_at, payload)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (event_id) DO NOTHING`,
 		r.EventID, r.OrderID, r.EventType, r.Topic, r.Partition, r.Offset, r.OccurredAt, []byte(r.Payload))
 	return err
 }
