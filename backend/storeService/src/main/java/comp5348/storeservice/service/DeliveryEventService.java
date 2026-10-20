@@ -90,6 +90,14 @@ public class DeliveryEventService {
                 paymentService.requestRefund(orderId, "Auto refund: package lost during delivery");
             }
             case CANCELLED -> {
+                // Only a still-paid order can be cancelled: once picked up, the goods are on the road (review 4a #1).
+                // A cancel marker has no deliveryId; a real delivery must be the one this order knows about.
+                boolean otherDelivery = deliveryId != null && !deliveryId.equals(order.getDeliveryId());
+                if (current != 0 || otherDelivery) {
+                    logger.error("ALERT delivery_event_unexpected orderId={} orderStatus={} event={} deliveryId={} orderDeliveryId={} eventId={}",
+                            orderId, order.getStatus(), event.wireName(), deliveryId, order.getDeliveryId(), eventId);
+                    return;
+                }
                 // Delivery cancelled but the order is still paid: store committed nothing (crash after the cancel
                 // call, a timed-out call, or the user cancelled on the delivery page). Finish the cancel here.
                 orderService.finishCancel(order, "Cancelled by delivery", OrderService.CANCEL_USER);
