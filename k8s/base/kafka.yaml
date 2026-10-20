@@ -1,0 +1,122 @@
+# Single-node Kafka in KRaft mode, same settings as compose.yml
+# (docs/wave2-config-contract.md). The services reach it at kafka:9092.
+#
+# One difference from compose, decided by Christy (2026-10-20): it has a volume.
+# In compose "stop" keeps Kafka's data; in Kubernetes there is no stop, deleting
+# the pod is like "down". Without a volume the topics would vanish with the pod,
+# and with auto-create off every producer and consumer would fail until
+# kafka-init ran again.
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: shop
+spec:
+  clusterIP: None
+  selector:
+    app: kafka
+  ports:
+    - { name: internal, port: 9092 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kafka
+  namespace: shop
+spec:
+  serviceName: kafka
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+  template:
+    metadata:
+      labels:
+        app: kafka
+    spec:
+      # Kubernetes adds KAFKA_PORT=tcp://... for the Service named "kafka", and
+      # the image turns every KAFKA_* variable into a broker setting, so the
+      # broker would fail on "port=tcp://...". Turn those variables off.
+      enableServiceLinks: false
+      securityContext:
+        # The image runs as appuser (uid 1000); let it write the volume.
+        fsGroup: 1000
+      containers:
+        - name: kafka
+          image: apache/kafka:3.9.1
+          env:
+            - { name: KAFKA_NODE_ID, value: '1' }
+            - { name: KAFKA_PROCESS_ROLES, value: 'broker,controller' }
+            - { name: KAFKA_CONTROLLER_QUORUM_VOTERS, value: '1@localhost:9093' }
+            - { name: KAFKA_CONTROLLER_LISTENER_NAMES, value: CONTROLLER }
+            # Only the in-cluster listener. compose's EXTERNAL (localhost:9094) is
+            # for services run with bootRun on this machine; not needed here.
+            - { name: KAFKA_LISTENERS, value: 'INTERNAL://:9092,CONTROLLER://:9093' }
+            - { name: KAFKA_ADVERTISED_LISTENERS, value: 'INTERNAL://kafka:9092' }
+            - { name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP, value: 'INTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT' }
+            - { name: KAFKA_INTER_BROKER_LISTENER_NAME, value: INTERNAL }
+            - { name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR, value: '1' }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR, value: '1' }
+            - { name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR, value: '1' }
+            - { name: KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS, value: '0' }
+            - { name: KAFKA_AUTO_CREATE_TOPICS_ENABLE, value: 'false' }
+            # A subdirectory of the volume, so the broker owns the whole directory.
+            - { name: KAFKA_LOG_DIRS, value: /var/lib/kafka/data/logs }
+            - { name: KAFKA_HEAP_OPTS, value: '-Xms256m -Xmx512m' }
+          ports:
+            - containerPort: 9092
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/kafka/data
+          readinessProbe:
+            exec:
+              command: ['sh', '-c', '/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null']
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 15
+          livenessProbe:
+            tcpSocket:
+              port: 9092
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            failureThreshold: 5
+          resources:
+            requests: { cpu: 100m, memory: 512Mi }
+            limits: { memory: 1Gi }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ['ReadWriteOnce']
+        resources:
+          requests:
+            storage: 2Gi
+---
+# Creates the four topics, then exits. Safe to run again (--if-not-exists).
+# 3 partitions each; the .DLT topics match their topic (see compose.yml).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-init
+  namespace: shop
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      enableServiceLinks: false
+      containers:
+        - name: kafka-init
+          image: apache/kafka:3.9.1
+          command: ['/bin/sh', '-c']
+          args:
+            - |
+              set -e
+              # K8s has no depends_on: wait until the broker answers.
+              until /opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:9092 > /dev/null 2>&1; do
+                echo 'waiting for kafka:9092'; sleep 3
+              done
+              for t in order-events delivery-events order-events.DLT delivery-events.DLT; do
+                /opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:9092 \
+                  --create --if-not-exists --topic "$t" --partitions 3 --replication-factor 1
+              done

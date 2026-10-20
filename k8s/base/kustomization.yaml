@@ -1,0 +1,18 @@
+# kubectl apply -k k8s/base
+# Secrets are not here: they come from backend/.env via scripts/apply-secrets.ps1.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - postgres.yaml
+  - db-init.yaml
+  - rabbitmq.yaml
+  - kafka.yaml
+configMapGenerator:
+  - name: db-init-script
+    namespace: shop
+    files:
+      - db-init.sh
+generatorOptions:
+  # Keep the plain name, so db-init.yaml can refer to it.
+  disableNameSuffixHash: true

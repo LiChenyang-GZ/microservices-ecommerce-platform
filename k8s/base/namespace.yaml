@@ -1,0 +1,5 @@
+# Everything of the shop lives in this namespace (design figure 2).
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
