@@ -5,7 +5,7 @@
 # 每次注册一个新用户，可以反复跑。
 #
 # 剧情：
-#   1. 新用户余额 10000，买 1 台 iPhone 13（6999）
+#   1. 新用户余额 10000，买 1 台最便宜、还有库存的 iPhone
 #   2. 等到订单 PAID（钱已经扣了）。建配送单是 OutboxProcessor 下一轮（约 5 秒后）才做的事。
 #      默认：PAID 后马上取消 → OutboxProcessor 看到已取消，不建配送单。
 #      -AfterDelivery：等配送单建好再取消。delivery 建单后约 10 秒才"取件"，取件后就不能取消了。
@@ -38,10 +38,12 @@ Invoke-RestMethod -Method Post "$store/user/activate" -ContentType 'application/
 $login = Invoke-RestMethod -Method Post "$store/user/login" -ContentType 'application/json' `
     -Body (@{ email = $email; password = $password } | ConvertTo-Json)
 $account = Sql 'store_db' "select bank_account_number from account where email = '$email'"
-$product = (Invoke-RestMethod "$store/products").products | Where-Object name -eq 'iPhone 13'
+# 挑最便宜、还有库存的那台（iPhone 13 库存少，别的脚本跑几次就没了）
+$name = Sql 'store_db' "select p.name from products p join warehouse_products w on w.product_id = p.id group by p.id having sum(w.quantity) > 0 order by p.price limit 1"
+$product = (Invoke-RestMethod "$store/products").products | Where-Object name -eq $name
 $balanceStart = Balance $account
 $stockStart = Stock $product.id
-"0. 新用户 $email，余额 $balanceStart；iPhone 13 库存 $stockStart"
+"0. 新用户 $email，余额 $balanceStart；$($product.name) 库存 $stockStart"
 
 # --- 1. 下单 ---
 $order = (Invoke-RestMethod -Method Post "$store/store/orders/create-with-payment" -ContentType 'application/json' `
