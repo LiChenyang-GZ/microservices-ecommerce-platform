@@ -362,6 +362,16 @@ public abstract class StoreIntegrationTest {
         FAKE_BANK_GRPC.onRefund(Reply.error(Status.Code.UNAVAILABLE));
     }
 
+    /** 退款时 bank 回某一个 gRPC 错误码 */
+    protected void bankRefundFailsWith(Status.Code code) {
+        FAKE_BANK_GRPC.onRefund(Reply.error(code));
+    }
+
+    /** 退款：状态 OK，但 outcome 没设（OUTCOME_UNSPECIFIED） */
+    protected void bankRefundAnswersWithoutOutcome() {
+        FAKE_BANK_GRPC.onRefund(Reply.ok(RefundResponse.newBuilder().setRefundTransactionId("9101").build()));
+    }
+
     protected void bankRejectsRefund(String reason) {
         FAKE_BANK_GRPC.onRefund(Reply.ok(
                 RefundResponse.newBuilder().setOutcome(Outcome.REJECTED).setReason(reason).build()));

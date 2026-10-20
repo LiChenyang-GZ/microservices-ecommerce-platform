@@ -1,5 +1,6 @@
 package comp5348.storeservice.adapter;
 
+import comp5348.storeservice.dto.BankRefundRequest;
 import comp5348.storeservice.dto.BankTransferRequest;
 import comp5348.storeservice.support.StoreIntegrationTest;
 import io.grpc.Status;
@@ -61,6 +62,37 @@ class BankGrpcMappingIntegrationTest extends StoreIntegrationTest {
         BankCallResult result = transferOnce("100.00");
 
         assertThat(transferRequests()).as("store 要真的用 gRPC 调到 bank").hasSize(1);
+        assertThat(result.outcome()).isEqualTo(BankCallResult.Outcome.UNKNOWN);
+    }
+
+    // ---------- 退款：同样的两条规则（审查 #4） ----------
+    // 现在扣款和退款共用 fromOutcome / unknown，所以这两条本来就是绿的，是安全网。
+    // 防的是：以后有人给退款单独写一套映射，把 INTERNAL 当成 REJECTED → 退款任务停止 + 告警，顾客的钱退不回来。
+
+    private BankCallResult refundOnce() {
+        return bankAdapter.refund(new BankRefundRequest("REFUND-test-" + UUID.randomUUID(), "9001", "ORDER_CANCELLED"));
+    }
+
+    /** 审查 #4：退款时，除了 OK，每一个错误码也都是 UNKNOWN */
+    @ParameterizedTest(name = "refund {0} → UNKNOWN")
+    @EnumSource(value = Status.Code.class, mode = EnumSource.Mode.EXCLUDE, names = "OK")
+    void everyNonOkStatus_isUnknown_forRefund(Status.Code code) {
+        bankRefundFailsWith(code);
+
+        BankCallResult result = refundOnce();
+
+        assertThat(refundRequests()).as("store 要真的用 gRPC 调到 bank").hasSize(1);
+        assertThat(result.outcome()).as(code + " 不是 bank 的回答").isEqualTo(BankCallResult.Outcome.UNKNOWN);
+    }
+
+    /** 审查 #4：退款时，状态 OK 但 outcome 没设 → UNKNOWN，不是 REJECTED */
+    @Test
+    void unspecifiedOutcome_isUnknown_forRefund() {
+        bankRefundAnswersWithoutOutcome();
+
+        BankCallResult result = refundOnce();
+
+        assertThat(refundRequests()).as("store 要真的用 gRPC 调到 bank").hasSize(1);
         assertThat(result.outcome()).isEqualTo(BankCallResult.Outcome.UNKNOWN);
     }
 
