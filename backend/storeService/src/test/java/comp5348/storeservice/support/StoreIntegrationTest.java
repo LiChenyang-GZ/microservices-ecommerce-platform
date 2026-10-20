@@ -55,7 +55,9 @@ import static org.assertj.core.api.Assertions.assertThat;
         "RABBITMQ_PASSWORD=guest",
         // 指向一个没人监听的端口：就算哪段代码绕过了 EmailAdapter，也发不到本机真的 RabbitMQ
         "spring.rabbitmq.port=1",
-        "outbox.processor.enabled=true"
+        "outbox.processor.enabled=true",
+        // 4b：store 的事件投递程序每 200 毫秒跑一轮（生产默认 1 秒），测试等事件不用等太久。红灯时没人读这个键
+        "event-outbox.publisher.interval-ms=200"
 })
 @Import(TestInfraConfig.class)
 public abstract class StoreIntegrationTest {
@@ -129,6 +131,9 @@ public abstract class StoreIntegrationTest {
                 .willReturn(okJson("{\"success\":true,\"balance\":1000000}")));
         FAKE_BANK.stubFor(post(urlEqualTo("/api/deliveries/create")).willReturn(okJson("{}")));
         FAKE_BANK.stubFor(post(urlPathMatching("/api/deliveries/cancel-by-order/.*")).willReturn(ok()));
+        // 第 2 波 A · 4b 的新取消接口（设计"取消接口"一节）：默认 delivery 同意取消
+        FAKE_BANK.stubFor(post(urlPathMatching("/internal/deliveries/cancel-by-order/.*"))
+                .willReturn(okJson("{\"result\":\"CANCELLED\"}")));
         // OutboxProcessor 每一轮会处理表里所有待办任务，所以清掉别的测试留下的，只留本测试自己的
         jdbc.update("DELETE FROM payment_outbox");
         // 别的测试留下的"待支付"订单直接标成已取消：否则 #14 拨表 16 分钟跑自动取消时，会把它们也取消、触发它们的退款
@@ -253,6 +258,11 @@ public abstract class StoreIntegrationTest {
     /** 假 delivery 收到的建配送单请求 */
     protected List<LoggedRequest> deliveryCreateRequests() {
         return FAKE_BANK.findAll(postRequestedFor(urlEqualTo("/api/deliveries/create")));
+    }
+
+    /** 假 delivery 收到的新取消接口请求（POST /internal/deliveries/cancel-by-order/{orderId}） */
+    protected List<LoggedRequest> deliveryCancelRequests() {
+        return FAKE_BANK.findAll(postRequestedFor(urlPathMatching("/internal/deliveries/cancel-by-order/.*")));
     }
 
     /**

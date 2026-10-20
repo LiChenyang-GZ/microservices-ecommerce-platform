@@ -80,6 +80,44 @@ public abstract class DeliveryEventsTestBase extends StoreIntegrationTest {
         return kafka.awaitRecord(Topics.deadLetter(Topics.DELIVERY_EVENTS), r -> orderId.equals(r.key()), timeout);
     }
 
+    // ---------- 读 order-events（4b：store 自己发的事件） ----------
+
+    /** 这一单在 order-events 里的事件类型，按 offset 先后 */
+    protected List<String> orderEventTypesOf(PlacedOrder order) {
+        return orderEventsOf(order).stream().map(EventEnvelope::eventType).toList();
+    }
+
+    /** 这一单在 order-events 里的全部事件（解析好的外壳） */
+    protected List<EventEnvelope> orderEventsOf(PlacedOrder order) {
+        return kafka.recordsOfOrder(Topics.ORDER_EVENTS, order.orderId().toString()).stream()
+                .map(r -> {
+                    try {
+                        return EventCodec.parse(r.value());
+                    } catch (Exception e) {
+                        throw new AssertionError("store published an event that does not match the contract: " + r.value(), e);
+                    }
+                })
+                .toList();
+    }
+
+    /** 等到这一单在 order-events 里至少有 n 条事件，返回类型。红灯时 store 不发事件，会等满后失败。 */
+    protected List<String> awaitOrderEventTypes(PlacedOrder order, int n) {
+        await().atMost(CONSUME_TIMEOUT).pollInterval(Duration.ofMillis(300))
+                .until(() -> orderEventTypesOf(order).size() >= n);
+        return orderEventTypesOf(order);
+    }
+
+    /** 这一单某种事件的 payload，转成契约里的 record */
+    protected <T> T payloadOf(PlacedOrder order, String eventType, Class<T> type) {
+        EventEnvelope event = orderEventsOf(order).stream().filter(e -> e.eventType().equals(eventType))
+                .findFirst().orElseThrow(() -> new AssertionError("no " + eventType + " for order " + order.orderId()));
+        try {
+            return EventCodec.payload(event, type);
+        } catch (Exception e) {
+            throw new AssertionError("bad " + eventType + " payload: " + event.payload(), e);
+        }
+    }
+
     // ---------- 读结果 ----------
 
     /** 这一单的全部 REFUND 任务（不管做没做完）：用来数"有没有写第二条退款" */

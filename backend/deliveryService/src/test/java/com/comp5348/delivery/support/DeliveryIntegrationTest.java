@@ -8,7 +8,10 @@ import com.comp5348.delivery.model.Delivery;
 import com.comp5348.delivery.repository.DeliveryRepository;
 import com.comp5348.delivery.service.DeliveryService;
 import com.comp5348.delivery.service.messaging.DeliveryStatusUpdateService;
+import com.comp5348.contracts.events.OrderEventType;
+import com.comp5348.contracts.events.payload.OrderPaidPayload;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -18,9 +21,14 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
 import org.testcontainers.kafka.KafkaContainer;
 
+import java.math.BigDecimal;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -94,6 +102,52 @@ public abstract class DeliveryIntegrationTest {
     @Autowired protected DeliveryStatusUpdateService worker;
     @Autowired protected DeliveryRepository deliveryRepository;
     @Autowired protected JdbcTemplate jdbc;
+    @Autowired protected WebApplicationContext web;
+
+    /** 契约：delivery 的消费者组 id */
+    protected static final String DELIVERY_GROUP = "delivery";
+
+    /** MockMvc：直接对 Spring MVC 发 HTTP 请求，不经过真的网络（测取消接口用） */
+    protected MockMvc mvc() {
+        return MockMvcBuilders.webAppContextSetup(web).build();
+    }
+
+    // ---------- 扮演 store：往 order-events 发事件（4b） ----------
+
+    /** 一条 OrderPaid：payload 带着建配送单要的全部字段（契约 OrderPaidPayload），delivery 不用回调 store */
+    protected static EventEnvelope orderPaid(String orderId) {
+        return new EventEnvelope(UUID.randomUUID(), OrderEventType.ORDER_PAID.wireName(), orderId, Instant.now(),
+                EventCodec.toTree(new OrderPaidPayload(Long.parseLong(orderId), new BigDecimal("6999.00"), "9001",
+                        "buyer-" + orderId + "@test.local", "buyer-" + orderId, "1 Test Street",
+                        List.of("Warehouse-1, 456 Storage Rd"), "Test Phone", 1)));
+    }
+
+    /** 某种 order-events 事件，payload 用给定的 JSON 对象（OrderCancelled 等） */
+    protected static EventEnvelope orderEvent(String orderId, OrderEventType type, Object payload) {
+        return new EventEnvelope(UUID.randomUUID(), type.wireName(), orderId, Instant.now(), EventCodec.toTree(payload));
+    }
+
+    /** 发到 order-events，key = orderId，等 Kafka 确认 */
+    protected static RecordMetadata publishOrderEvent(EventEnvelope event) {
+        return kafka.send(Topics.ORDER_EVENTS, event.orderId(), EventCodec.write(event));
+    }
+
+    /** 等 delivery 的消费者组处理完这条（它的数据库事务已提交）。红灯时没有这个组，会等满后失败。 */
+    protected static void awaitConsumedByDelivery(RecordMetadata record) {
+        kafka.awaitConsumed(DELIVERY_GROUP, record, EVENT_TIMEOUT);
+    }
+
+    /** 等这个订单在 delivery_db 里有一行 */
+    protected void awaitDeliveryRow(String orderId) {
+        await().atMost(EVENT_TIMEOUT).pollInterval(Duration.ofMillis(200))
+                .until(() -> deliveryRepository.findByOrderId(orderId).isPresent());
+    }
+
+    /** 这个订单在 delivery 表里有几行（唯一约束要保证最多 1 行） */
+    protected int rowsOf(String orderId) {
+        Integer n = jdbc.queryForObject("SELECT count(*) FROM delivery WHERE order_id = ?", Integer.class, orderId);
+        return n == null ? 0 : n;
+    }
 
     // ---------- 造数据 ----------
 

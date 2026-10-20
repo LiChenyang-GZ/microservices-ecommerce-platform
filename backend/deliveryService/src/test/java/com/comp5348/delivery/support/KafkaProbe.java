@@ -6,6 +6,7 @@ import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -132,6 +133,45 @@ public final class KafkaProbe {
     /** Kafka 默认分区器给这个 key 选哪个分区（murmur2 哈希，对分区数取余） */
     public static int partitionFor(String key) {
         return Utils.toPositive(Utils.murmur2(key.getBytes(StandardCharsets.UTF_8))) % PARTITIONS;
+    }
+
+    /**
+     * 等到某个消费者组"处理完"这条消息：组在这个分区上提交的 offset 已经越过它。
+     * 规则 4：消费者先提交数据库事务，再提交 offset。所以 offset 越过它 = 它的事务已经提交了。
+     * 用来测"什么都不该发生"的场景：不等消费者处理完就去检查，什么都没变是理所当然的，证明不了任何事。
+     * 红灯时根本没有这个消费者组，这里会等满 timeout 后失败。
+     */
+    public void awaitConsumed(String group, RecordMetadata record, Duration timeout) {
+        TopicPartition tp = new TopicPartition(record.topic(), record.partition());
+        try (Admin admin = admin()) {
+            await().atMost(timeout).pollInterval(Duration.ofMillis(300)).until(() -> {
+                Map<TopicPartition, OffsetAndMetadata> offsets =
+                        admin.listConsumerGroupOffsets(group).partitionsToOffsetAndMetadata().get();
+                OffsetAndMetadata committed = offsets.get(tp);
+                return committed != null && committed.offset() > record.offset();
+            });
+        }
+    }
+
+    /**
+     * 等到某个消费者组稳定下来、有 members 个消费者（每人分到了分区）。
+     * 组用 latest 起步时要先等这个：分区还没分好就发的消息，分好后会被当成"过去的"跳过。
+     */
+    public void awaitGroupStable(String group, int members, Duration timeout) {
+        try (Admin admin = admin()) {
+            await().atMost(timeout).pollInterval(Duration.ofMillis(300)).until(() -> {
+                var description = admin.describeConsumerGroups(List.of(group)).all().get().get(group);
+                return description.state() == org.apache.kafka.common.ConsumerGroupState.STABLE
+                        && description.members().size() == members
+                        && description.members().stream().allMatch(m -> !m.assignment().topicPartitions().isEmpty());
+            });
+        }
+    }
+
+    /** 消息头里的一个值（DLT 消息带着失败原因和原来的 topic，都在头里） */
+    public static String header(ConsumerRecord<String, String> record, String name) {
+        var h = record.headers().lastHeader(name);
+        return h == null ? null : new String(h.value(), StandardCharsets.UTF_8);
     }
 
     private Admin admin() {
