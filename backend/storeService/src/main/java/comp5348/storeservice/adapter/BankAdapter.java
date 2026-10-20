@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
 /**
  * store's only way to bank.
  * - transfer / refund (money): gRPC, contracts/bank.proto (ADR-10). Only OutboxProcessor calls these (rule 1).
- * - balance, create account, account by email: still REST; bank.proto has no such calls.
+ * - create account, account by email: still REST; bank.proto has no such calls.
  */
 @Component
 public class BankAdapter {

@@ -103,7 +103,7 @@
 5. store：`fromOutcome` → `BankCallResult.succeeded` → OutboxProcessor → `paymentService.onPaySucceeded`（锁订单行，订单 PAID）。
 6. 出错时：第 4 步变成错误状态 → `unknown(...)` → OutboxProcessor 同键重试，最多 5 次 → PAY_UNKNOWN + `ALERT payment_unknown`。
 
-余额、开户、按邮箱查账户：proto 里没有，继续走 REST（`bank.service.url`）。
+开户、按邮箱查账户：proto 里没有，继续走 REST（`bank.service.url`）。（`getBalance` 没有调用方，删掉了。）
 
 ---
 
@@ -116,7 +116,7 @@
 | `waitForReady`（Christy 定） | 默认 fail-fast | bank 短暂重启时不浪费重试；bank 长时间挂掉时每次调用等满 5 秒 |
 | 🤖 `disableRetry()` | 用 gRPC 的重试策略 | 只有一层重试，次数和时间好算；gRPC 自己的"请求根本没发出去时重发"（透明重试）也一起关了 |
 | 🤖 bank 出错回 `INTERNAL`，描述只写 "bank internal error" | 把异常信息发回去 | 调试时少了点信息（要看 bank 日志），但不往外泄露 SQL 和表名 |
-| 只有 transfer / refund 走 gRPC | 余额、开户也搬到 gRPC | proto 里没有这些方法，契约不许改；它们不碰钱，HTTP 够用 |
+| 只有 transfer / refund 走 gRPC | 开户这些也搬到 gRPC | proto 里没有这些方法，契约不许改；它们不碰钱，HTTP 够用 |
 
 ---
 

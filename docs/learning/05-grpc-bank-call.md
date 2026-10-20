@@ -103,7 +103,7 @@ One charge (the user has ordered; a PAY task sits in `payment_outbox`):
 5. Store: `fromOutcome` → `BankCallResult.succeeded` → OutboxProcessor → `paymentService.onPaySucceeded` (locks the order row, order PAID).
 6. On errors, step 4 is an error status → `unknown(...)` → OutboxProcessor retries the same key up to 5 times → PAY_UNKNOWN + `ALERT payment_unknown`.
 
-Balance, account creation and account-by-email are not in the proto and stay on REST (`bank.service.url`).
+Account creation and account-by-email are not in the proto and stay on REST (`bank.service.url`). (`getBalance` had no callers and was removed.)
 
 ---
 
@@ -116,7 +116,7 @@ Balance, account creation and account-by-email are not in the proto and stay on 
 | `waitForReady` (Christy's decision) | Default fail-fast | No wasted retries during a short bank restart; during a long outage every call waits the full 5 s |
 | 🤖 `disableRetry()` | gRPC retry policies | One retry layer, easy to count calls and time; gRPC's transparent retry (resend when the call never left the client) is off too |
 | 🤖 Bank errors are `INTERNAL` with only "bank internal error" | Send the exception message back | Less detail when debugging (read bank's log), but no SQL or table names leak |
-| Only transfer / refund on gRPC | Move balance and accounts to gRPC too | Not in the proto, and the contract is fixed; they move no money, HTTP is enough |
+| Only transfer / refund on gRPC | Move account calls to gRPC too | Not in the proto, and the contract is fixed; they move no money, HTTP is enough |
 
 ---
 
