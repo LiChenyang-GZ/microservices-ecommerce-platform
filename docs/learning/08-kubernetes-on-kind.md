@@ -2,7 +2,7 @@
 
 **English** | [中文](08-kubernetes-on-kind.zh-CN.md)
 
-> Commits: `e22bb3a` (cluster + entry + stateful parts) → `17371b3` (frontend relative paths) → `5bae77d` (six services + routes) → `8856d8e` (nginx 404) → `d970344` (one-command deploy + README)
+> Commits: `e22bb3a` (cluster + entry + stateful parts) → `17371b3` (frontend relative paths) → `5bae77d` (six services + routes) → `8856d8e` (nginx 404) → `d970344` (one-command deploy + README); review fixes: `375efa2` test(red) → `ae116d3` (entry becomes an allowlist)
 > Infrastructure work: no `test(red)`; a checklist instead (learn-by-building §1). The checklist and the evidence for each item are in Obsidian `开发/电商项目/19-第2波C-K8s-检查清单.md`.
 > Replay time: **60 minutes**
 > Before this: [02 · Docker and database per service](02-docker-database-per-service.md) (images, compose, one database per service).
@@ -71,8 +71,10 @@ Solved means: all 26 checklist items plus the scenarios found on the way were ru
 ### 2.7 The entry: Gateway API + Envoy Gateway
 - Design ADR-13 says Ingress. While building it turned out that ingress-nginx (the most used Ingress controller) has had no releases or security fixes since March 2026, and kind's docs point to Gateway API. Christy chose Gateway API (Q7).
 - Three resources: **GatewayClass** (which controller: Envoy Gateway) → **Gateway** (listens on 80) → **HTTPRoute** (which path goes to which Service): [gateway.yaml](../../k8s/gateway/gateway.yaml), [routes.yaml](../../k8s/gateway/routes.yaml).
-- **Path rewrite**: the design's external path is `/api/store`; store's own paths are `/api/user`, `/api/orders`, ... `URLRewrite` with `ReplacePrefixMatch: /api` turns `/api/store/user/login` into `/api/user/login` before sending it to store. No Java change.
-- **Longest prefix wins**: the `/api/store` rule is longer than `/api`, so it matches first. The `/api` catch-all uses Envoy Gateway's `HTTPRouteFilter` (`directResponse`) to answer 404. Without it `POST /api/bank/transfer` would fall through to `/`, and the frontend would answer 200 with index.html, hiding the mistake.
+- **Path rewrite**: the design's external path is `/api/store`; store's own paths are `/api/user`, `/api/orders`, ... A rewrite turns `/api/store/user/login` into `/api/user/login` before sending it to store. No Java change.
+- **Allowlist, not "whole prefix + holes"** (review 23 #1 #2 #6). The first version forwarded all of `/api/store/*` and `/api/delivery/*` and added a 404 rule for each internal path someone remembered (the webhook). It missed delivery's token-free `cancel-by-order` (anyone could cancel a delivery and so trigger a refund) and store's `payment-success` (PAID without bank). Now each rule lists method + path pairs the frontend calls, ids as `[0-9]+`; the standard `ReplacePrefixMatch` only works with `PathPrefix` matches, so store and delivery use Envoy Gateway's `ReplaceRegexMatch` filter. A new backend endpoint is closed until someone lists it.
+- **Catch-all 404**: Exact and regex matches win over prefixes, so the `/api` prefix rule only gets what is not listed. It uses Envoy Gateway's `HTTPRouteFilter` (`directResponse`) to answer 404. Without it `POST /api/bank/transfer` would fall through to `/`, and the frontend would answer 200 with index.html, hiding the mistake.
+- **Two copies, one check**: compose has no gateway, so [nginx.conf](../../frontend/nginx.conf) holds the same list as a `map` on `"$request_method $uri"`. [check-entry.ps1](../../k8s/scripts/check-entry.ps1) sends 58 requests to both entries and expects the same answer from each.
 - kind has no cloud load balancer, so Envoy's Service is a NodePort 30080 (set in the `EnvoyProxy` resource), and `extraPortMappings` connects it to port 80 on this machine.
 
 ### 2.8 `enableServiceLinks: false`
@@ -92,7 +94,7 @@ The browser clicks "Sign in":
 browser  POST http://localhost/api/store/user/login       (frontend baseURL is the relative /api/store)
   → Docker port mapping 127.0.0.1:80 → kind node container port 30080   kind-config.yaml
   → NodePort Service envoy-shop-shop-... → Envoy proxy pod               gateway.yaml (EnvoyProxy)
-  → HTTPRoute rule /api/store: rewritten to /api/user/login              routes.yaml
+  → HTTPRoute: POST /api/store/user/login is listed; rewritten to /api/user/login   routes.yaml
   → Service store:8082 (cluster DNS) → store pod                         apps/store.yaml
   → AccountController.login (/api/user/login)                           storeService/.../AccountController.java
 ```
@@ -137,7 +139,8 @@ When bank validates a token it calls `http://store:8082/api/user/validate-token`
 | 📒 H1 secrets | [apply-secrets.ps1](../../k8s/scripts/apply-secrets.ps1) | one Secret per reader, never on disk; a Secret is only base64, protected by RBAC and by staying out of git. Production adds etcd encryption and an external store (Key Vault / External Secrets). **Not needed** on a one-person local kind |
 | 📒 H3 tech obsolescence | header of [gateway.yaml](../../k8s/gateway/gateway.yaml) | a new deployment does not pick the retired ingress-nginx; existing ones keep working but need a migration plan |
 | 📒 F2 resilience | K19, K21, K23 | self-healing = controllers (Deployment / StatefulSet) + volumes + idempotency keys together: the pod dies, the new one retries with the same key, one charge |
-| 📒 F8 Webhook | `delivery-webhook` in [routes.yaml](../../k8s/gateway/routes.yaml) | an unauthenticated callback is for inside the cluster only; forwarding a whole prefix easily exposes it too (F32) |
+| 📒 F8 Webhook | `delivery-webhook` in [routes.yaml](../../k8s/gateway/routes.yaml) | an unauthenticated callback is for inside the cluster only; forwarding a whole prefix exposed it, and then its token-free neighbours (review #1). The allowlist closes them all |
+| ➕ Default deny / allowlist vs denylist | routes.yaml, nginx.conf | a denylist must know every bad path in advance and fails open when one is missed; an allowlist fails closed (a forgotten frontend call is a visible 404). **Not** a replacement for each service checking the token itself |
 | 📒 C1 heap | `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75` | in a container the heap is a share of the limit, leaving room off-heap; **no need** for a hand-written `-Xmx` |
 | ➕ Gateway API vs Ingress | routes.yaml | split roles (GatewayClass / Gateway / Route); rewrite and method match are standard fields, not controller-specific annotations |
 | ➕ StatefulSet vs Deployment | base/*.yaml | fixed names + a volume per pod: databases, brokers. Stateless services use Deployments |

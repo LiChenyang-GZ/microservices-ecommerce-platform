@@ -2,7 +2,7 @@
 
 [English](08-kubernetes-on-kind.md) | **中文**
 
-> 对应 commit：`e22bb3a`（集群 + 入口 + 有状态组件）→ `17371b3`（前端改相对路径）→ `5bae77d`（6 个服务 + 路由）→ `8856d8e`（nginx 404）→ `d970344`（一键部署 + README）
+> 对应 commit：`e22bb3a`（集群 + 入口 + 有状态组件）→ `17371b3`（前端改相对路径）→ `5bae77d`（6 个服务 + 路由）→ `8856d8e`（nginx 404）→ `d970344`（一键部署 + README）；审查修复：`375efa2` test(red) → `ae116d3`（入口改成允许名单）
 > 基础设施类：没有 `test(red)`，用检查清单代替（learn-by-building §1）。清单和每条的证据在 Obsidian `开发/电商项目/19-第2波C-K8s-检查清单.md`。
 > 预计回放时间：**60 分钟**
 > 前置：[02 · Docker 与拆库](02-docker-database-per-service.zh-CN.md)（镜像、compose、每个服务一个库）。
@@ -71,8 +71,10 @@
 ### 2.7 入口：Gateway API + Envoy Gateway
 - 设计 ADR-13 写的是 Ingress。开工时发现 ingress-nginx（最常用的 Ingress 控制器）2026 年 3 月起不再发版、不修安全漏洞，kind 文档也改推 Gateway API。Christy 决定用 Gateway API（Q7）。
 - 三层资源：**GatewayClass**（用哪个控制器，这里是 Envoy Gateway）→ **Gateway**（在 80 端口监听）→ **HTTPRoute**（哪个路径去哪个 Service）：[gateway.yaml](../../k8s/gateway/gateway.yaml)、[routes.yaml](../../k8s/gateway/routes.yaml)。
-- **路径改写**：设计图的外部路径是 `/api/store`，store 自己的路径是 `/api/user`、`/api/orders`……`URLRewrite` + `ReplacePrefixMatch: /api` 把 `/api/store/user/login` 变成 `/api/user/login` 再发给 store。不用改 Java。
-- **最长前缀优先**：`/api/store` 的规则比 `/api` 长，所以先匹配。`/api` 兜底规则用 Envoy Gateway 的 `HTTPRouteFilter`（`directResponse`）直接回 404。没有它，`POST /api/bank/transfer` 会落到 `/`，前端回一个 200 的 index.html，把错误藏起来。
+- **路径改写**：设计图的外部路径是 `/api/store`，store 自己的路径是 `/api/user`、`/api/orders`……改写把 `/api/store/user/login` 变成 `/api/user/login` 再发给 store。不用改 Java。
+- **允许名单，不是"整段放行 + 补洞"**（审查 23 的 #1 #2 #6）。第一版把 `/api/store/*`、`/api/delivery/*` 整段转发，想起哪个内部接口（webhook）就补一条 404。漏掉了 delivery 不要 token 的 `cancel-by-order`（外人能取消配送单，进而触发退款）和 store 的 `payment-success`（不经 bank 就变 PAID）。现在每条规则列的是前端调用的"方法 + 路径"，id 写成 `[0-9]+`。标准的 `ReplacePrefixMatch` 只能配 `PathPrefix` 匹配，所以 store 和 delivery 用 Envoy Gateway 的 `ReplaceRegexMatch` 过滤器。后端新加的接口，没人列进名单之前都是关着的。
+- **兜底 404**：精确匹配和正则匹配优先于前缀，所以 `/api` 前缀规则只接到名单外的请求，用 Envoy Gateway 的 `HTTPRouteFilter`（`directResponse`）直接回 404。没有它，`POST /api/bank/transfer` 会落到 `/`，前端回一个 200 的 index.html，把错误藏起来。
+- **两份配置，一个检查**：compose 没有网关，[nginx.conf](../../frontend/nginx.conf) 用一个按 `"$request_method $uri"` 查表的 `map` 写同一份名单。[check-entry.ps1](../../k8s/scripts/check-entry.ps1) 对两个入口发同样的 58 个请求，要求两边回答一致。
 - kind 没有云负载均衡，所以 Envoy 的 Service 用 NodePort 30080（`EnvoyProxy` 资源里改），再由 `extraPortMappings` 接到本机 80。
 
 ### 2.8 `enableServiceLinks: false`
@@ -92,7 +94,7 @@
 浏览器  POST http://localhost/api/store/user/login        （前端的 baseURL 是相对路径 /api/store）
   → Docker 端口映射 127.0.0.1:80 → kind 节点容器的 30080               kind-config.yaml
   → NodePort Service envoy-shop-shop-… → Envoy 代理 pod                gateway.yaml（EnvoyProxy）
-  → HTTPRoute 规则 /api/store：改写成 /api/user/login                    routes.yaml
+  → HTTPRoute：POST /api/store/user/login 在名单里，改写成 /api/user/login   routes.yaml
   → Service store:8082（集群 DNS）→ store pod                            apps/store.yaml
   → AccountController.login（/api/user/login）                          storeService/.../AccountController.java
 ```
@@ -137,7 +139,8 @@ bank 收到请求要校验 token 时，回调 `http://store:8082/api/user/valida
 | 📒 H1 secrets | [apply-secrets.ps1](../../k8s/scripts/apply-secrets.ps1) | 每个读者一个 Secret，不落盘；Secret 只是 base64，靠 RBAC 和不进 git 保护。生产要再加：etcd 加密、外部密钥库（Key Vault / External Secrets）。**不需要**外部密钥库的场景：本地 kind，只有一个人 |
 | 📒 H3 技术过时 | [gateway.yaml](../../k8s/gateway/gateway.yaml) 开头注释 | 新部署就不选已退役的 ingress-nginx。旧集群里已经在跑的不会坏，但要排进迁移计划 |
 | 📒 F2 resilience | K19、K21、K23 | 自愈靠控制器（Deployment / StatefulSet）+ 数据卷 + 幂等键三样一起：pod 被删，新 pod 用同一个键重试，钱只扣一次 |
-| 📒 F8 Webhook | [routes.yaml](../../k8s/gateway/routes.yaml) 的 `delivery-webhook` | 没鉴权的回调接口只能在集群内用；按前缀整段转发时很容易把它一起带出去（F32） |
+| 📒 F8 Webhook | [routes.yaml](../../k8s/gateway/routes.yaml) 的 `delivery-webhook` | 没鉴权的回调接口只能在集群内用；按前缀整段转发把它带了出去，补了 404 以后它旁边不要 token 的接口又漏了（审查 #1）。允许名单一次全关上 |
+| ➕ 默认拒绝 / 允许名单 vs 拒绝名单 | routes.yaml、nginx.conf | 拒绝名单要事先知道所有坏路径，漏一条就是开着的；允许名单漏一条是前端看到 404，马上发现。**不能**代替服务自己验 token |
 | 📒 C1 堆 | `JAVA_TOOL_OPTIONS=-XX:MaxRAMPercentage=75` | 容器里堆按上限的百分比算，留出堆外内存；**不需要**再手写 `-Xmx` |
 | ➕ Gateway API vs Ingress | routes.yaml | 角色分开（GatewayClass / Gateway / Route），改写、按方法匹配是标准字段，不靠控制器私有注解 |
 | ➕ StatefulSet vs Deployment | base/*.yaml | 固定名字 + 每个 pod 一块卷；数据库、消息队列用它，无状态服务用 Deployment |
