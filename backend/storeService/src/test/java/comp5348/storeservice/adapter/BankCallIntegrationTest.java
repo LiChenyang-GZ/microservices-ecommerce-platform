@@ -7,7 +7,10 @@ import comp5348.storeservice.model.Payment;
 import comp5348.storeservice.model.PaymentStatus;
 import comp5348.storeservice.support.StoreIntegrationTest;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -24,6 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 【层】集成测试：真 Spring + 真 Postgres + 假 bank。假 bank 怎么冒充（HTTP 还是 gRPC）藏在
  *   StoreIntegrationTest 的剧本方法里（bankTransferSucceeds() 这类），所以测试体和协议无关。
  */
+@ExtendWith(OutputCaptureExtension.class) // 抓下日志：第 16 行要数 store 白费了几次调用
 class BankCallIntegrationTest extends StoreIntegrationTest {
 
     // 直接拿到 store 里真的 BankAdapter，用来测"一次调用"本身（第 20 行）
@@ -114,7 +118,7 @@ class BankCallIntegrationTest extends StoreIntegrationTest {
      *   HTTP 每次都新建连接，没有这个问题。（Christy 2026-10-20 定：gRPC 版加 waitForReady，连不上时等到超时为止）
      */
     @Test
-    void bankBriefRestart_paymentStillCompletes() {
+    void bankBriefRestart_paymentStillCompletes(CapturedOutput output) {
         bankTransferSucceeds();
         // 先成功付一单：让 store 和 bank 之间已经有连接（gRPC 的长连接要先建起来，才测得到"断了以后"）
         PlacedOrder warmUp = placeOrder();
@@ -127,8 +131,16 @@ class BankCallIntegrationTest extends StoreIntegrationTest {
 
         runOutboxRounds(1);
 
-        // 断言：这一轮之内就付成功了，没有掉进 PAY_UNKNOWN
+        // 断言 1：这一轮之内就付成功了，没有掉进 PAY_UNKNOWN
         assertThat(paymentOf(order).getStatus()).as("bank 只停了 1.5 秒").isEqualTo(PaymentStatus.SUCCESS);
+        // 断言 2（审查 #5）：第一次调用就成功，一次都没白费。
+        //   只数"假 bank 收到几次"不够：不加 waitForReady 时，失败的调用在 store 这边立刻失败，根本到不了 bank，
+        //   假 bank 照样只收到 1 次。所以数 store 自己的日志：这个键有没有出现过"结果未知"。
+        String key = payKeyOf(order);
+        assertThat(transferRequests()).extracting(StoreIntegrationTest::keyOf).containsOnlyOnce(key);
+        assertThat(output.getAll())
+                .as("waitForReady：等连接恢复再发，不会先白费几次 UNKNOWN")
+                .doesNotContain("Bank transfer result: key=" + key + ", outcome=UNKNOWN");
     }
 
     /**
