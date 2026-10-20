@@ -11,6 +11,12 @@ docker compose -f backend/compose.yml up -d --wait
 pwsh backend/docker/scenarios/<脚本>.ps1
 ```
 
+脚本 04–08 也能跑在 kind 上（先 `./k8s/scripts/up.ps1`）：加 `-Target kind`，请求走统一入口 `http://localhost`，查库用 `kubectl exec postgres-0`，关 Kafka / RabbitMQ 是把 StatefulSet 缩到 0 再扩回 1。两边的差别都在 `_target.ps1` 里。
+
+```
+pwsh backend/docker/scenarios/<脚本>.ps1 -Target kind
+```
+
 | 脚本 | 用户做了什么 | 必须成立的结果 | 时间 |
 |---|---|---|---|
 | `01-paynow-twice.ps1` | 付款失败（钱不够），充值，然后在两个标签页同时点 Pay Now | 钱只扣一次；PAY 任务一共 2 条（被拒的那次 + 一次 Pay Now） | 约 20 秒 |
@@ -26,5 +32,5 @@ pwsh backend/docker/scenarios/<脚本>.ps1
 上一层的 `smoke-order.ps1` 是正常路径：一单从 PAID 走到 IN_TRANSIT。
 
 注意：
-- 初始数据里 `iPhone 13` 的库存很少，脚本 01 一次买两台。多跑几次以后，下单会报 "Insufficient stock"。
+- 初始数据里 `iPhone 13` 的库存很少，脚本 01 一次买两台。多跑几次以后，脚本 01 会报 "Insufficient stock"。其他脚本和 `smoke-order.ps1` 买的是最便宜、还有库存的那台。
 - 脚本 03 要等慢重试（`payment.bank.slow-retry-minutes`，默认 10 分钟）。

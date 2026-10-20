@@ -11,6 +11,12 @@ docker compose -f backend/compose.yml up -d --wait
 pwsh backend/docker/scenarios/<script>.ps1
 ```
 
+Scripts 04–08 also run on kind (start it with `./k8s/scripts/up.ps1`): add `-Target kind`. Requests then go through the single entry `http://localhost`, the database is read with `kubectl exec postgres-0`, and stopping Kafka or RabbitMQ scales its StatefulSet to 0 and back to 1. Everything that differs between the two lives in `_target.ps1`.
+
+```
+pwsh backend/docker/scenarios/<script>.ps1 -Target kind
+```
+
 | Script | What a user does | What must be true | Time |
 |---|---|---|---|
 | `01-paynow-twice.ps1` | Payment fails (not enough money), tops up, then clicks Pay Now in two tabs at once | Charged once; two PAY tasks in total (the rejected one + one Pay Now) | ~20 s |
@@ -26,5 +32,5 @@ pwsh backend/docker/scenarios/<script>.ps1
 `smoke-order.ps1` (one level up) is the happy path: one order goes from PAID to IN_TRANSIT.
 
 Notes:
-- `iPhone 13` has little stock in the seed data, and script 01 buys two. After a few runs, orders fail with "Insufficient stock".
+- `iPhone 13` has little stock in the seed data, and script 01 buys two. After a few runs, script 01 fails with "Insufficient stock". The other scripts and `smoke-order.ps1` buy the cheapest phone still in stock.
 - Script 03 waits for the slow retry (`payment.bank.slow-retry-minutes`, 10 by default).
