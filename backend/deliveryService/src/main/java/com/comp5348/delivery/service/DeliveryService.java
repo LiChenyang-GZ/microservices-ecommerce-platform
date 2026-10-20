@@ -50,9 +50,10 @@ public class DeliveryService {
     /**
      * Create the delivery for an order (sequence A: delivery reads OrderPaid and creates the delivery itself).
      *
-     * One row per order: INSERT ... ON CONFLICT (order_id) DO NOTHING. If the row is already there, nothing happens:
-     * either this OrderPaid is a repeat (rule 4, Kafka delivers at least once), or a cancel got here first and
-     * left a cancel marker (sequence C). Either way there is no second delivery and no second DeliveryCreated.
+     * One row per order: INSERT ... ON CONFLICT (order_id) DO NOTHING. If the row is already there, no delivery is
+     * created: either this OrderPaid is a repeat (rule 4, Kafka delivers at least once), or a cancel got here first
+     * and left a cancel marker (sequence C). Either way there is no second delivery and no second DeliveryCreated.
+     * If the row is CANCELLED, Cancelled is published once more, so store cannot be left with a paid order.
      *
      * @return the new delivery, or empty if this order already had a row
      */
@@ -68,8 +69,17 @@ public class DeliveryService {
                 ADDRESSES.convertToDatabaseColumn(request.getFromAddress()), request.getProductName(),
                 request.getEmail(), request.getQuantity(), now, now);
         if (inserted == 0) {
-            logger.info("Order {} already has a delivery row (repeat OrderPaid, or cancelled first), skipping",
-                    request.getOrderId());
+            Delivery existing = deliveryRepository.findByOrderIdForUpdate(request.getOrderId()).orElseThrow();
+            if (existing.getDeliveryStatus() == DeliveryStatus.CANCELLED) {
+                // Paid, but cancelled here first (review 4b #2). The earlier Cancelled may have reached store before
+                // the order existed or was paid, and been dropped. Say it again now that store has a paid order:
+                // store finishes the cancel and refunds, or skips it if the order is already cancelled.
+                logger.info("Order {} was paid but its delivery is cancelled: publishing Cancelled again",
+                        request.getOrderId());
+                eventRecorder.recordCancelMarker(existing);
+                return Optional.empty();
+            }
+            logger.info("Order {} already has a delivery row (repeat OrderPaid), skipping", request.getOrderId());
             return Optional.empty();
         }
 
