@@ -31,9 +31,9 @@ export const testCreateAccount = async () => {
       console.error('Server response:', error.response.status, error.response.data);
     } else if (error.request) {
       console.error('Network error: Unable to connect to backend server');
-      console.error('Please ensure backend service is running on http://localhost:8082');
+      console.error('Please ensure the store service is reachable at /api/store');
     }
-    
+
     return false;
   }
 };
@@ -54,7 +54,7 @@ export const testLogin = async () => {
       console.error('Server response:', error.response.status, error.response.data);
     } else if (error.request) {
       console.error('Network error: Unable to connect to backend server');
-      console.error('Please ensure backend service is running on http://localhost:8082');
+      console.error('Please ensure the store service is reachable at /api/store');
     }
     
     return false;

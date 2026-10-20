@@ -37,7 +37,7 @@ class PayNowIntegrationTest extends StoreIntegrationTest {
         payment.setAttempt(1);
         paymentRepository.save(payment);
         jdbc.update("DELETE FROM payment_outbox WHERE order_id = ?", order.orderId());
-        FAKE_BANK.resetRequests();
+        forgetBankRequests();
     }
 
     /**

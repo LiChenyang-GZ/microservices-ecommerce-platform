@@ -2,7 +2,10 @@ import axios from 'axios';
 
 // Create axios instance
 const api = axios.create({
-  baseURL: 'http://localhost:8082/api', // Backend service address
+  // Relative paths: the browser sends every request to the address the page came
+  // from (the K8s gateway, or nginx in compose), which forwards it by path.
+  // /api/store/x reaches store's /api/x.
+  baseURL: '/api/store',
   timeout: 10000, // Request timeout
   headers: {
     'Content-Type': 'application/json',
@@ -200,7 +203,7 @@ export const userAPI = {
 
 // Email service API - using separate axios instance
 const emailApi = axios.create({
-  baseURL: 'http://localhost:8083/api', // Email service address
+  baseURL: '/api', // email's own paths already start with /api/email
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',
@@ -241,7 +244,7 @@ export const emailAPI = {
 
 // Create a new axios instance specifically for connecting to your DeliveryCo service
 const deliveryApi = axios.create({
-    baseURL: 'http://localhost:8081/api', // Your DeliveryCo backend address
+    baseURL: '/api/delivery', // /api/delivery/x reaches delivery's /api/x
     timeout: 10000,
     headers: { 'Content-Type': 'application/json' },
 });
@@ -422,7 +425,7 @@ export const checkoutAPI = {
   }
 };
 
-// Product service API (using default api instance, pointing to http://localhost:8082/api)
+// Product service API (using default api instance, pointing to store)
 export const productAPI = {
   // Get all products
   getAll: async () => {
@@ -487,7 +490,9 @@ export const paymentAPI = {
 
 // Bank service API - using separate axios instance
 const bankApi = axios.create({
-  baseURL: 'http://localhost:8084/api', // Bank service address
+  // bank's own paths start with /api/bank. Only the two GETs below are routed
+  // from outside; transfer and refund are for store, inside the cluster.
+  baseURL: '/api',
   timeout: 10000,
   headers: {
     'Content-Type': 'application/json',

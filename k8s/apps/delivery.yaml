@@ -1,0 +1,80 @@
+# delivery: delivery orders, simulated shipping, DLQ alerts.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: delivery
+  namespace: shop
+data:
+  DB_HOST: postgres
+  DB_PORT: '5432'
+  SPRING_RABBITMQ_HOST: rabbitmq
+  STORE_SERVICE_URL: http://store:8082
+  STORE_AUTH_URL: http://store:8082/api/user/login
+  EMAIL_SERVICE_URL: http://email:8083
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: 'true'
+  MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db
+  JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: delivery
+  namespace: shop
+spec:
+  selector:
+    app: delivery
+  ports:
+    - { name: http, port: 8081 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: delivery
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: delivery
+  template:
+    metadata:
+      labels:
+        app: delivery
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        - name: wait-for-deps
+          image: postgres:16-alpine
+          command: ['sh', '-c']
+          args:
+            - until PGPASSWORD="$DELIVERY_DB_PASSWORD" psql -h postgres -U delivery_user -d delivery_db -tAc 'select 1' >/dev/null 2>&1 && nc -z rabbitmq 5672; do echo 'waiting for postgres/delivery_db and rabbitmq'; sleep 3; done
+          env:
+            - name: DELIVERY_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: delivery, key: DELIVERY_DB_PASSWORD } }
+      containers:
+        - name: delivery
+          image: shop-delivery:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: { name: delivery }
+            - secretRef: { name: delivery }
+          ports:
+            - containerPort: 8081
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8081 }
+            periodSeconds: 5
+            failureThreshold: 48
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8081 }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: 8081 }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits: { memory: 768Mi }

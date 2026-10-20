@@ -37,6 +37,9 @@ dependencies {
 	implementation 'org.projectlombok:lombok'
 	annotationProcessor 'org.projectlombok:lombok'
 	implementation 'com.fasterxml.jackson.core:jackson-databind'
+	// bank.proto stubs (contracts) + gRPC transport for store -> bank (ADR-10). Version matches contracts' grpcVersion.
+	implementation project(':contracts')
+	implementation 'io.grpc:grpc-netty-shaded:1.68.1'
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	// Integration tests: a throwaway Postgres in Docker, never the local webuser database
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'

@@ -1,0 +1,10 @@
+# kubectl apply -k k8s/apps   (after k8s/base, the Secrets and the images)
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - store.yaml
+  - bank.yaml
+  - delivery.yaml
+  - email.yaml
+  - tracking.yaml
+  - frontend.yaml

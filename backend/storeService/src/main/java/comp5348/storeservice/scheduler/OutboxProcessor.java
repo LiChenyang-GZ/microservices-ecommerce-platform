@@ -169,6 +169,9 @@ public class OutboxProcessor {
                 }
                 case UNKNOWN -> lastError = result.message();
             }
+            if (shuttingDown(taskId, call.idempotencyKey())) {
+                return;
+            }
             if (call.slowRetry()) {
                 break;
             }
@@ -199,12 +202,31 @@ public class OutboxProcessor {
                 }
                 case UNKNOWN -> lastError = result.message();
             }
+            if (shuttingDown(taskId, call.idempotencyKey())) {
+                return;
+            }
             if (call.slowRetry()) {
                 break;
             }
             pause();
         }
         paymentService.onRefundStillUnknown(taskId, lastError);
+    }
+
+    /**
+     * Store is shutting down: Spring interrupts this thread. The gRPC blocking stub answers an interrupt with
+     * CANCELLED (unknown), and with the flag still set every next call and pause() return at once, so without this
+     * check the 5 fast retries burn in milliseconds → *_UNKNOWN, a false ALERT, and a 10-minute wait after restart.
+     * An interrupt says nothing about bank, so stop here without marking anything: the task stays PENDING with the
+     * same key and the first round after restart sends it again (rule 7: same key is always safe).
+     */
+    private boolean shuttingDown(Long taskId, String key) {
+        if (!Thread.currentThread().isInterrupted()) {
+            return false;
+        }
+        logger.warn("Outbox thread interrupted (shutdown?): leaving task id={} key={} pending for the next start",
+                taskId, key);
+        return true;
     }
 
     private void pause() {

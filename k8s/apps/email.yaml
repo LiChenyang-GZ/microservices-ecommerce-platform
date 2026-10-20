@@ -1,0 +1,77 @@
+# email: verification codes and the email_queue consumer (unchanged in wave 2).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: email
+  namespace: shop
+data:
+  DB_HOST: postgres
+  DB_PORT: '5432'
+  SPRING_RABBITMQ_HOST: rabbitmq
+  STORE_SERVICE_URL: http://store:8082
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: 'true'
+  MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db
+  JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: email
+  namespace: shop
+spec:
+  selector:
+    app: email
+  ports:
+    - { name: http, port: 8083 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: email
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: email
+  template:
+    metadata:
+      labels:
+        app: email
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        - name: wait-for-deps
+          image: postgres:16-alpine
+          command: ['sh', '-c']
+          args:
+            - until PGPASSWORD="$EMAIL_DB_PASSWORD" psql -h postgres -U email_user -d email_db -tAc 'select 1' >/dev/null 2>&1 && nc -z rabbitmq 5672; do echo 'waiting for postgres/email_db and rabbitmq'; sleep 3; done
+          env:
+            - name: EMAIL_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: email, key: EMAIL_DB_PASSWORD } }
+      containers:
+        - name: email
+          image: shop-email:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: { name: email }
+            - secretRef: { name: email }
+          ports:
+            - containerPort: 8083
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8083 }
+            periodSeconds: 5
+            failureThreshold: 48
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8083 }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: 8083 }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits: { memory: 768Mi }

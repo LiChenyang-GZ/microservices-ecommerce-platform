@@ -1,0 +1,80 @@
+# bank: accounts and money. REST 8084 for the frontend (only two GETs are routed
+# from outside, routes.yaml), gRPC 9090 for store (wave 2 B).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bank
+  namespace: shop
+data:
+  DB_HOST: postgres
+  DB_PORT: '5432'
+  STORE_SERVICE_URL: http://store:8082
+  BANK_GRPC_PORT: '9090'
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: 'true'
+  MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db
+  JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: bank
+  namespace: shop
+spec:
+  selector:
+    app: bank
+  ports:
+    - { name: http, port: 8084 }
+    - { name: grpc, port: 9090 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bank
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bank
+  template:
+    metadata:
+      labels:
+        app: bank
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        - name: wait-for-deps
+          image: postgres:16-alpine
+          command: ['sh', '-c']
+          args:
+            - until PGPASSWORD="$BANK_DB_PASSWORD" psql -h postgres -U bank_user -d bank_db -tAc 'select 1' >/dev/null 2>&1; do echo 'waiting for postgres/bank_db'; sleep 3; done
+          env:
+            - name: BANK_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: bank, key: BANK_DB_PASSWORD } }
+      containers:
+        - name: bank
+          image: shop-bank:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: { name: bank }
+            - secretRef: { name: bank }
+          ports:
+            - containerPort: 8084
+            - containerPort: 9090
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8084 }
+            periodSeconds: 5
+            failureThreshold: 48
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8084 }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: 8084 }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits: { memory: 768Mi }
