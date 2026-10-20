@@ -17,12 +17,9 @@ public class RabbitMQConfig {
 
     // Queue names agreed with team member C
     public static final String DELIVERY_QUEUE_NAME = "delivery_processing_queue";
-    public static final String NOTIFICATION_QUEUE_NAME = "notification_queue"; // <-- New
-    public static final String DEAD_LETTER_QUEUE_NAME = "dead_letter_queue";   // <-- New
     public static final String DELIVERY_DEAD_LETTER_QUEUE_NAME = "delivery_dead_letter_queue";
     public static final String DEAD_LETTER_EXCHANGE_NAME = "dead_letter_exchange";
     public static final String DELIVERY_DEAD_LETTER_ROUTING_KEY = "delivery.deadletter";
-    public static final String NOTIFICATION_DEAD_LETTER_ROUTING_KEY = "notification.deadletter";
 
     @Bean
     public Queue deliveryRequestQueue() {
@@ -30,19 +27,6 @@ public class RabbitMQConfig {
                 .withArgument("x-dead-letter-exchange", DEAD_LETTER_EXCHANGE_NAME)
                 .withArgument("x-dead-letter-routing-key", DELIVERY_DEAD_LETTER_ROUTING_KEY)
                 .build();
-    }
-
-    @Bean // New Webhook queue bean
-    public Queue notificationQueue() {
-        return QueueBuilder.durable(NOTIFICATION_QUEUE_NAME)
-                .withArgument("x-dead-letter-exchange", DEAD_LETTER_EXCHANGE_NAME)
-                .withArgument("x-dead-letter-routing-key", NOTIFICATION_DEAD_LETTER_ROUTING_KEY)
-                .build();
-    }
-
-    @Bean // New dead letter queue bean
-    public Queue deadLetterQueue() {
-        return QueueBuilder.durable(DEAD_LETTER_QUEUE_NAME).build();
     }
 
     @Bean
@@ -53,13 +37,6 @@ public class RabbitMQConfig {
     @Bean
     public DirectExchange deadLetterExchange() {
         return new DirectExchange(DEAD_LETTER_EXCHANGE_NAME, true, false);
-    }
-
-    @Bean
-    public Binding notificationDeadLetterBinding(Queue deadLetterQueue, DirectExchange deadLetterExchange) {
-        return BindingBuilder.bind(deadLetterQueue)
-                .to(deadLetterExchange)
-                .with(NOTIFICATION_DEAD_LETTER_ROUTING_KEY);
     }
 
     @Bean

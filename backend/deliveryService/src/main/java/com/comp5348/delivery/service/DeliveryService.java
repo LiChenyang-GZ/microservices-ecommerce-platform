@@ -3,10 +3,9 @@ package com.comp5348.delivery.service;
 import com.comp5348.delivery.config.RabbitMQConfig;
 import com.comp5348.delivery.dto.DeliveryOrderDTO;
 import com.comp5348.delivery.dto.DeliveryRequest;
-import com.comp5348.delivery.dto.NotificationMessage;
-import com.comp5348.delivery.dto.NotificationRequest;
 import com.comp5348.delivery.model.Delivery;
 import com.comp5348.delivery.repository.DeliveryRepository;
+import com.comp5348.delivery.service.events.DeliveryEventRecorder;
 import com.comp5348.delivery.utils.DeliveryStatus;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,10 +30,14 @@ public class DeliveryService {
     private final DeliveryRepository deliveryRepository;
     private final RabbitTemplate rabbitTemplate;
 
+    private final DeliveryEventRecorder eventRecorder;
+
     @Autowired
-    public DeliveryService(DeliveryRepository deliveryRepository, RabbitTemplate rabbitTemplate) {
+    public DeliveryService(DeliveryRepository deliveryRepository, RabbitTemplate rabbitTemplate,
+                           DeliveryEventRecorder eventRecorder) {
         this.deliveryRepository = deliveryRepository;
         this.rabbitTemplate = rabbitTemplate;
+        this.eventRecorder = eventRecorder;
     }
 
     /**
@@ -52,6 +55,8 @@ public class DeliveryService {
         // 2. Save entity to database
         Delivery savedDelivery = deliveryRepository.save(newDelivery);
         logger.info("Delivery task successfully saved to database, ID: {}", savedDelivery.getId());
+        // DeliveryCreated goes out with the new row, in the same transaction (rule 2)
+        eventRecorder.recordStatus(savedDelivery);
 
         // 3. Send a message to RabbitMQ queue to notify background service to process this delivery
         //    We only send the ID, background service can fetch complete info from database
@@ -98,7 +103,8 @@ public class DeliveryService {
 
         // 3. Core business rule: cancellation only allowed in specific statuses
         // Assumption: Once delivery starts (DELIVERING), it cannot be cancelled
-        if (currentStatus == DeliveryStatus.CREATED || currentStatus == DeliveryStatus.PICKED_UP) {
+        // Only CREATED can be cancelled (cancel API table: PICKED_UP and later is TOO_LATE)
+        if (currentStatus == DeliveryStatus.CREATED) {
 
             // 4. Execute cancellation
             deliveryToCancel.setDeliveryStatus(DeliveryStatus.CANCELLED);
@@ -106,15 +112,8 @@ public class DeliveryService {
             Delivery savedDelivery = deliveryRepository.save(deliveryToCancel);
             logger.info("Delivery ID: {} status successfully updated to -> CANCELLED", savedDelivery.getId());
 
-            // 5. [Critical] Send webhook notification to tell Store service "cancellation succeeded"!
-            // This reuses our Phase 3 results, forming a complete closed loop
-            if (savedDelivery.getNotificationUrl() != null && !savedDelivery.getNotificationUrl().isEmpty()) {
-                NotificationRequest payload = new NotificationRequest(savedDelivery.getId(), savedDelivery.getDeliveryStatus());
-                NotificationMessage message = new NotificationMessage(payload, savedDelivery.getNotificationUrl());
-
-                rabbitTemplate.convertAndSend(RabbitMQConfig.NOTIFICATION_QUEUE_NAME, message);
-                logger.info("Created webhook notification for cancellation of delivery ID: {}", savedDelivery.getId());
-            }
+            // 5. Cancelled event in the same transaction; store reads it and completes the cancel (refund, stock)
+            eventRecorder.recordStatus(savedDelivery);
 
             return true; // Return success
 
@@ -140,16 +139,12 @@ public class DeliveryService {
         Delivery deliveryToCancel = deliveryOptional.get();
         DeliveryStatus currentStatus = deliveryToCancel.getDeliveryStatus();
         
-        if (currentStatus == DeliveryStatus.CREATED || currentStatus == DeliveryStatus.PICKED_UP) {
+        // Only CREATED can be cancelled (cancel API table: PICKED_UP and later is TOO_LATE)
+        if (currentStatus == DeliveryStatus.CREATED) {
             deliveryToCancel.setDeliveryStatus(DeliveryStatus.CANCELLED);
             deliveryToCancel.setUpdateTime(LocalDateTime.now());
             Delivery savedDelivery = deliveryRepository.save(deliveryToCancel);
-            
-            if (savedDelivery.getNotificationUrl() != null && !savedDelivery.getNotificationUrl().isEmpty()) {
-                NotificationRequest payload = new NotificationRequest(savedDelivery.getId(), savedDelivery.getDeliveryStatus());
-                NotificationMessage message = new NotificationMessage(payload, savedDelivery.getNotificationUrl());
-                rabbitTemplate.convertAndSend(RabbitMQConfig.NOTIFICATION_QUEUE_NAME, message);
-            }
+            eventRecorder.recordStatus(savedDelivery);
             return true;
         }
         return false;
@@ -173,6 +168,7 @@ public class DeliveryService {
 
         // Send message for each saved entity and convert to DTO
         for (Delivery savedDelivery : savedDeliveries) {
+            eventRecorder.recordStatus(savedDelivery);
             rabbitTemplate.convertAndSend(RabbitMQConfig.DELIVERY_QUEUE_NAME, savedDelivery.getId());
             logger.info("Sent batch-created new task ID {} to queue {}", savedDelivery.getId(), RabbitMQConfig.DELIVERY_QUEUE_NAME);
         }
@@ -251,17 +247,7 @@ public class DeliveryService {
         d.setUpdateTime(java.time.LocalDateTime.now());
         Delivery saved = deliveryRepository.save(d);
 
-        // Email notifications are now handled by Store Service via webhook notifications
-        // No need to send emails directly from Delivery Service
-
-        // If notification URL exists, send webhook notification to StoreService for refund/rollback inventory/email
-        try {
-            if (saved.getNotificationUrl() != null && !saved.getNotificationUrl().isEmpty()) {
-                com.comp5348.delivery.dto.NotificationRequest payload = new com.comp5348.delivery.dto.NotificationRequest(saved.getId(), saved.getDeliveryStatus());
-                com.comp5348.delivery.dto.NotificationMessage message = new com.comp5348.delivery.dto.NotificationMessage(payload, saved.getNotificationUrl());
-                rabbitTemplate.convertAndSend(com.comp5348.delivery.config.RabbitMQConfig.NOTIFICATION_QUEUE_NAME, message);
-            }
-        } catch (Exception ignore) {}
+        eventRecorder.recordStatus(saved);
         return true;
     }
 }

@@ -4,6 +4,8 @@ import comp5348.storeservice.repository.OrderRepository;
 import comp5348.storeservice.support.DeliveryEventsTestBase;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.TransientDataAccessResourceException;
+import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 import java.time.Duration;
@@ -30,7 +32,15 @@ import static org.mockito.Mockito.verify;
  *   只对测试指定的那个订单号抛异常。绿灯实现里，消费者用 findByIdForUpdate 锁订单行（时序图 B"锁订单行"）。
  *   换了 spy 的上下文和别的测试类不一样，Spring 会另起一个上下文。
  * 【红灯为什么红】没有消费者：DLT 里没有东西，订单也不会被处理。
+ * 【为什么换一个消费者组】Spring 会把前面测试类的上下文缓存起来，它们的消费者还活着，也在 "store" 组里。
+ *   同一个组里的消费者分摊分区，"埋了 bug"的那条事件可能被别的上下文的消费者拿走 —— 那边的仓库不是间谍，
+ *   不会抛异常，测试就看不到重试和 DLT。单独一个组，这个上下文的消费者一定会读到每一条事件。
+ *   （别的组照样会处理同一条事件；这不影响这里的断言：看的是间谍被调了几次、DLT 里有没有。）
+ * 【为什么 @DirtiesContext】反过来也一样：这个类跑完后，它的上下文如果留在缓存里，它的消费者会继续处理
+ *   后面测试类发的事件（同一个数据库），抢先改掉订单、把坏消息再写一次 DLT。所以这个类跑完就关掉它的上下文。
  */
+@DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
+@TestPropertySource(properties = "spring.kafka.consumer.group-id=store-error-kinds-test")
 class DeliveryEventsErrorKindsIntegrationTest extends DeliveryEventsTestBase {
 
     @MockitoSpyBean
@@ -56,7 +66,7 @@ class DeliveryEventsErrorKindsIntegrationTest extends DeliveryEventsTestBase {
      * 第 9 次数据库好了，事件照常处理。
      */
     @Test
-    void knownTransientError_isRetriedBeyondTheBugLimit_andNotDlt() {
+    void knownTransientError_isRetriedBeyondTheBugLimit_andNotDlt() throws Exception {
         PlacedOrder order = placePaidOrder();
         AtomicInteger calls = new AtomicInteger();
         // 前 8 次抛"数据库抖了一下"；第 9 次起照常查库。
@@ -71,8 +81,12 @@ class DeliveryEventsErrorKindsIntegrationTest extends DeliveryEventsTestBase {
 
         publish(order, DELIVERY_CREATED);
 
+        // 等到这个上下文的消费者真的熬过了 8 次失败、第 9 次调用成功（不能只看订单：别的组也会处理这条事件）
         await().atMost(Duration.ofSeconds(90)).pollInterval(Duration.ofMillis(500))
+                .until(() -> calls.get() >= 9);
+        await().atMost(Duration.ofSeconds(10))
                 .until(() -> Long.valueOf(deliveryIdOf(order)).equals(orderOf(order).getDeliveryId()));
+        Thread.sleep(1_000); // 万一它在第 9 次之后还是进了 DLT，给 DLT 消息一点时间出现
         assertThat(kafka.recordsOfOrder("delivery-events.DLT", order.orderId().toString())).isEmpty();
     }
 }

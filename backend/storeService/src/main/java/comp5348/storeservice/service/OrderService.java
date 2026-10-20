@@ -231,6 +231,19 @@ public class OrderService {
             logger.info("No delivery exists for order: {}, skipping delivery cancellation", orderId);
         }
 
+        Order savedOrder = finishCancel(order, "User cancelled");
+        logger.info("Order cancelled successfully");
+        return convertToDTO(savedOrder);
+    }
+
+    /**
+     * The part of a cancel that happens in store once delivery has agreed (or there is no delivery yet):
+     * give the stock back, mark the order CANCELLED, write a REFUND task if the payment went through.
+     * The caller has locked the order row and runs the transaction. Used by cancelOrder (user) and by
+     * DeliveryEventService when a Cancelled event arrives for an order store still thinks is paid.
+     */
+    public Order finishCancel(Order order, String reason) {
+        Long orderId = order.getId();
         // Rollback inventory
         try {
             if (order.getInventoryTransactionIds() != null && !order.getInventoryTransactionIds().isEmpty()) {
@@ -255,7 +268,7 @@ public class OrderService {
         // A payment that is still PENDING / PAY_UNKNOWN is left alone: the money may be moving right now.
         // If that charge succeeds later, its result transaction sees CANCELLED and writes the refund.
         if (paymentService.getPaymentByOrderId(order.getId()).isPresent()) {
-            paymentService.requestRefund(order.getId(), "Order cancelled by user");
+            paymentService.requestRefund(order.getId(), "Order cancelled: " + reason);
         }
 
         // Email notification
@@ -263,150 +276,12 @@ public class OrderService {
             accountRepository.findById(order.getUserId()).ifPresent(acc -> {
                 String email = acc.getEmail();
                 if (email != null && !email.isEmpty()) {
-                    emailAdapter.sendOrderCancelled(email, String.valueOf(order.getId()), "User cancelled");
+                    emailAdapter.sendOrderCancelled(email, String.valueOf(order.getId()), reason);
                 }
             });
         } catch (Exception ignore) {}
 
-        logger.info("Order cancelled successfully");
-        return convertToDTO(savedOrder);
-    }
-
-    @Transactional
-    public void handleDeliveryUpdate(DeliveryNotificationDTO notification) {
-        logger.info("Handling delivery update for deliveryId={}: new status is {}",
-                notification.getDeliveryId(), notification.getStatus());
-
-        if (notification.getDeliveryId() == null) {
-            logger.error("Delivery ID is null in notification.");
-            return;
-        }
-//
-//        Long orderId;
-//        try {
-//            orderId = Long.parseLong(notification.getOrderId());
-//        } catch (NumberFormatException e) {
-//            logger.error("Invalid orderId format in delivery notification: {}", notification.getOrderId());
-//            return; // or throw exception
-//        }
-
-        Order order = orderRepository.findByDeliveryId(notification.getDeliveryId())
-                .orElseThrow(() -> new RuntimeException("Order not found for delivery update with deliveryId: "
-                        + notification.getDeliveryId()));
-
-        Long orderId = order.getId();
-
-        // Translate external DeliveryStatus to our internal OrderStatus
-        // This is the core logic of the "anti-corruption layer"
-        String incomingStatus = notification.getStatus();
-        OrderStatus newStatus = translateDeliveryStatus(incomingStatus);
-
-        // If new status is not null and differs from current status, update
-        if (newStatus != null && order.getStatus() != newStatus) {
-            order.setStatus(newStatus);
-            orderRepository.save(order);
-            logger.info("Order status updated to {} for orderId={}", newStatus, orderId);
-
-            // Record OUT transaction when order is DELIVERED or LOST
-            if (newStatus == OrderStatus.DELIVERED || "LOST".equalsIgnoreCase(incomingStatus)) {
-                try {
-                    boolean outRecorded = warehouseService.recordOutTransaction(
-                            order.getProduct().getId(), 
-                            order.getQuantity(), 
-                            orderId
-                    );
-                    if (outRecorded) {
-                        logger.info("OUT transaction recorded for orderId={}, status={}", orderId, newStatus);
-                    } else {
-                        logger.warn("Failed to record OUT transaction for orderId={}", orderId);
-                    }
-                } catch (Exception e) {
-                    logger.error("Error recording OUT transaction for orderId={}: {}", orderId, e.getMessage(), e);
-                }
-            }
-
-            // If delivery service reports LOST (we map to CANCELLED), trigger refund
-            if ("LOST".equalsIgnoreCase(incomingStatus)) {
-                try {
-                    // Only writes a REFUND task; does nothing if the payment is not SUCCESS (already refunding / refunded)
-                    paymentService.requestRefund(orderId, "Auto refund: package lost during delivery");
-                } catch (Exception e) {
-                    logger.error("Refund on LOST failed for orderId={}: {}", orderId, e.getMessage(), e);
-                }
-
-                // Send order lost email notification (complementary to refund success email)
-                try {
-                    accountRepository.findById(order.getUserId()).ifPresent(acc -> {
-                        String email = acc.getEmail();
-                        if (email != null && !email.isEmpty()) {
-                            emailAdapter.sendOrderLost(email, String.valueOf(orderId), "Package lost during delivery, system has initiated refund");
-                        }
-                    });
-                } catch (Exception mailEx) {
-                    logger.warn("Failed to send order lost email for orderId={}: {}", orderId, mailEx.getMessage());
-                }
-            }
-
-            // Asynchronously send email notification to user
-            sendEmailForStatusUpdate(order, newStatus);
-        } else {
-            logger.info("No status change needed for orderId={}. Current: {}, New (translated): {}",
-                    orderId, order.getStatus(), newStatus);
-        }
-    }
-
-    /**
-     * [New] Translate external DeliveryStatus string to internal OrderStatus enum
-     */
-    private OrderStatus translateDeliveryStatus(String deliveryStatusStr) {
-        if (deliveryStatusStr == null) {
-            return null;
-        }
-        // Note: The strings here need to be agreed upon with your DeliveryService team
-        return switch (deliveryStatusStr.toUpperCase()) {
-            case "PICKED_UP" -> OrderStatus.PICKED_UP;
-            case "DELIVERING" -> OrderStatus.IN_TRANSIT;
-            case "RECEIVED", "DELIVERED" -> OrderStatus.DELIVERED;
-            // Map both LOST and CANCELLED to order's CANCELLED
-            case "CANCELLED", "LOST" -> OrderStatus.CANCELLED;
-            default -> null; // For states we don't care about (e.g., CREATED), we don't update
-        };
-    }
-
-    /**
-     * [New] Send corresponding email based on new order status
-     */
-    private void sendEmailForStatusUpdate(Order order, OrderStatus newStatus) {
-        try {
-            accountRepository.findById(order.getUserId()).ifPresent(account -> {
-                String email = account.getEmail();
-                if (email != null && !email.isEmpty()) {
-                    switch (newStatus) {
-                        case PICKED_UP:
-                            // When status changes to PICKED_UP, it means package was picked up by delivery partner
-                            if (order.getDeliveryId() != null) {
-                                emailAdapter.sendOrderPickedUp(email, String.valueOf(order.getId()), order.getDeliveryId());
-                            }
-                            break;
-                        case IN_TRANSIT:
-                            // When status changes to IN_TRANSIT, it means package is delivering
-                            if (order.getDeliveryId() != null) {
-                                emailAdapter.sendOrderDelivering(email, String.valueOf(order.getId()), order.getDeliveryId());
-                            }
-                            break;
-                        case DELIVERED:
-                            // When status changes to DELIVERED, it means package was delivered
-                            if (order.getDeliveryId() != null) {
-                                emailAdapter.sendOrderDelivered(email, String.valueOf(order.getId()), order.getDeliveryId());
-                            }
-                            break;
-                        // ... Can add email notifications for other statuses
-                    }
-                }
-            });
-        } catch (Exception e) {
-            logger.warn("Failed to send email notification for orderId={}: {}", order.getId(), e.getMessage());
-        }
+        return savedOrder;
     }
 
     /**

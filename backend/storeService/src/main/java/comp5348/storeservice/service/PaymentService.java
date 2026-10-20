@@ -336,11 +336,18 @@ public class PaymentService {
     @Transactional
     public void onRefundSucceeded(Long taskId, String refundTxnId) {
         PaymentOutbox task = outboxRepository.findById(taskId).orElseThrow();
+        // Order row first, then the payment row: same lock order as everywhere else
+        Order order = orderRepository.findByIdForUpdate(task.getOrderId()).orElse(null);
         Payment payment = paymentRepository.findByOrderIdForUpdate(task.getOrderId()).orElseThrow();
         if (REFUND_OPEN.contains(payment.getStatus())) {
             payment.setStatus(PaymentStatus.REFUNDED);
             payment.setErrorMessage(payloadText(task, "reason"));
             paymentRepository.save(payment);
+            // Timeline B: a lost parcel's order ends as REFUNDED. A cancelled order stays CANCELLED.
+            if (order != null && order.getStatus() == OrderStatus.LOST) {
+                order.setStatus(OrderStatus.REFUNDED);
+                orderRepository.save(order);
+            }
             outboxService.createRefundSuccessEvent(task.getOrderId(), refundTxnId); // refund email
             logger.info("Refund successful: orderId={}, key={}, refundTxnId={}", task.getOrderId(), task.getIdempotencyKey(), refundTxnId);
         }

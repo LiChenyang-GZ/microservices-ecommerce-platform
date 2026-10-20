@@ -93,9 +93,6 @@ public class OutboxProcessor {
     @Value("${outbox.processor.enabled:true}")
     private boolean enabled;
     
-    @Value("${delivery.notification.url:http://localhost:8082/api/delivery-webhook}")
-    private String deliveryNotificationUrl;
-    
     @Value("${store.service.url:http://localhost:8082}")
     private String storeServiceUrl;
     
@@ -367,7 +364,7 @@ public class OutboxProcessor {
             deliveryRequest.setFromAddress(Collections.singletonList("Warehouse-1, 456 Storage Rd"));
             deliveryRequest.setProductName(productName);
             deliveryRequest.setQuantity(quantity);
-            deliveryRequest.setNotificationUrl(deliveryNotificationUrl);
+            // No notificationUrl: delivery reports status changes on Kafka (delivery-events), not by webhook
 
             // 5. [Optimized] Confirm inventory reservation (Saga pattern "Confirm")
             // The purpose of this step is to mark inventory transactions in HOLD status as COMMITTED/CONFIRMED
