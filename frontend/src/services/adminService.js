@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const API_BASE_URL = 'http://localhost:8082/api';
+// Relative: goes through the gateway (K8s) or nginx (compose) to store's /api.
+const API_BASE_URL = '/api/store';
 
 const adminService = {
   // Order Module - Get all orders

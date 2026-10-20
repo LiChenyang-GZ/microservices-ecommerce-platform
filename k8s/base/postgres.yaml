@@ -1,0 +1,81 @@
+# One PostgreSQL instance, one database per service (ADR-12, ADR-13).
+# Unlike compose, this container gets only the superuser password. The
+# databases and logins are made by the db-init Job (db-init.yaml), which is the
+# only place that sees the service passwords (09 B#6).
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: shop
+spec:
+  # Headless: the name "postgres" resolves straight to the pod. Required by the
+  # StatefulSet, and the services connect to postgres:5432 as in compose.
+  clusterIP: None
+  selector:
+    app: postgres
+  ports:
+    - name: postgres
+      port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: shop
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      # No *_PORT / *_SERVICE_HOST variables for every Service in the namespace;
+      # each pod gets exactly the variables listed here.
+      enableServiceLinks: false
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres
+                  key: POSTGRES_PASSWORD
+            # A subdirectory, so initdb never meets files the volume brings along.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - containerPort: 5432
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          # -h 127.0.0.1: over TCP, as the services connect (see compose.yml).
+          readinessProbe:
+            exec:
+              command: ['pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'postgres']
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            exec:
+              command: ['pg_isready', '-h', '127.0.0.1', '-U', 'postgres', '-d', 'postgres']
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          resources:
+            requests: { cpu: 100m, memory: 256Mi }
+            limits: { memory: 512Mi }
+  # The data outlives the pod: deleting the pod keeps every order and balance.
+  # It does not outlive the cluster: `kind delete cluster` throws it away.
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ['ReadWriteOnce']
+        resources:
+          requests:
+            storage: 2Gi

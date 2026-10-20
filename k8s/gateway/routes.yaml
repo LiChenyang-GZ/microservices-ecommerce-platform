@@ -1,0 +1,87 @@
+# Which path goes where (design figure 2). Only what is listed here is reachable
+# from outside; /actuator, /internal/... and everything else answer 404.
+#
+#   /api/store/x     -> store    /api/x   (store's paths are /api/user, /api/orders, ...)
+#   /api/delivery/x  -> delivery /api/x   (/api/deliveries, /api/admin/dlq)
+#   /api/email/...   -> email    unchanged
+#   /api/tracking/.. -> tracking unchanged
+#   /api/bank/...    -> bank: GET account/me and GET account/{n}/balance only
+#   /                -> frontend
+# The same table is in frontend/nginx.conf, for compose.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: api
+  namespace: shop
+spec:
+  parentRefs:
+    - name: shop
+  rules:
+    - matches:
+        - path: { type: PathPrefix, value: /api/store }
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path: { type: ReplacePrefixMatch, replacePrefixMatch: /api }
+      backendRefs:
+        - { name: store, port: 8082 }
+    - matches:
+        - path: { type: PathPrefix, value: /api/delivery }
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path: { type: ReplacePrefixMatch, replacePrefixMatch: /api }
+      backendRefs:
+        - { name: delivery, port: 8081 }
+    - matches:
+        - path: { type: PathPrefix, value: /api/email }
+      backendRefs:
+        - { name: email, port: 8083 }
+    - matches:
+        - path: { type: PathPrefix, value: /api/tracking }
+      backendRefs:
+        - { name: tracking, port: 8085 }
+    # bank: the two reads the frontend uses. Transfer and refund have no
+    # authentication and are for store only, inside the cluster (checklist Q5).
+    - matches:
+        - path: { type: Exact, value: /api/bank/account/me }
+          method: GET
+        - path: { type: RegularExpression, value: '/api/bank/account/[^/]+/balance' }
+          method: GET
+      backendRefs:
+        - { name: bank, port: 8084 }
+    # Anything else under /api (e.g. POST /api/bank/transfer), and the internal
+    # prefixes, gets 404 here. Without this rule they would fall through to "/"
+    # and the frontend would answer 200 with index.html, which hides the mistake.
+    # A longer matching prefix wins, so the rules above still take their paths.
+    - matches:
+        - path: { type: PathPrefix, value: /api }
+        - path: { type: PathPrefix, value: /actuator }
+        - path: { type: PathPrefix, value: /internal }
+        # delivery -> store status callback (on main until wave 2 A removes it).
+        # It has no authentication: from outside, anyone could report an order
+        # as Lost and so trigger a refund.
+        - path: { type: PathPrefix, value: /api/store/delivery-webhook }
+      filters:
+        - type: ExtensionRef
+          extensionRef:
+            group: gateway.envoyproxy.io
+            kind: HTTPRouteFilter
+            name: not-found
+    - matches:
+        - path: { type: PathPrefix, value: / }
+      backendRefs:
+        - { name: frontend, port: 80 }
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: not-found
+  namespace: shop
+spec:
+  directResponse:
+    statusCode: 404
+    contentType: text/plain
+    body:
+      type: Inline
+      inline: 'not found'

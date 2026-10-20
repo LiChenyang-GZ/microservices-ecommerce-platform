@@ -1,0 +1,40 @@
+# One-off Job: creates one database and one login per service (09 B#6).
+# The script is db-init.sh; the ConfigMap is made from it by kustomization.yaml.
+# Safe to run again:
+#   kubectl -n shop delete job db-init; kubectl apply -k k8s/base
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-init
+  namespace: shop
+spec:
+  backoffLimit: 6
+  template:
+    spec:
+      restartPolicy: OnFailure
+      enableServiceLinks: false
+      initContainers:
+        # K8s has no depends_on: wait until postgres answers over TCP.
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command: ['sh', '-c', 'until pg_isready -h postgres -U postgres; do sleep 2; done']
+      containers:
+        - name: db-init
+          image: postgres:16-alpine
+          command: ['sh', '/scripts/db-init.sh']
+          env:
+            - { name: PGHOST, value: postgres }
+            - { name: PGUSER, value: postgres }
+            - name: PGPASSWORD
+              valueFrom: { secretKeyRef: { name: postgres, key: POSTGRES_PASSWORD } }
+          # All five service passwords, and nothing else.
+          envFrom:
+            - secretRef:
+                name: db-init
+          volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+      volumes:
+        - name: scripts
+          configMap:
+            name: db-init-script
