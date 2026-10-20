@@ -243,6 +243,52 @@ class DeliveryEventsConsumerIntegrationTest extends DeliveryEventsTestBase {
     }
 
     /**
+     * A17（4a 审查 #1，钱）：货已经揽收了，却收到 Cancelled。不能补完取消：
+     * 订单留在 PICKED_UP，不写退款、不还库存，打 ALERT（要人去看），不进 DLT（消息本身没坏）。
+     * 设计：A11 只写了"订单【还是 PAID】时补完取消"；揽收之后来 Cancelled 是不可能的跳转（同 A14 的处理）。
+     * 旧代码错在哪：Cancelled 的等级是终态 3，比 PICKED_UP 的 1 高，"状态不倒退"就放行了 → 货在路上，钱退了。
+     */
+    @Test
+    void cancelledEvent_afterPickedUp_isSkippedWithAlert(CapturedOutput output) {
+        PlacedOrder order = placePaidOrder();
+        publish(order, DELIVERY_CREATED);
+        publish(order, PICKED_UP);
+        awaitOrderStatus(order, "PICKED_UP");
+        int stockBefore = stockOf(order);
+
+        RecordMetadata cancelled = publish(order, CANCELLED);
+        awaitConsumedByStore(cancelled);
+
+        assertThat(orderOf(order).getStatus()).isEqualTo(OrderStatus.PICKED_UP);
+        assertThat(refundTasksOf(order)).as("货在路上，不能退款").isEmpty();
+        assertThat(stockOf(order)).as("货已经出库，不能还库存").isEqualTo(stockBefore);
+        // 同一行里既有 ALERT 又有这一单的号（\b：后面不能紧跟数字，避免 orderId=12 匹配到 orderId=123）
+        assertThat(output.getAll()).containsPattern("ALERT.*orderId=" + order.orderId() + "\\b");
+        assertThat(kafka.recordsOfOrder("delivery-events.DLT", order.orderId().toString())).isEmpty();
+    }
+
+    /**
+     * A17 的另一种（4a 审查 #1）：订单还是 PAID，但 Cancelled 里的配送单号和订单记下的不是同一个。
+     * 这不是"这一单的配送被取消了"，而是别的配送单（4b 以后 delivery 一单只能有一个配送单，正常不会出现）。
+     * 处理：不补完取消，ALERT + 跳过。取消标记的 deliveryId 是 null，那种照 A11 补完（见上面 cancelMarkerEvent_*）。
+     */
+    @Test
+    void cancelledEvent_forAnotherDeliveryId_isSkippedWithAlert(CapturedOutput output) {
+        PlacedOrder order = placePaidOrder();
+        RecordMetadata created = publish(order, DELIVERY_CREATED);
+        awaitConsumedByStore(created); // 订单记下了 deliveryIdOf(order)
+        int stockBefore = stockOf(order);
+
+        RecordMetadata cancelled = publish(deliveryEvent(order.orderId().toString(), CANCELLED, deliveryIdOf(order) + 1));
+        awaitConsumedByStore(cancelled);
+
+        assertThat(orderOf(order).getStatus()).isEqualTo(OrderStatus.PAID);
+        assertThat(refundTasksOf(order)).isEmpty();
+        assertThat(stockOf(order)).isEqualTo(stockBefore);
+        assertThat(output.getAll()).containsPattern("ALERT.*orderId=" + order.orderId() + "\\b");
+    }
+
+    /**
      * A13：事件里的订单在 store 根本不存在 → 消息本身有问题，进 delivery-events.DLT。
      * 设计：规则 6"消息本身有问题，例如……引用的订单不存在：直接进 .DLT 并告警"。
      */
