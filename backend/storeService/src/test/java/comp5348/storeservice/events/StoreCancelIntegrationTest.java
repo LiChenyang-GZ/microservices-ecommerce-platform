@@ -148,6 +148,28 @@ class StoreCancelIntegrationTest extends DeliveryEventsTestBase {
         assertThat(awaitOrderEventTypes(order, 2)).containsExactly("OrderPlaced", "OrderCancelled");
     }
 
+    /**
+     * C10（4b 审查 #1，钱）：订单状态被人从外面改回"未付款"，再取消。钱已经扣了，就必须先问 delivery。
+     * 场景：先付款，等货已经揽收，再调 PUT /api/orders/{id}/status?status=PENDING_PAYMENT（这个接口不要 token，
+     * 测试里直接调它背后的 orderService.updateOrderStatus），然后取消。
+     * 应该怎样：store 看到钱已经付过（payment 是 SUCCESS），照样先问 delivery → delivery 回 409（货已揽收）→ 拒绝取消、不退款。
+     * 旧代码错在哪：只看订单状态是不是 PAID/PROCESSING 才问 delivery。状态是 PENDING_PAYMENT → 不问 →
+     *   finishCancel 看到 payment 是 SUCCESS → 写 REFUND。货照样送到，钱也退回来了。
+     */
+    @Test
+    void cancel_afterStatusTamperedToUnpaid_stillAsksDelivery_becausePaymentSucceeded() {
+        PlacedOrder order = placePaidOrder();
+        deliveryAnswers(aResponse().withStatus(409).withHeader("Content-Type", "application/json")
+                .withBody("{\"result\":\"TOO_LATE\",\"status\":\"PICKED_UP\"}"));
+        orderService.updateOrderStatus(order.orderId(), OrderStatus.PENDING_PAYMENT); // 外人改状态
+
+        assertThatThrownBy(() -> orderService.cancelOrder(order.orderId()));
+
+        assertThat(deliveryCancelRequests()).as("钱扣过了，要先问 delivery").hasSize(1);
+        assertThat(refundTasksOf(order)).as("货已揽收，不能退款").isEmpty();
+        assertThat(stockOf(order)).as("库存不能还").isEqualTo(99);
+    }
+
     /** 换掉假 delivery 对新取消接口的回答（后登记的剧本优先） */
     private void deliveryAnswers(ResponseDefinitionBuilder answer) {
         FAKE_BANK.stubFor(post(urlPathMatching(CANCEL_PATH + ".*")).willReturn(answer));
