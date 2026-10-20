@@ -58,7 +58,11 @@ import static org.awaitility.Awaitility.await;
         // 事件投递程序每 200 毫秒跑一轮，测试不用等 5 秒
         "event-outbox.publisher.interval-ms=200",
         // 模拟配送每一步等 1 秒（现在写死 10 秒，红灯时测试会慢一些，但结果一样）
-        "delivery.simulation.step-delay-ms=1000"
+        "delivery.simulation.step-delay-ms=1000",
+        // 集成发现 I1 的绿灯配置键（红灯时没人读）：不是终态、2 秒没动的配送单算"卡住"，每 500 毫秒找一次
+        // 2 秒 > 上面的每步 1 秒，正常推进中的单不会被当成卡住
+        "delivery.stuck-job.stale-after-ms=2000",
+        "delivery.stuck-job.check-interval-ms=500"
 })
 public abstract class DeliveryIntegrationTest {
 
