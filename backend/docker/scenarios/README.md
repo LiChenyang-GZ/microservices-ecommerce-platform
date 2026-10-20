@@ -17,6 +17,8 @@ pwsh backend/docker/scenarios/<script>.ps1
 | `02-cancel-after-paid.ps1` | Pays, then cancels right away, before the delivery is created | Order CANCELLED, no delivery created, one refund, balance and stock back to the start | ~20 s |
 | `02-cancel-after-paid.ps1 -AfterDelivery` | Pays, waits for the delivery to be created, cancels before pickup | Same, and the delivery is CANCELLED. Pickup happens ~10 s after the delivery is created; if you miss it, run again | ~25 s |
 | `03-bank-down-during-payment.ps1` | Orders while the bank is down, clicks Pay Now while the result is unknown, bank comes back | `PAY_UNKNOWN` + `ALERT payment_unknown` log; Pay Now does not start a new attempt; after the bank is back the same key is retried and the charge happens once. The script always starts the bank again | ~11 min |
+| `04-kafka-down.ps1` | Orders while Kafka is down, then Kafka comes back | The order still reaches PAID and store / delivery stay healthy; OrderPaid waits in store's `event_outbox`; once Kafka is back the delivery is created. The script always starts Kafka again | ~1 min |
+| `05-rabbitmq-down-at-delivery.ps1` | Orders while RabbitMQ is down (the delivery is created at that moment), then RabbitMQ comes back | The order is not cancelled or refunded; once RabbitMQ is back the delivery moves past CREATED. Wave 2 integration finding I1: before the fix it stays in CREATED for good. The script always starts RabbitMQ again | ~1.5 min |
 
 `smoke-order.ps1` (one level up) is the happy path: one order goes from PAID to IN_TRANSIT.
 
