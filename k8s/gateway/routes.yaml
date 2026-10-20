@@ -1,13 +1,18 @@
-# Which path goes where (design figure 2). Only what is listed here is reachable
-# from outside; /actuator, /internal/... and everything else answer 404.
+# What the single entry lets in (design figure 2). An allowlist: only the
+# method + path pairs the frontend calls are forwarded; everything else,
+# including /actuator and /internal, gets 404 from the entry itself.
 #
 #   /api/store/x     -> store    /api/x   (store's paths are /api/user, /api/orders, ...)
 #   /api/delivery/x  -> delivery /api/x   (/api/deliveries, /api/admin/dlq)
 #   /api/email/...   -> email    unchanged
-#   /api/tracking/.. -> tracking unchanged
-#   /api/bank/...    -> bank: GET account/me and GET account/{n}/balance only
 #   /                -> frontend
-# The same table is in frontend/nginx.conf, for compose.
+# bank and tracking: no path from outside, the frontend calls neither.
+#
+# A new frontend call needs a line here and the same line in frontend/nginx.conf;
+# ./k8s/scripts/check-entry.ps1 runs one list of requests against both entries.
+# Ids are [0-9]+, not [^/]+: a word in an id's place could make the service
+# pick a different handler (POST deliveries/cancel-by-order/cancel would match
+# "{id}/cancel" here but reach delivery's token-free cancel-by-order/{orderId}).
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
@@ -17,61 +22,85 @@ spec:
   parentRefs:
     - name: shop
   rules:
+    # A RegularExpression match cannot use the standard ReplacePrefixMatch
+    # rewrite, so store and delivery use Envoy Gateway's regex rewrite (below).
     - matches:
-        - path: { type: PathPrefix, value: /api/store }
+        - { method: POST, path: { type: Exact, value: /api/store/user } }
+        - { method: POST, path: { type: Exact, value: /api/store/user/login } }
+        - { method: POST, path: { type: Exact, value: /api/store/user/activate } }
+        - { method: POST, path: { type: Exact, value: /api/store/user/forgot-password } }
+        - { method: POST, path: { type: Exact, value: /api/store/user/reset-password } }
+        - { method: GET, path: { type: Exact, value: /api/store/products } }
+        - { method: GET, path: { type: Exact, value: /api/store/products/available } }
+        - { method: GET, path: { type: RegularExpression, value: '/api/store/products/[0-9]+' } }
+        - { method: POST, path: { type: Exact, value: /api/store/store/orders/create-with-payment } }
+        - { method: GET, path: { type: RegularExpression, value: '/api/store/store/orders/user/[0-9]+/with-payment' } }
+        - { method: GET, path: { type: RegularExpression, value: '/api/store/store/orders/[0-9]+/with-payment' } }
+        - { method: POST, path: { type: RegularExpression, value: '/api/store/store/orders/[0-9]+/(cancel|retry-payment)' } }
+        - { method: POST, path: { type: RegularExpression, value: '/api/store/payments/[0-9]+/refund' } }
+        # admin dashboard
+        - { method: GET, path: { type: Exact, value: /api/store/orders } }
+        - { method: GET, path: { type: Exact, value: /api/store/warehouses } }
+        - { method: GET, path: { type: Exact, value: /api/store/warehouses/audit-logs/out-transactions } }
       filters:
-        - type: URLRewrite
-          urlRewrite:
-            path: { type: ReplacePrefixMatch, replacePrefixMatch: /api }
+        - type: ExtensionRef
+          extensionRef: { group: gateway.envoyproxy.io, kind: HTTPRouteFilter, name: strip-store }
       backendRefs:
         - { name: store, port: 8082 }
     - matches:
-        - path: { type: PathPrefix, value: /api/delivery }
+        - { method: GET, path: { type: Exact, value: /api/delivery/deliveries/me } }
+        - { method: GET, path: { type: RegularExpression, value: '/api/delivery/deliveries/[0-9]+' } }
+        - { method: POST, path: { type: RegularExpression, value: '/api/delivery/deliveries/[0-9]+/cancel' } }
+        # admin dashboard
+        - { method: GET, path: { type: Exact, value: /api/delivery/admin/dlq/delivery } }
+        - { method: POST, path: { type: RegularExpression, value: '/api/delivery/admin/dlq/delivery/[0-9]+/(resolve|requeue)' } }
       filters:
-        - type: URLRewrite
-          urlRewrite:
-            path: { type: ReplacePrefixMatch, replacePrefixMatch: /api }
+        - type: ExtensionRef
+          extensionRef: { group: gateway.envoyproxy.io, kind: HTTPRouteFilter, name: strip-delivery }
       backendRefs:
         - { name: delivery, port: 8081 }
     - matches:
-        - path: { type: PathPrefix, value: /api/email }
+        - { method: POST, path: { type: Exact, value: /api/email/send-verification } }
+        - { method: POST, path: { type: Exact, value: /api/email/verify-code } }
       backendRefs:
         - { name: email, port: 8083 }
-    - matches:
-        - path: { type: PathPrefix, value: /api/tracking }
-      backendRefs:
-        - { name: tracking, port: 8085 }
-    # bank: the two reads the frontend uses. Transfer and refund have no
-    # authentication and are for store only, inside the cluster (checklist Q5).
-    - matches:
-        - path: { type: Exact, value: /api/bank/account/me }
-          method: GET
-        - path: { type: RegularExpression, value: '/api/bank/account/[^/]+/balance' }
-          method: GET
-      backendRefs:
-        - { name: bank, port: 8084 }
-    # Anything else under /api (e.g. POST /api/bank/transfer), and the internal
-    # prefixes, gets 404 here. Without this rule they would fall through to "/"
-    # and the frontend would answer 200 with index.html, which hides the mistake.
-    # A longer matching prefix wins, so the rules above still take their paths.
+    # Everything else under these prefixes: 404 from the entry. Without this
+    # rule they would fall through to "/" and the frontend would answer 200
+    # with index.html, which hides the mistake. Exact and regex matches above
+    # win over these prefixes, a prefix match only takes what is left.
     - matches:
         - path: { type: PathPrefix, value: /api }
         - path: { type: PathPrefix, value: /actuator }
         - path: { type: PathPrefix, value: /internal }
-        # delivery -> store status callback (on main until wave 2 A removes it).
-        # It has no authentication: from outside, anyone could report an order
-        # as Lost and so trigger a refund.
-        - path: { type: PathPrefix, value: /api/store/delivery-webhook }
       filters:
         - type: ExtensionRef
-          extensionRef:
-            group: gateway.envoyproxy.io
-            kind: HTTPRouteFilter
-            name: not-found
+          extensionRef: { group: gateway.envoyproxy.io, kind: HTTPRouteFilter, name: not-found }
     - matches:
         - path: { type: PathPrefix, value: / }
       backendRefs:
         - { name: frontend, port: 80 }
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: strip-store
+  namespace: shop
+spec:
+  urlRewrite:
+    path:
+      type: ReplaceRegexMatch
+      replaceRegexMatch: { pattern: '^/api/store/', substitution: /api/ }
+---
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: HTTPRouteFilter
+metadata:
+  name: strip-delivery
+  namespace: shop
+spec:
+  urlRewrite:
+    path:
+      type: ReplaceRegexMatch
+      replaceRegexMatch: { pattern: '^/api/delivery/', substitution: /api/ }
 ---
 apiVersion: gateway.envoyproxy.io/v1alpha1
 kind: HTTPRouteFilter

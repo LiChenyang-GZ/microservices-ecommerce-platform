@@ -33,6 +33,7 @@
 ```powershell
 ./k8s/scripts/smoke-order.ps1        # 经入口下一单：钱只扣一次、配送状态回到 store
 ./k8s/scripts/check-config-keys.ps1  # 每个 pod 的变量名和 compose 一致，没有别人的库密码
+./k8s/scripts/check-entry.ps1        # 对两个入口（kind :80、compose :3000）发同一组 58 个请求：该放的放、该挡的 404
 ```
 
 浏览器打开 `http://localhost`。
@@ -46,19 +47,21 @@ k8s/
   apps/                   store、bank、delivery、email、tracking、frontend
   gateway/gateway.yaml    唯一入口：Envoy Gateway（Gateway API）
   gateway/routes.yaml     哪个路径去哪个服务
-  scripts/                up、apply-secrets、smoke-order、check-config-keys
+  scripts/                up、apply-secrets、smoke-order、check-config-keys、check-entry
 ```
+
+入口是**允许名单**：只转发前端真正调用的"方法 + 路径"（`routes.yaml` 里一条条列出来）。`/api` 下的其他路径、`/actuator`、`/internal` 都由入口自己回 404。所以后端新加的接口，没人把它加进名单之前，外面是调不到的。
 
 | 路径 | 去哪 |
 |---|---|
-| `/` | frontend |
-| `/api/store/x` | store 的 `/api/x`（store 自己的路径是 `/api/user`、`/api/orders`…） |
-| `/api/delivery/x` | delivery 的 `/api/x` |
-| `/api/email/…`、`/api/tracking/…` | 原样转发 |
-| `/api/bank/account/me`、`/api/bank/account/{n}/balance` | bank，**只有这两条 GET** |
-| 其他 `/api/…`、`/actuator`、`/internal`、`/api/store/delivery-webhook` | 404 |
+| `/` 和其他非 API 路径 | frontend |
+| 名单里的 `/api/store/x` | store 的 `/api/x`（store 自己的路径是 `/api/user`、`/api/orders`…） |
+| 名单里的 `/api/delivery/x` | delivery 的 `/api/x` |
+| 名单里的 `/api/email/…` | email，原样转发 |
+| bank、tracking | 一条都不放：前端不调它们（bank 的转账 / 退款只给集群里的 store 用） |
+| `/api` 下其他路径、`/actuator`、`/internal` | 404 `not found` |
 
-`frontend/nginx.conf` 里有同一张表，所以 compose 的 `localhost:3000` 也照样能用。
+`frontend/nginx.conf` 里有同一份名单，所以 compose 的 `localhost:3000` 行为一样。前端加新调用，两份都要加一行；两边不一致时 `check-entry.ps1` 会显示出来。
 
 ## 几个决定和原因
 

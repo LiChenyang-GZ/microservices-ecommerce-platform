@@ -33,6 +33,7 @@ About 5 minutes the first time (it pulls the node image and postgres / rabbitmq 
 ```powershell
 ./k8s/scripts/smoke-order.ps1        # one order through the entry: charged once, delivery updates reach store
 ./k8s/scripts/check-config-keys.ps1  # each pod has compose's variable names, and no other service's DB password
+./k8s/scripts/check-entry.ps1        # 58 requests to both entries (kind :80, compose :3000): open / 404 / page as expected
 ```
 
 Open `http://localhost` in a browser.
@@ -46,19 +47,21 @@ k8s/
   apps/                   store, bank, delivery, email, tracking, frontend
   gateway/gateway.yaml    the single entry: Envoy Gateway (Gateway API)
   gateway/routes.yaml     which path goes to which service
-  scripts/                up, apply-secrets, smoke-order, check-config-keys
+  scripts/                up, apply-secrets, smoke-order, check-config-keys, check-entry
 ```
+
+The entry is an **allowlist**: only the method + path pairs the frontend calls are forwarded (`routes.yaml` lists them one by one). Everything else under `/api`, plus `/actuator` and `/internal`, gets 404 from the entry itself, so a new backend endpoint is not reachable from outside until someone adds it.
 
 | Path | Goes to |
 |---|---|
-| `/` | frontend |
-| `/api/store/x` | store's `/api/x` (store's own paths are `/api/user`, `/api/orders`, ...) |
-| `/api/delivery/x` | delivery's `/api/x` |
-| `/api/email/...`, `/api/tracking/...` | unchanged |
-| `/api/bank/account/me`, `/api/bank/account/{n}/balance` | bank, **these two GETs only** |
-| any other `/api/...`, `/actuator`, `/internal`, `/api/store/delivery-webhook` | 404 |
+| `/` and any non-API path | frontend |
+| listed `/api/store/x` | store's `/api/x` (store's own paths are `/api/user`, `/api/orders`, ...) |
+| listed `/api/delivery/x` | delivery's `/api/x` |
+| listed `/api/email/...` | email, unchanged |
+| bank, tracking | nothing: the frontend calls neither (bank's transfer / refund are for store, inside the cluster) |
+| anything else under `/api`, `/actuator`, `/internal` | 404 `not found` |
 
-`frontend/nginx.conf` has the same table, so compose's `localhost:3000` keeps working.
+`frontend/nginx.conf` has the same list, so compose's `localhost:3000` behaves the same. A new frontend call needs a line in both; `check-entry.ps1` shows it if they differ.
 
 ## Decisions and why
 

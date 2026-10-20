@@ -14,7 +14,6 @@ import ProductDetailPage from './pages/ProductDetailPage.jsx';
 import CheckoutPage from './pages/CheckoutPage.jsx';
 import MyOrdersPage from './pages/MyOrdersPage.jsx';
 import OrderDetailPage from './pages/OrderDetailPage.jsx';
-import AddMoneyPage from './pages/AddMoneyPage.jsx';
 import AdminDashboard from './pages/admin/AdminDashboard.jsx';
 import './App.css';
 
@@ -97,11 +96,6 @@ function App() {
             <Route path="/orders/:id" element={
               <ProtectedRoute>
                 <OrderDetailPage />
-              </ProtectedRoute>
-            } />
-            <Route path="/add-money" element={
-              <ProtectedRoute>
-                <AddMoneyPage />
               </ProtectedRoute>
             } />
             <Route path="/admin" element={
