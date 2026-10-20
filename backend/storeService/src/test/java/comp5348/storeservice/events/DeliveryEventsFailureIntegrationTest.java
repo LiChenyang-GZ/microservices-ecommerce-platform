@@ -142,6 +142,34 @@ class DeliveryEventsFailureIntegrationTest extends DeliveryEventsTestBase {
     }
 
     /**
+     * D8（4a 审查 #2，钱）：Cancelled 补完取消时，要还的那行库存被别的事务锁着（比如同一件商品正好有人在下单）。
+     * 等锁 5 秒超时 —— 这是暂时性故障，应该原地退避重试，锁放开后取消照常补完：订单 CANCELLED、退款 1 条、库存还回去。
+     *
+     * 旧代码错在哪：等锁超时的异常在 WarehouseService.unholdProduct 里（还有 OrderService.finishCancel 里）被 catch 吞掉，
+     * 只打一行日志。可异常经过仓库（repository）的事务代理时，Spring 已经把整个共享事务标成"只能回滚"，
+     * Postgres 那边这个事务也已经作废了 → 后面的语句或提交报一个"看不出是暂时性"的异常 → 被当成代码 bug，
+     * 约 1 秒重试 5 次（每次再等 5 秒锁）→ 进 DLT。结果：订单停在 PAID、没有退款，要人工去 DLT 重放。
+     *
+     * 锁 35 秒：比"bug 预算"长（1 次 + 重试 5 次，每次等锁 5 秒，约 31 秒），旧代码一定会在锁放开前把消息送进 DLT。
+     */
+    @Test
+    void cancelledEvent_stockRowLocked_isRetriedNotDeadLettered() throws Exception {
+        PlacedOrder order = placePaidOrder();
+        int stockBefore = stockOf(order);
+        try (Connection locker = lockStockRow(order)) {
+            publish(order, DELIVERY_CREATED);
+            publish(order, CANCELLED);
+            Thread.sleep(35_000);
+            locker.rollback();
+        }
+
+        awaitOrderStatus(order, "CANCELLED", Duration.ofSeconds(30));
+        assertThat(kafka.recordsOfOrder(DLT, order.orderId().toString())).as("暂时性故障不能进 DLT").isEmpty();
+        assertThat(openTasksOf(order, "REFUND")).as("要退款").hasSize(1);
+        assertThat(stockOf(order)).as("锁住的 1 件要还回去").isEqualTo(stockBefore + 1);
+    }
+
+    /**
      * D6：写 DLT 这一步本身失败了（这里把 DLT topic 删掉来制造；自动建 topic 是关的，所以写不进去）。
      * 坏消息不能因此被悄悄跳过：DLT 回来后，它要出现在 DLT 里。
      */
@@ -183,6 +211,17 @@ class DeliveryEventsFailureIntegrationTest extends DeliveryEventsTestBase {
         c.setAutoCommit(false);
         try (PreparedStatement ps = c.prepareStatement("SELECT id FROM orders WHERE id = ? FOR UPDATE")) {
             ps.setLong(1, order.orderId());
+            ps.executeQuery();
+        }
+        return c;
+    }
+
+    /** 同上，锁的是这一单那件商品的库存行（warehouse_products），取消时 unhold 要锁它才能把库存加回去 */
+    private Connection lockStockRow(PlacedOrder order) throws Exception {
+        Connection c = DriverManager.getConnection(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
+        c.setAutoCommit(false);
+        try (PreparedStatement ps = c.prepareStatement("SELECT id FROM warehouse_products WHERE id = ? FOR UPDATE")) {
+            ps.setLong(1, order.warehouseProductId());
             ps.executeQuery();
         }
         return c;

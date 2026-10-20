@@ -66,7 +66,11 @@ public abstract class DeliveryEventsTestBase extends StoreIntegrationTest {
 
     /** 等订单状态变成某个值。用名字比较：LOST、REFUNDED 在红灯时还不是 OrderStatus 的值，写成枚举编译不过 */
     protected void awaitOrderStatus(PlacedOrder order, String status) {
-        await().atMost(CONSUME_TIMEOUT).pollInterval(Duration.ofMillis(200))
+        awaitOrderStatus(order, status, CONSUME_TIMEOUT);
+    }
+
+    protected void awaitOrderStatus(PlacedOrder order, String status, Duration timeout) {
+        await().atMost(timeout).pollInterval(Duration.ofMillis(200))
                 .until(() -> orderOf(order).getStatus().name().equals(status));
     }
 
