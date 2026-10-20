@@ -59,7 +59,7 @@ The three tests that best show what can go wrong:
 - **Reconnecting**: when the connection drops, gRPC reconnects with backoff (about 1 s, 1.6 s, 2.6 s…). By default (fail-fast) new calls **fail immediately** while it waits.
 - `withWaitForReady()`: while there is no connection, the call is queued until the connection is ready, up to the deadline. Christy decided: use it.
   - Measured (`bankBriefRestart_paymentStillCompletes`, bank down for 1.5 s): without it, 2–3 UNKNOWN calls are wasted before success; with it, the first call succeeds.
-  - **This test does not catch removing waitForReady**: without it the 5 fast retries still catch the reconnect, so the test stays green. It proves "a 1.5 s outage still pays", not "waitForReady is required".
+  - First version of the test only checked "paid in the end" and stayed green without waitForReady. After review (#5) it also checks that no UNKNOWN was logged for the key. Counting requests at the fake bank is not enough: fail-fast calls never reach it. Broken on purpose, it is red 3 out of 3 (once even PAY_UNKNOWN).
   - Cost: when bank is down for long, every call waits the full 5 s, about 27 s for the 5 tries of one PAY task (same kind of issue as A#5 in the review backlog).
 - `disableRetry()`: gRPC can retry on its own from configuration. Turned off so OutboxProcessor is the only retry layer (5 fast, then every 10 minutes). `noAnswer_bankSeesExactly5CallsPerRound` asserts exactly 5 calls per round.
 

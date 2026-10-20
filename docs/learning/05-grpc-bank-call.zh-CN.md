@@ -59,7 +59,7 @@
 - **断线重连**：连接断了，gRPC 按退避时间（大约 1 秒、1.6 秒、2.6 秒……）重连。默认（fail-fast）在等重连的时候，新调用**立刻失败**。
 - `withWaitForReady()`：连不上时把调用排队，等到连接好了再发，最多等到 deadline。Christy 定的：加上。
   - 实测（`bankBriefRestart_paymentStillCompletes`，bank 停 1.5 秒）：不加的时候，先白费 2–3 次 UNKNOWN，再成功；加了以后，第一次调用就成功。
-  - **这个测试拦不住"去掉 waitForReady"**：不加的话，5 次快速重试里也赶上了重连，测试照样绿。它证明的是"停 1.5 秒照样能付成功"，不是"waitForReady 必不可少"。
+  - 测试第一版只断言"最后付成功了"，去掉 waitForReady 也是绿的。审查（#5）之后加了一条：这个键的日志里不能出现"结果未知"。只数假 bank 收到几次不够：fail-fast 的调用根本到不了 bank。改坏检查 3 次都红（有一次直接掉进 PAY_UNKNOWN）。
   - 代价：bank 长时间挂掉时，每次调用都要等满 5 秒，一个 PAY 任务 5 次大约 27 秒（和 09 里的 A#5 同一类问题）。
 - `disableRetry()`：gRPC 自带重试，可以按配置自动重发。这里关掉，让 OutboxProcessor 成为唯一一层重试（5 次快速，然后每 10 分钟）。测试 `noAnswer_bankSeesExactly5CallsPerRound` 断言一轮正好 5 次。
 
