@@ -1,6 +1,8 @@
 package com.comp5348.delivery.events;
 
 import com.comp5348.contracts.events.EventEnvelope;
+import com.comp5348.contracts.events.payload.DeliveryEventPayload;
+import com.comp5348.contracts.events.EventCodec;
 import com.comp5348.contracts.events.OrderEventType;
 import com.comp5348.contracts.events.Topics;
 import com.comp5348.contracts.events.payload.OrderCancelledPayload;
@@ -19,6 +21,7 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.math.BigDecimal;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
@@ -76,6 +79,8 @@ class OrderEventsConsumerIntegrationTest extends DeliveryIntegrationTest {
     /**
      * B6：取消先到（取消标记），OrderPaid 迟到 → 跳过，不建单。
      * 设计：时序图 C"orderId 已存在且是 CANCELLED，跳过，不建单"。
+     * 【4b 审查 #2 改过期望】以前断言"只有一条 Cancelled"。现在 OrderPaid 撞上 CANCELLED 行时，delivery 要再发一条
+     *   Cancelled（见下面 B13）：store 那边如果订单已经取消，会按"状态不倒退"跳过它，所以正常情况下多一条无害。
      */
     @Test
     void orderPaid_afterCancelMarker_isSkipped() throws Exception {
@@ -88,7 +93,33 @@ class OrderEventsConsumerIntegrationTest extends DeliveryIntegrationTest {
         assertThat(rowsOf(orderId)).isEqualTo(1);
         assertThat(deliveryOf(orderId).getDeliveryStatus()).isEqualTo(DeliveryStatus.CANCELLED);
         Thread.sleep(1_000);
-        assertThat(eventTypesOf(orderId)).as("只有取消标记的 Cancelled，没有 DeliveryCreated").containsExactly("Cancelled");
+        assertThat(awaitEventTypes(orderId, 2)).as("取消标记的 Cancelled + 撞上标记后再发的 Cancelled，没有 DeliveryCreated")
+                .containsExactly("Cancelled", "Cancelled");
+    }
+
+    /**
+     * B13（4b 审查 #2，钱）：取消标记在订单付款之前就被插进来了（/internal/... 没有鉴权，订单号是自增的，可以猜；
+     * 或者标记发出的 Cancelled 在 store 那边因为订单还不存在进了 DLT）。之后这单真的付了款 → OrderPaid 撞上标记 → 不建单。
+     * 应该怎样：delivery 这时【再发一条】Cancelled（deliveryId 为空，和取消标记一样）。
+     *   store 收到时订单是 PAID → 按 A11 补完取消 + 退款；订单已经取消 → 状态不倒退，跳过。
+     * 旧代码错在哪：只打一行 INFO 就跳过。标记的那条 Cancelled 早就被 store 丢掉了（订单当时不存在或还没付款），
+     *   之后再没有任何事件告诉 store → 订单永远停在 PAID：不发货，也不退款。
+     */
+    @Test
+    void orderPaid_hittingAnEarlierCancelMarker_publishesCancelledAgain() throws Exception {
+        String orderId = newOrderId();
+        mvc().perform(post("/internal/deliveries/cancel-by-order/" + orderId)); // 订单还没付款（甚至还不存在）就被插了标记
+        awaitEventTypes(orderId, 1); // 标记的 Cancelled 已经发出去了（store 当时处理不了它）
+
+        RecordMetadata paid = publishOrderEvent(orderPaid(orderId));
+        awaitConsumedByDelivery(paid);
+
+        assertThat(rowsOf(orderId)).as("还是不建单").isEqualTo(1);
+        awaitEventTypes(orderId, 2); // 红灯时等满 10 秒还是只有 1 条
+        List<EventEnvelope> events = kafka.recordsOfOrder(Topics.DELIVERY_EVENTS, orderId).stream().map(r -> parse(r)).toList();
+        assertThat(events).extracting(EventEnvelope::eventType).containsExactly("Cancelled", "Cancelled");
+        DeliveryEventPayload again = EventCodec.payload(events.get(1), DeliveryEventPayload.class);
+        assertThat(again.deliveryId()).as("和取消标记一样不带配送单号：store 不拿它和订单比").isNull();
     }
 
     /**
