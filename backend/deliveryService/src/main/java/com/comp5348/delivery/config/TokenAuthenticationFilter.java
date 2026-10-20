@@ -37,10 +37,9 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
         
         // Skip publicly accessible endpoints
         String path = request.getRequestURI();
-        if (path.startsWith("/api/deliveries/create") || 
-            path.startsWith("/api/deliveries/webhook") ||
-            // Internal call: cancel delivery by order ID (called by StoreService), allow without token
-            path.startsWith("/api/deliveries/cancel-by-order") ||
+        // (/api/deliveries/create and /api/deliveries/cancel-by-order are gone in wave 2 step 4b: deliveries come from
+        // OrderPaid on Kafka, and store cancels through /internal/deliveries/..., which this filter does not cover)
+        if (path.startsWith("/api/deliveries/webhook") ||
             path.startsWith("/actuator")) {
             filterChain.doFilter(request, response);
             return;

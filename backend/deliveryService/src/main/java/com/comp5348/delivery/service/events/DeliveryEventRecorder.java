@@ -32,10 +32,23 @@ public class DeliveryEventRecorder {
     /** The delivery has just entered its current status: record the matching event */
     @Transactional(propagation = Propagation.MANDATORY)
     public void recordStatus(Delivery delivery) {
+        record(delivery, delivery.getId());
+    }
+
+    /**
+     * A cancel arrived before OrderPaid, so a cancel marker row was inserted instead of a delivery.
+     * Its Cancelled event carries deliveryId null (the contract allows it): there is no delivery to point at.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordCancelMarker(Delivery marker) {
+        record(marker, null);
+    }
+
+    private void record(Delivery delivery, Long deliveryId) {
         DeliveryEventType type = DeliveryEventType.fromStatus(delivery.getDeliveryStatus().name());
         Instant now = Instant.now();
         EventEnvelope envelope = new EventEnvelope(UUID.randomUUID(), type.wireName(), delivery.getOrderId(), now,
-                EventCodec.toTree(new DeliveryEventPayload(delivery.getId(), type.deliveryStatus())));
+                EventCodec.toTree(new DeliveryEventPayload(deliveryId, type.deliveryStatus())));
 
         EventOutbox row = new EventOutbox();
         row.setEventId(envelope.eventId());

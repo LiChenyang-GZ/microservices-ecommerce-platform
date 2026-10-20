@@ -1,5 +1,9 @@
 package comp5348.storeservice.service;
 
+import com.comp5348.contracts.events.OrderEventType;
+import com.comp5348.contracts.events.payload.OrderCancelledPayload;
+import comp5348.storeservice.events.OrderEventRecorder;
+
 import comp5348.storeservice.adapter.DeliveryAdapter;
 import comp5348.storeservice.adapter.EmailAdapter;
 import comp5348.storeservice.dto.*;
@@ -51,6 +55,9 @@ public class OrderService {
 
     @Autowired
     private WarehouseService warehouseService;
+
+    @Autowired
+    private OrderEventRecorder orderEventRecorder;
 
     /**
      * Get all orders list
@@ -189,52 +196,62 @@ public class OrderService {
                     order == null ? "missing" : order.getStatus());
             return false;
         }
-        cancelOrder(orderId); // same transaction; the row is already locked by us
+        cancelOrder(orderId, CANCEL_TIMEOUT); // same transaction; the row is already locked by us
         return true;
     }
 
-    /**
-     * Cancel order (logic mostly unchanged, excellent)
-     */
+    /** OrderCancelled reasons (contract OrderCancelledPayload) */
+    public static final String CANCEL_USER = "USER_REQUEST";
+    public static final String CANCEL_TIMEOUT = "PAYMENT_TIMEOUT";
+
+    /** The user cancels an order */
     public OrderDTO cancelOrder(Long orderId) {
-        // ... Your cancel order logic hardly needs modification because it already works based on inventoryTransactionIds in the Order entity.
-        // I only made minor adjustments
+        return cancelOrder(orderId, CANCEL_USER);
+    }
+
+    /**
+     * Cancel an order (the design's cancel API section).
+     *
+     * A PAID order may already be on delivery's side, whether or not store has heard DeliveryCreated yet
+     * (C6: the deliveryId arrives later on Kafka). So store always asks delivery first, synchronously:
+     *   agreed (CANCELLED_BEFORE_CREATED / CANCELLED / ALREADY_CANCELLED) → cancel here, refund, OrderCancelled
+     *   too late (409, already picked up)                                → refuse
+     *   no answer / 5xx                                                   → refuse, try again later: we do not
+     *                                                                       know whether delivery stopped it
+     * An unpaid order (PENDING_PAYMENT, including PAY_UNKNOWN) cannot have a delivery yet: no call. Its
+     * OrderCancelled makes delivery leave a cancel marker, in case the charge lands later (C7).
+     */
+    public OrderDTO cancelOrder(Long orderId, String cancelReason) {
         logger.info("Cancelling order: {}", orderId);
 
         // Lock the order row first (then the payment row inside requestRefund): a charge result arriving
         // at the same moment waits for us, then sees CANCELLED and writes the refund itself (rule 1).
+        // The lock is held while we ask delivery (at most its 5 s timeout); accepted, see C8.
         Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
 
-        // Cannot cancel if already picked up, in transit, delivered, or cancelled
-        if (order.getStatus() == OrderStatus.PICKED_UP ||
-            order.getStatus() == OrderStatus.IN_TRANSIT ||
-            order.getStatus() == OrderStatus.DELIVERED ||
-            order.getStatus() == OrderStatus.CANCELLED) {
+        if (!CANCELLABLE.contains(order.getStatus())) {
             throw new RuntimeException("Cannot cancel order with status: " + order.getStatus());
         }
 
-        // Only try to cancel delivery if one exists (order has been paid and delivery created)
-        if (order.getDeliveryId() != null) {
-            try {
-                boolean cancelled = deliveryAdapter.cancelByOrderId(String.valueOf(order.getId()));
-                if (!cancelled) {
-                    throw new RuntimeException("Cannot cancel after pickup - delivery is already in progress");
-                }
-                logger.info("Delivery cancelled successfully for order: {}", orderId);
-            } catch (Exception e) {
-                // If delivery exists but can't be cancelled, stop the entire cancellation
-                logger.error("Cannot cancel order {}: delivery cancellation failed: {}", orderId, e.getMessage());
-                throw new RuntimeException("Cannot cancel order: " + e.getMessage());
+        if (order.getStatus() == OrderStatus.PAID || order.getStatus() == OrderStatus.PROCESSING) {
+            DeliveryAdapter.CancelAnswer answer = deliveryAdapter.cancelByOrderId(String.valueOf(order.getId()));
+            switch (answer) {
+                case AGREED -> logger.info("Delivery agreed to cancel order {}", orderId);
+                case TOO_LATE -> throw new RuntimeException("Cannot cancel after pickup - delivery is already in progress");
+                case UNAVAILABLE -> throw new RuntimeException("Cannot cancel right now, the delivery service did not answer. Please try again later");
             }
-        } else {
-            logger.info("No delivery exists for order: {}, skipping delivery cancellation", orderId);
         }
 
-        Order savedOrder = finishCancel(order, "User cancelled");
+        Order savedOrder = finishCancel(order, "User cancelled", cancelReason);
         logger.info("Order cancelled successfully");
         return convertToDTO(savedOrder);
     }
+
+    /** States a cancel is still possible from: before payment, and paid but not picked up */
+    private static final java.util.Set<OrderStatus> CANCELLABLE = java.util.EnumSet.of(
+            OrderStatus.PENDING_STOCK_HOLD, OrderStatus.PLACED, OrderStatus.PENDING_PAYMENT,
+            OrderStatus.PAID, OrderStatus.PROCESSING);
 
     /**
      * The part of a cancel that happens in store once delivery has agreed (or there is no delivery yet):
@@ -242,7 +259,7 @@ public class OrderService {
      * The caller has locked the order row and runs the transaction. Used by cancelOrder (user) and by
      * DeliveryEventService when a Cancelled event arrives for an order store still thinks is paid.
      */
-    public Order finishCancel(Order order, String reason) {
+    public Order finishCancel(Order order, String reason, String cancelReason) {
         Long orderId = order.getId();
         // Rollback inventory
         try {
@@ -263,6 +280,8 @@ public class OrderService {
 
         order.setStatus(OrderStatus.CANCELLED);
         Order savedOrder = orderRepository.save(order);
+        // OrderCancelled in the same transaction (rule 2). For an unpaid order, delivery inserts a cancel marker.
+        orderEventRecorder.record(orderId, OrderEventType.ORDER_CANCELLED, new OrderCancelledPayload(cancelReason));
 
         // Money: only write a REFUND task (same transaction as the cancel). OutboxProcessor calls bank.
         // A payment that is still PENDING / PAY_UNKNOWN is left alone: the money may be moving right now.

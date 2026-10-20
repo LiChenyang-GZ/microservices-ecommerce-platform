@@ -92,7 +92,7 @@ public class DeliveryEventService {
             case CANCELLED -> {
                 // Delivery cancelled but the order is still paid: store committed nothing (crash after the cancel
                 // call, a timed-out call, or the user cancelled on the delivery page). Finish the cancel here.
-                orderService.finishCancel(order, "Cancelled by delivery");
+                orderService.finishCancel(order, "Cancelled by delivery", OrderService.CANCEL_USER);
             }
             case DELIVERY_CREATED -> { } // rank 0, never above current; handled by the deliveryId line above
         }

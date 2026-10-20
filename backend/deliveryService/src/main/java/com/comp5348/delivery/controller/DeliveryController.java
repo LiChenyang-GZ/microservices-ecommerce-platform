@@ -1,7 +1,6 @@
 package com.comp5348.delivery.controller;
 
 import com.comp5348.delivery.dto.DeliveryOrderDTO;
-import com.comp5348.delivery.dto.DeliveryRequest;
 import com.comp5348.delivery.service.DeliveryService;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,35 +23,13 @@ public class DeliveryController {
         this.deliveryService = deliveryService;
     }
 
-    /**
-     * API endpoint to create delivery task
-     * @param request JSON request body containing delivery information
-     * @return Response containing created task information
-     */
-    @PostMapping("/create") // Responds to POST request, URL is /api/deliveries/create
-    public ResponseEntity<DeliveryOrderDTO> createDelivery(
-            @RequestBody DeliveryRequest request // @RequestBody tells Spring to automatically convert JSON content to DeliveryRequest object
-    ) {
-        // Call Service layer to handle business logic
-        DeliveryOrderDTO createdOrder = deliveryService.createDelivery(request);
-
-        // Return HTTP 201 Created response with created order information in response body
-        return ResponseEntity.status(HttpStatus.CREATED).body(createdOrder);
-    }
-
-    /**
-     * API endpoint to create delivery tasks in batch
-     */
-    @PostMapping("/create/batch")
-    public ResponseEntity<List<DeliveryOrderDTO>> createDeliveryBatch(@RequestBody List<DeliveryRequest> requests) {
-        List<DeliveryOrderDTO> createdOrders = deliveryService.createDeliveryBatch(requests);
-        return ResponseEntity.status(HttpStatus.CREATED).body(createdOrders);
-    }
+    // POST /create and /create/batch are gone (wave 2 step 4b): a delivery is created only when delivery reads
+    // OrderPaid from Kafka. A second way in could create deliveries for unpaid orders.
 
     /**
      * API endpoint to get single delivery task by ID (can only get own orders)
      */
-    @GetMapping("/{deliveryId}")
+    @GetMapping("/{deliveryId:[0-9]+}") // digits only, so a POST to a removed path like /create is a plain 404
     public ResponseEntity<?> getDeliveryOrder(
             @PathVariable Long deliveryId,
             HttpServletRequest request) {
@@ -91,16 +68,8 @@ public class DeliveryController {
         return ResponseEntity.ok(deliveryOrders);
     }
 
-    /**
-     * Internal call: Cancel delivery by order ID (only CREATED can be cancelled)
-     */
-    @PostMapping("/cancel-by-order/{orderId}")
-    public ResponseEntity<?> cancelByOrderId(@PathVariable String orderId) {
-        boolean ok = deliveryService.cancelByOrderId(orderId);
-        if (ok) return ResponseEntity.ok().build();
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body("Cannot cancel after pickup or delivery not found");
-    }
+    // POST /cancel-by-order/{orderId} is gone too: store now calls POST /internal/deliveries/cancel-by-order/{orderId}
+    // (InternalDeliveryController), which can tell "too late" from "no delivery yet".
 
     /**
      * Compatible with old API endpoint (deprecated, kept for backward compatibility)

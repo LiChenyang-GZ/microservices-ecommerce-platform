@@ -68,34 +68,6 @@ public class OutboxService {
     }
 
     /**
-     * Create payment success event
-     */
-    @Transactional
-    public void createPaymentSuccessEvent(Long orderId, String bankTxnId) {
-        logger.info("Creating PAYMENT_SUCCESS event for orderId={}", orderId);
-
-        try {
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("orderId", orderId);
-            payload.put("bankTxnId", bankTxnId);
-
-            PaymentOutbox outbox = new PaymentOutbox();
-            outbox.setOrderId(orderId);
-            // Consistently use PaymentStatus enum name
-            outbox.setEventType(PaymentStatus.SUCCESS.name());
-            outbox.setPayload(objectMapper.writeValueAsString(payload));
-            outbox.setStatus("PENDING");
-            outbox.setRetryCount(0);
-
-            outboxRepository.save(outbox);
-            logger.info("PAYMENT_SUCCESS event created for orderId={}", orderId);
-
-        } catch (Exception e) {
-            logger.error("Failed to create PAYMENT_SUCCESS event: {}", e.getMessage(), e);
-        }
-    }
-
-    /**
      * Create payment failed event
      */
     @Transactional
@@ -150,24 +122,4 @@ public class OutboxService {
             logger.error("Failed to create REFUND_SUCCESS event: {}", e.getMessage(), e);
         }
     }
-
-    @Transactional
-    public void createDeliveryFailedEvent(Long orderId, String reason) throws JsonProcessingException {
-        logger.info("Creating DELIVERY_FAILED event for orderId: {}", orderId);
-
-        PaymentOutbox outboxMessage = new PaymentOutbox();
-        outboxMessage.setOrderId(orderId);
-        outboxMessage.setEventType(PaymentStatus.DELIVERY_FAILED.name()); // Use Enum
-
-        // Construct payload
-        Map<String, Object> payload = new HashMap<>();
-        payload.put("orderId", orderId);
-        payload.put("reason", reason);
-
-        outboxMessage.setPayload(objectMapper.writeValueAsString(payload));
-
-        outboxRepository.save(outboxMessage);
-    }
 }
-
-
