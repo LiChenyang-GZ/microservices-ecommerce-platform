@@ -2,7 +2,7 @@
 
 **English** | [中文](06-kafka-delivery-events.zh-CN.md)
 
-> Commits: `d1d5638 test(red)` → `feat` (wave 2 A · 4a, branch `claude/wave2-kafka-656c13`)
+> Commits: `d1d5638 test(red)` → `f3483f0 feat` (wave 2 A · 4a, branch `claude/wave2-kafka-656c13`)
 > Replay time: **60 minutes** (many concepts: outbox publishing, advisory lock, consumer groups, two kinds of failure + DLT)
 > Before this: [00 · Event contract](00-event-contract.md) (envelope, `EventCodec`), [01 · Idempotent payments](01-idempotent-payments.md) (payment_outbox, lock order), [03 · Go tracking consumer](03-go-tracking-consumer.md) (consumer groups, offsets).
 > Failure-scenario table: Obsidian `开发/电商项目/17-第2波A-Kafka-失败场景表.md` (groups P, A, D, E).
@@ -163,7 +163,7 @@ Also changed (outside the table, reported):
 | ➕ `lock_timeout` | `DeliveryEventService.java:60` | a lock wait becomes a retryable error instead of hanging on a connection |
 | ➕ `auto.offset.reset` | `earliest` | a new group reads from the start; the default latest drops earlier events |
 | ➕ DLT naming / partition | `KafkaConsumerConfig.java:61` | Spring's default is `-dlt` and the same partition → a DLT needs at least as many partitions |
-| ➕ test context caching | `@DirtiesContext` on `DeliveryEventsErrorKindsIntegrationTest` | cached contexts keep their consumers alive and steal messages |
+| ➕ test context caching / stubbing race | `@DirtiesContext` and `latest` on `DeliveryEventsErrorKindsIntegrationTest` | cached contexts keep their consumers alive and steal messages; never stub a spy that background threads are calling |
 
 Scenario anchors:
 - "Delivery used to call store back over a webhook. If the call was lost, store never knew the parcel moved. Now the status change and its event commit in one transaction, and a publisher sends the event to Kafka."
@@ -212,7 +212,7 @@ Scenario anchors:
 <details><summary>Answer</summary>Every delivery event means "entered a status"; the same status again is never above the current one, so it is skipped. Not enough when an event is not a state change ("add one item", "add points"): processing it twice adds twice — then you need an eventId table or unique constraint (as tracking does).</details>
 
 3. `codeBug_retriedFewTimes_thenDlt` passed alone but failed with the other tests. Why, and how was it fixed?
-<details><summary>Answer</summary>Spring caches test contexts. Earlier test classes' contexts were still alive and their consumers were also in group "store", so they took some partitions. The "bug" event went to another context (whose repository was not the spy and did not throw), so no retries or DLT appeared. Fix: this class uses its own consumer group and <code>@DirtiesContext</code>, so its context closes afterwards and does not steal later tests' messages.</details>
+<details><summary>Answer</summary>Spring caches test contexts. Earlier test classes' contexts were still alive and their consumers were also in group "store", so they took some partitions. The "bug" event went to another context (whose repository was not the spy and did not throw), so no retries or DLT appeared. Fix: this class uses its own consumer group and <code>@DirtiesContext</code>, so its context closes afterwards and does not steal later tests' messages.<br>Then a second trap: the new group started at <code>earliest</code> and replayed dozens of old events; Mockito stubbing of a spy is <b>not thread-safe</b>, and while the test thread was stubbing, a consumer thread called the same spy, so the stub landed on another order. Second fix: this group starts at <code>latest</code>, and the test waits until all 3 consumers have partitions before publishing.</details>
 
 ---
 

@@ -2,7 +2,7 @@
 
 [English](06-kafka-delivery-events.md) | **中文**
 
-> 对应 commit：`d1d5638 test(red)` → `feat`（第 2 波 A · 4a，分支 `claude/wave2-kafka-656c13`）
+> 对应 commit：`d1d5638 test(red)` → `f3483f0 feat`（第 2 波 A · 4a，分支 `claude/wave2-kafka-656c13`）
 > 预计回放时间：**60 分钟**（概念多：outbox 投递、咨询锁、消费者组、两种失败 + DLT）
 > 前置：[00 · 事件契约](00-event-contract.zh-CN.md)（外壳、`EventCodec`）、[01 · 幂等扣款与退款](01-idempotent-payments.zh-CN.md)（payment_outbox、加锁顺序）、[03 · Go tracking 消费者](03-go-tracking-consumer.zh-CN.md)（消费者组、offset）。
 > 失败场景表：Obsidian `开发/电商项目/17-第2波A-Kafka-失败场景表.md`（P、A、D、E 组）。
@@ -163,7 +163,7 @@ store · DeliveryEventsConsumer.onDeliveryEvent（3 个线程，组 store）    
 | ➕ `lock_timeout` | `DeliveryEventService.java:60` | 等锁超时变成可重试的异常，不会永远挂着占连接 |
 | ➕ `auto.offset.reset` | `earliest` | 新组从头读；默认 latest 会丢启动前的事件 |
 | ➕ DLT 命名 / 分区 | `KafkaConsumerConfig.java:61` | Spring 默认 `-dlt`、同分区号 → DLT 分区数不能少于原 topic |
-| ➕ 测试上下文缓存 | `DeliveryEventsErrorKindsIntegrationTest` 的 `@DirtiesContext` | Spring 缓存的旧上下文里消费者还活着，会抢消息 |
+| ➕ 测试上下文缓存 / 打桩竞争 | `DeliveryEventsErrorKindsIntegrationTest` 的 `@DirtiesContext`、`latest` | Spring 缓存的旧上下文里消费者还活着，会抢消息；后台线程在调的间谍不能边跑边打桩 |
 
 英文场景锚点：
 - "Delivery used to call store back over a webhook. If the call was lost, store never knew the parcel moved. Now the status change and its event commit in one transaction, and a publisher sends the event to Kafka."
@@ -212,7 +212,7 @@ store · DeliveryEventsConsumer.onDeliveryEvent（3 个线程，组 store）    
 <details><summary>答案</summary>每个配送事件的意思都是"进入某个状态"，同一状态再来一次不会"高于"当前状态，所以直接跳过。不够的情况：事件本身不是状态变化（比如"加一件商品""扣一次积分"），重复处理会累加——那就需要 eventId 去重表或唯一约束（tracking 就是这么做的）。</details>
 
 3. 测试 `codeBug_retriedFewTimes_thenDlt` 单独跑能过，和其他测试一起跑却失败了。为什么？怎么修的？
-<details><summary>答案</summary>Spring 测试会缓存上下文，前面测试类的上下文还活着，它们的消费者也在 "store" 组里，分走了分区。"埋 bug"的那条事件被别的上下文拿走（那边的仓库不是 spy，不抛异常），就看不到重试和 DLT。修法：这个类用自己的消费者组，并且 <code>@DirtiesContext</code>，跑完就关掉，免得它反过来抢后面测试的消息。</details>
+<details><summary>答案</summary>Spring 测试会缓存上下文，前面测试类的上下文还活着，它们的消费者也在 "store" 组里，分走了分区。"埋 bug"的那条事件被别的上下文拿走（那边的仓库不是 spy，不抛异常），就看不到重试和 DLT。修法：这个类用自己的消费者组，并且 <code>@DirtiesContext</code>，跑完就关掉，免得它反过来抢后面测试的消息。<br>后来又踩一次：新组用 <code>earliest</code>，一启动就重放几十条旧事件；Mockito 给间谍打桩<b>不是线程安全的</b>，测试线程打桩时消费者线程正好在调同一个间谍，桩挂到了别的订单上。再修：这个组用 <code>latest</code>，并且等 3 个消费者都分到分区再发事件。</details>
 
 ---
 

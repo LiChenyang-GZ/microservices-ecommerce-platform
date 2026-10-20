@@ -2,6 +2,7 @@ package comp5348.storeservice.events;
 
 import comp5348.storeservice.repository.OrderRepository;
 import comp5348.storeservice.support.DeliveryEventsTestBase;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.TransientDataAccessResourceException;
 import org.springframework.test.annotation.DirtiesContext;
@@ -40,8 +41,23 @@ import static org.mockito.Mockito.verify;
  *   后面测试类发的事件（同一个数据库），抢先改掉订单、把坏消息再写一次 DLT。所以这个类跑完就关掉它的上下文。
  */
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_CLASS)
-@TestPropertySource(properties = "spring.kafka.consumer.group-id=store-error-kinds-test")
+@TestPropertySource(properties = {
+        "spring.kafka.consumer.group-id=" + DeliveryEventsErrorKindsIntegrationTest.GROUP,
+        // 新组不从头读：否则它一启动就把前面测试类留在 topic 里的几十条旧事件重放一遍。
+        // 重放期间消费者线程一直在调间谍，而 Mockito 给间谍打桩不是线程安全的 —— 测试线程打桩的那一刻
+        // 消费者线程正好也在调它，桩就会挂到别的订单上（2026-10-20 全量跑时真的发生过）。
+        // "新组要从头读"由 FreshEnvironmentIntegrationTest 单独证明。
+        "spring.kafka.consumer.auto-offset-reset=latest"
+})
 class DeliveryEventsErrorKindsIntegrationTest extends DeliveryEventsTestBase {
+
+    static final String GROUP = "store-error-kinds-test";
+
+    /** latest 起步：等 3 个消费者都分到分区再发事件，否则事件会被当成"组出现之前的"跳过 */
+    @BeforeEach
+    void waitForConsumers() {
+        kafka.awaitGroupStable(GROUP, 3, Duration.ofSeconds(30));
+    }
 
     @MockitoSpyBean
     OrderRepository orderRepositorySpy;

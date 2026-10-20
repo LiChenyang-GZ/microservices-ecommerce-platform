@@ -153,6 +153,21 @@ public final class KafkaProbe {
         }
     }
 
+    /**
+     * 等到某个消费者组稳定下来、有 members 个消费者（每人分到了分区）。
+     * 组用 latest 起步时要先等这个：分区还没分好就发的消息，分好后会被当成"过去的"跳过。
+     */
+    public void awaitGroupStable(String group, int members, Duration timeout) {
+        try (Admin admin = admin()) {
+            await().atMost(timeout).pollInterval(Duration.ofMillis(300)).until(() -> {
+                var description = admin.describeConsumerGroups(List.of(group)).all().get().get(group);
+                return description.state() == org.apache.kafka.common.ConsumerGroupState.STABLE
+                        && description.members().size() == members
+                        && description.members().stream().allMatch(m -> !m.assignment().topicPartitions().isEmpty());
+            });
+        }
+    }
+
     /** 消息头里的一个值（DLT 消息带着失败原因和原来的 topic，都在头里） */
     public static String header(ConsumerRecord<String, String> record, String name) {
         var h = record.headers().lastHeader(name);
