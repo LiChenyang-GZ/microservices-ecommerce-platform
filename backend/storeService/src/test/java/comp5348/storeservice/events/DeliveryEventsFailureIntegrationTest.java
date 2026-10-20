@@ -142,7 +142,7 @@ class DeliveryEventsFailureIntegrationTest extends DeliveryEventsTestBase {
     }
 
     /**
-     * D8（4a 审查 #2，钱）：Cancelled 补完取消时，要还的那行库存被别的事务锁着（比如同一件商品正好有人在下单）。
+     * D10（4a 审查 #2，钱）：Cancelled 补完取消时，要还的那行库存被别的事务锁着（比如同一件商品正好有人在下单）。
      * 等锁 5 秒超时 —— 这是暂时性故障，应该原地退避重试，锁放开后取消照常补完：订单 CANCELLED、退款 1 条、库存还回去。
      *
      * 旧代码错在哪：等锁超时的异常在 WarehouseService.unholdProduct 里（还有 OrderService.finishCancel 里）被 catch 吞掉，
