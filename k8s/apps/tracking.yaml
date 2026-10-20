@@ -57,7 +57,8 @@ spec:
             - secretRef: { name: tracking }
           ports:
             - containerPort: 8085
-          # /healthz: the process answers. /readyz: its dependencies are reachable.
+          # /healthz: the process answers. /readyz: the database answers (not Kafka:
+          # Kafka down only delays events, the same rule as the Java services).
           livenessProbe:
             httpGet: { path: /healthz, port: 8085 }
             periodSeconds: 10
