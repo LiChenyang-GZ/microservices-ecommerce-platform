@@ -144,6 +144,35 @@ class BankCallIntegrationTest extends StoreIntegrationTest {
     }
 
     /**
+     * 审查 #2（待确认 → 这个测试就是确认）：store 关机时，正在调 bank 的定时任务线程被中断。
+     * 怀疑会出什么错：Spring 关机时对定时任务线程池 shutdownNow() → 线程被中断。gRPC 的 blocking stub 会响应中断，
+     *   这次调用立刻变成 CANCELLED（= UNKNOWN）；中断标志还在，重试之间的 Thread.sleep 也立刻返回，
+     *   后面几次调用也马上被取消 → 5 次快速重试几毫秒就烧完 → PAY_UNKNOWN + 一条假告警，重启后要等 10 分钟。
+     *   以前 HTTP 的 HttpURLConnection 不理中断，那次调用会正常拿到结果。
+     * 怎么造：假 bank 每次慢 3 秒才回成功；另起一个线程跑一轮 OutboxProcessor，1 秒后中断它。
+     * 要的行为：不会因为一次中断就把 5 次重试烧完、变成 PAY_UNKNOWN。钱的安全不受影响（同一个键）。
+     */
+    @Test
+    void interruptedDuringCall_doesNotBurnFastRetries() throws InterruptedException {
+        PlacedOrder order = placeOrder();
+        bankTransferSucceedsSlowly(3_000);
+
+        // 另一个线程跑一轮 OutboxProcessor（就像 Spring 的定时任务线程）
+        Thread scheduler = new Thread(() -> outboxProcessor.processOutbox());
+        scheduler.start();
+        // 1 秒后：第一次调用还在等 bank（要 3 秒），这时中断它（就像关机）
+        Thread.sleep(1_000);
+        scheduler.interrupt();
+        scheduler.join(30_000);
+        assertThat(scheduler.isAlive()).as("前提：这一轮已经跑完").isFalse();
+
+        // 断言 1：没有把 5 次快速重试全部用掉
+        assertThat(transferRequests()).as("一次中断不该烧掉 5 次重试").hasSizeLessThan(5);
+        // 断言 2：没有因为关机就变成 PAY_UNKNOWN（那样会发假告警，还要等 10 分钟才重试）
+        assertThat(paymentOf(order).getStatus()).as("关机 ≠ bank 没回答").isNotEqualTo(PaymentStatus.PAY_UNKNOWN);
+    }
+
+    /**
      * 第 20 行：请求里某个字段是 null，适配器也不能抛异常，要让 bank 去判断。
      * 会出什么错：protobuf 生成的 setter 遇到 null 直接抛 NullPointerException。异常飞出适配器后，
      *   OutboxProcessor 只记一条日志，任务每 5 秒重试一次，**永远不进 PAY_UNKNOWN、也不告警**。
