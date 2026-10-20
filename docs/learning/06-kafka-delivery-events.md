@@ -37,7 +37,7 @@
   public void recordStatus(Delivery delivery) { ... outboxRepository.save(row); }
   ```
   `MANDATORY` = a transaction **must** already exist, otherwise it throws. Nobody can "forget the transaction" and let the event commit on its own.
-- Callers: create [DeliveryService.java:79](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L79), cancel `:150` `:181` `:278` (and the cancel marker `:270`, part 2), each worker step [DeliveryStatusUpdateService.java:114](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/DeliveryStatusUpdateService.java#L114).
+- Callers: create [DeliveryService.java:89](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L89), cancel `:150` `:181` `:278` (and the cancel marker `:270`, part 2), each worker step [DeliveryStatusUpdateService.java:114](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/DeliveryStatusUpdateService.java#L114).
 - If a worker step collides with a cancel (`@Version` conflict), the whole transaction rolls back **and so does that step's event** — no "picked up" goes out for a cancelled delivery (test `cancelDuringWorkerStep_onlyCancelledIsPublished`).
 
 ### 2.2 Publisher + transaction-level advisory lock (`pg_try_advisory_xact_lock`)
@@ -72,15 +72,15 @@
   - `concurrency=3`: three consumers, one partition each. One stuck partition does not stop the other two (review C medium 1, test `stuckPartition_doesNotBlockOtherPartitions`).
 
 ### 2.5 Status never goes backwards = store's de-duplication
-- Code: [DeliveryEventService.java:73](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L73)
+- Code: [DeliveryEventService.java:74](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L74)
   ```java
   if (rank(event) <= current) { logger.info("Skipping ..."); return; }
   ```
 - Ranks: PAID(0) < PICKED_UP(1) < IN_TRANSIT(2) < final DELIVERED / LOST / CANCELLED / REFUNDED(3). An unpaid order is -1: a delivery event for it raises an ALERT and changes nothing (question 8).
 - One rule covers two cases: a **duplicate** is never "above" itself, and a **late** old status is never above the newer one.
-- One transaction: `SET LOCAL lock_timeout = '5s'` → lock the order row (`findByIdForUpdate`) → change status → for Lost, write a REFUND task ([:90](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L90)). The consumer **never calls bank** (rule 1, enforced by the architecture test).
+- One transaction: `SET LOCAL lock_timeout = '5s'` → lock the order row (`findByIdForUpdate`) → change status → for Lost, write a REFUND task ([:90](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L91)). The consumer **never calls bank** (rule 1, enforced by the architecture test).
 - Cancelled arriving while the order is still PAID → `OrderService.finishCancel` (stock back, CANCELLED, REFUND task), the same code a user cancel runs.
-- Emails go out in `afterCommit` ([:112](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L112)): a rolled-back, retried transaction does not send a second one.
+- Emails go out in `afterCommit` ([:112](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L124)): a rolled-back, retried transaction does not send a second one.
 
 ### 2.6 Two kinds of failure + DLT: `DefaultErrorHandler`
 - Code: [KafkaConsumerConfig.java:61](../../backend/storeService/src/main/java/comp5348/storeservice/events/KafkaConsumerConfig.java#L61). Spring Boot hands this bean to every `@KafkaListener` container.
@@ -262,7 +262,7 @@ Scenario anchors:
 | OrderPlaced | [OrderProductService.java:108](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderProductService.java#L108) | same transaction as the order, the stock hold and the PAY task |
 | OrderPaid | [PaymentService.java:271](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L271) | only on the "order not cancelled" branch; the payload carries everything delivery needs, so delivery never calls store |
 | PaymentFailed | [PaymentService.java:285](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L285) | only when bank definitely said no; a timeout (PAY_UNKNOWN) is **not** one (rule 7) |
-| OrderCancelled | [OrderService.java:284](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L284) | in `finishCancel`, which user cancel, the timeout and delivery's Cancelled all go through; reason `USER_REQUEST` / `PAYMENT_TIMEOUT` |
+| OrderCancelled | [OrderService.java:286](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L286) | in `finishCancel`, which user cancel, the timeout and delivery's Cancelled all go through; reason `USER_REQUEST` / `PAYMENT_TIMEOUT` |
 | OrderRefunded | [PaymentService.java:374](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L374) | reason worked out at [:442](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L442): order LOST → `DELIVERY_LOST`; charge after cancel → `PAID_AFTER_CANCEL`; else `ORDER_CANCELLED` |
 
 - **Why the publisher is not `@Scheduled`**: [EventOutboxPublisher.java:67](../../backend/storeService/src/main/java/comp5348/storeservice/events/EventOutboxPublisher.java#L67) implements `SmartLifecycle` and runs its own thread. Spring's default `taskScheduler` has **one thread**, shared by every `@Scheduled` method; an OutboxProcessor round calling bank can take seconds (fast retries), and events would wait behind it.
@@ -270,7 +270,7 @@ Scenario anchors:
   - Tried `@Scheduled(scheduler = "my bean")` next, then realised that **registering any `TaskScheduler` bean makes Spring Boot skip its default one** (**to be confirmed**: read from `@ConditionalOnMissingBean` on Boot's `TaskSchedulingConfigurations`, not tested in this project), so in production every scheduled task would share that one thread. Hence a private thread that is not a bean.
 
 ### 2.2 delivery: de-duplicate with a unique constraint + `ON CONFLICT DO NOTHING`
-- Creating: [DeliveryService.java:60](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L60)
+- Creating: [DeliveryService.java:61](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L61)
   ```sql
   INSERT INTO delivery (...) VALUES (..., 'CREATED', ...)
   ON CONFLICT (order_id) DO NOTHING
@@ -281,7 +281,7 @@ Scenario anchors:
 - Consumer settings and error handling copied from store: group `delivery`, `earliest`, `ack-mode=record`, 3 threads, the three kinds of failure in [KafkaConsumerConfig.java](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/events/KafkaConsumerConfig.java).
 
 ### 2.3 The cancel marker and the four answers of the cancel API
-- Code: [DeliveryService.java:261](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L261). **Insert first, then lock**:
+- Code: [DeliveryService.java:271](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L271). **Insert first, then lock**:
   ```java
   int inserted = jdbc.update("INSERT ... VALUES (0, ?, 'CANCELLED', ...) ON CONFLICT (order_id) DO NOTHING", ...);
   Delivery d = deliveryRepository.findByOrderIdForUpdate(orderId).orElseThrow();   // SELECT ... FOR UPDATE
@@ -299,7 +299,7 @@ Scenario anchors:
 - OrderCancelled (cancelled before payment) uses the same method. If it answers TOO_LATE, the two services disagree (store thinks unpaid, the parcel is moving): `ALERT`, no change ([OrderEventsConsumer.java:49](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/events/OrderEventsConsumer.java#L49)).
 
 ### 2.4 store cancel: a PAID order always asks delivery first
-- Code: [OrderService.java:238](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L238), [DeliveryAdapter.java:51](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/DeliveryAdapter.java#L51)
+- Code: [OrderService.java:243](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L243), [DeliveryAdapter.java:51](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/DeliveryAdapter.java#L51)
 
 | delivery says | store does |
 |---|---|
@@ -307,16 +307,26 @@ Scenario anchors:
 | 409 | refuse: "already picked up" |
 | 5xx / no answer (5 s timeout) | refuse: "try later". It **does not know** whether delivery stopped, so it must not refund first |
 
-- The condition changed from "`deliveryId != null`" to "the order is PAID". This is the heart of the 4b red (C6).
+- The condition changed from "`deliveryId != null`" to "the order is PAID". This is the heart of the 4b red (C6). **Changed again after review** (4b #1, see 2.7): decide by money. A SUCCESS payment, a known deliveryId, or status PAID / PROCESSING: any one means ask first.
 - The order row stays locked while store asks delivery (at most 5 seconds): consumers for that order wait. The design did not ask to change this; noted in 09 (C8).
 
 ### 2.5 Fixing delivery's old table at startup; sending the job after commit
 - [DeliverySchemaUpgrade.java:43](../../backend/deliveryService/src/main/java/com/comp5348/delivery/config/DeliverySchemaUpgrade.java#L43): `DROP NOT NULL` (a cancel marker has no address or email) + `CREATE UNIQUE INDEX IF NOT EXISTS`. Same timing as store's `OrderStatusCheckUpgrade`. **If the unique index cannot be built, startup fails**: without it, de-duplication would quietly stop working.
-- [DeliveryService.java:84](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L84): the RabbitMQ job goes out in `TransactionSynchronization.afterCommit`, once. What is left: a crash after commit and before the send leaves that delivery at CREATED (noted in 09).
+- [DeliveryService.java:94](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L94): the RabbitMQ job goes out in `TransactionSynchronization.afterCommit`, once. What is left: a crash after commit and before the send leaves that delivery at CREATED (noted in 09).
 
 ### 2.6 Removed
 - store: `DeliveryAdapter.createDelivery`, `CompensationService`, the create and 30-second compensation in OutboxProcessor, `DeliveryRequestDTO` / `DeliveryResponseDTO`. Leftover `SUCCESS` / `DELIVERY_FAILED` tasks in the database are closed with a WARN ([OutboxProcessor.java:249](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java#L249); question 4, option a: check for them by hand before upgrading).
 - delivery: `/api/deliveries/create`, `/create/batch`, the old `/api/deliveries/cancel-by-order`, and their entries in the token filter's allow-list. `GET /{deliveryId}` now matches digits only; otherwise `POST /create` matched it and answered 405 instead of 404.
+
+### 2.7 Fixes after the independent reviews (4a, 4b)
+Each one: a failing test first, then the fix. Ids are from the failure-scenario table (Obsidian note 17).
+| Review | Problem | Fix | Code |
+|---|---|---|---|
+| 4a #1 (A17) | A Cancelled after pick-up still finished the cancel and refunded (Cancelled is final, so "never go backwards" let it through) | Finish the cancel only while the order is PAID / PROCESSING and the delivery id matches; otherwise ALERT and skip | [DeliveryEventService.java:98](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L98) |
+| 4a #2 (D10) | A lock timeout while returning stock was swallowed; the transaction was already aborted, the next error looked like a bug, 5 retries, then the DLT: no refund | Stop swallowing: `unholdProduct` / `recordOutTransaction` rethrow, `finishCancel` has no try/catch; the lock timeout is seen as transient and retried in place | [OrderService.java:269](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L269), [WarehouseService.java:353](../../backend/storeService/src/main/java/comp5348/storeservice/service/WarehouseService.java#L353) |
+| 4b #1 (C10) | The order status can be set back to "unpaid" through an old endpoint with no auth, then the cancel refunds without asking delivery | Decide by money whether to ask delivery (see 2.4) | [OrderService.java:239](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L239) |
+| 4b #2 (B13) | A cancel marker arrived before payment and store dropped its Cancelled; the OrderPaid then hit the marker and the order stayed PAID forever | When OrderPaid hits a CANCELLED row, delivery publishes Cancelled again; store already handles repeats | [DeliveryService.java:77](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L77) |
+| 4b #3 | The delivery id check compared the id with itself (filled in from the same event first) | Compare with the id store knew before this event; if it knew none, do not compare (one delivery per order) | [DeliveryEventService.java:70](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L70) |
 
 ## 3. Request path (payment succeeds → delivery created; cancel right after paying)
 
@@ -378,7 +388,7 @@ store reads Cancelled → order already CANCELLED (never backwards), nothing to 
 **① F3 Idempotency: the same OrderPaid arrives twice**
 - Scenario: store's publisher sends OrderPaid, restarts before marking it sent, sends it again next round. delivery gets two identical OrderPaid.
 - Old code: `order_id` not unique, both `save(new Delivery(...))` → two deliveries → the worker moves both → the user gets emails for two parcels, the warehouse ships twice.
-- New code: [DeliveryService.java:66](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L66)
+- New code: [DeliveryService.java:67](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L67)
   ```sql
   INSERT INTO delivery (...) VALUES (...) ON CONFLICT (order_id) DO NOTHING
   ```
@@ -389,7 +399,7 @@ store reads Cancelled → order already CANCELLED (never backwards), nothing to 
 **② E3 A pessimistic lock cannot lock a missing row: cancel and OrderPaid at the same moment**
 - Scenario: the user cancels right after paying. In the same millisecond store calls delivery's cancel API, delivery's consumer is handling this order's OrderPaid.
 - If you `SELECT ... FOR UPDATE` first: neither side finds the row (not created yet), nothing gets locked → cancel inserts a marker, OrderPaid inserts a delivery → with a unique constraint one of them errors, without one both rows exist → the delivery ships.
-- New code: [DeliveryService.java:263](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L263) `INSERT ... ON CONFLICT DO NOTHING` first, then `findByOrderIdForUpdate`. The two INSERTs meet on the unique index; the second waits for the first to commit.
+- New code: [DeliveryService.java:273](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L273) `INSERT ... ON CONFLICT DO NOTHING` first, then `findByOrderIdForUpdate`. The two INSERTs meet on the unique index; the second waits for the first to commit.
 - Interview answer: "FOR UPDATE only locks rows that exist. To stop both sides thinking the row is missing, insert first, then lock, and let the unique index queue them. My test releases the cancel and the OrderPaid together with a CountDownLatch; ten orders, each ends with one CANCELLED row."
 - When **not**: the row always exists already (stock), plain FOR UPDATE is enough; or use SERIALIZABLE isolation, at the cost of handling retries.
 

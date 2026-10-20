@@ -37,7 +37,7 @@
   public void recordStatus(Delivery delivery) { ... outboxRepository.save(row); }
   ```
   `MANDATORY` = **必须**已经有一个事务，没有就抛异常。这样谁也不能"忘了开事务"、让事件单独提交。
-- 调用它的地方：建单 [DeliveryService.java:79](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L79)、取消 `:150` `:181` `:278`（还有取消标记 `:270`，见第二部分）、worker 每推进一步 [DeliveryStatusUpdateService.java:114](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/DeliveryStatusUpdateService.java#L114)。
+- 调用它的地方：建单 [DeliveryService.java:89](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L89)、取消 `:150` `:181` `:278`（还有取消标记 `:270`，见第二部分）、worker 每推进一步 [DeliveryStatusUpdateService.java:114](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/DeliveryStatusUpdateService.java#L114)。
 - worker 推进时如果撞上取消（`@Version` 冲突），整个事务回滚，**这一步的事件也一起没了**——不会发出"已揽收"而实际已取消（测试 `cancelDuringWorkerStep_onlyCancelledIsPublished`）。
 
 ### 2.2 投递程序 + 事务级咨询锁（`pg_try_advisory_xact_lock`）
@@ -72,15 +72,15 @@
   - `concurrency=3`：开 3 个消费者，每人一个分区。一个分区卡住，另外两个照常（09 · C 中 1，测试 `stuckPartition_doesNotBlockOtherPartitions`）。
 
 ### 2.5 状态不倒退 = store 的去重
-- 代码：[DeliveryEventService.java:73](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L73)
+- 代码：[DeliveryEventService.java:74](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L74)
   ```java
   if (rank(event) <= current) { logger.info("Skipping ..."); return; }
   ```
 - 等级：PAID(0) < PICKED_UP(1) < IN_TRANSIT(2) < 终态 DELIVERED / LOST / CANCELLED / REFUNDED(3)。没付款的订单是 -1：收到配送事件就 ALERT，不改（❓8）。
 - 一个规则管住两件事：**重复**的消息不会"高于"自己；**迟到**的旧状态也不会高于新状态。
-- 一个事务里：`SET LOCAL lock_timeout = '5s'` → 锁订单行（`findByIdForUpdate`）→ 改状态 → Lost 时写 REFUND 任务（[:90](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L90)）。消费者**不调 bank**（规则 1，架构测试管着）。
+- 一个事务里：`SET LOCAL lock_timeout = '5s'` → 锁订单行（`findByIdForUpdate`）→ 改状态 → Lost 时写 REFUND 任务（[:90](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L91)）。消费者**不调 bank**（规则 1，架构测试管着）。
 - Cancelled 到了、订单还是 PAID → `OrderService.finishCancel`（还库存、CANCELLED、写 REFUND），和用户取消走同一段代码。
-- 邮件在 `afterCommit` 里发（[:112](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L112)）：事务回滚重试时不会多发一封。
+- 邮件在 `afterCommit` 里发（[:112](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L124)）：事务回滚重试时不会多发一封。
 
 ### 2.6 两种失败 + DLT：`DefaultErrorHandler`
 - 代码：[KafkaConsumerConfig.java:61](../../backend/storeService/src/main/java/comp5348/storeservice/events/KafkaConsumerConfig.java#L61)。Spring Boot 会把这个 bean 自动交给所有 `@KafkaListener` 的容器。
@@ -262,7 +262,7 @@ store · DeliveryEventsConsumer.onDeliveryEvent（3 个线程，组 store）    
 | OrderPlaced | [OrderProductService.java:108](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderProductService.java#L108) | 和建订单、锁库存、写 PAY 任务同一个事务 |
 | OrderPaid | [PaymentService.java:271](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L271) | 只在"订单还没取消"那个分支；payload 带齐建单要的字段，delivery 不回调 store |
 | PaymentFailed | [PaymentService.java:285](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L285) | 只有 bank 明确拒绝才写；超时（PAY_UNKNOWN）**不写**（规则 7） |
-| OrderCancelled | [OrderService.java:284](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L284) | 在 `finishCancel` 里：用户取消、超时自动取消、delivery 的 Cancelled 补完取消，三条路都经过它；reason 是 `USER_REQUEST` / `PAYMENT_TIMEOUT` |
+| OrderCancelled | [OrderService.java:286](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L286) | 在 `finishCancel` 里：用户取消、超时自动取消、delivery 的 Cancelled 补完取消，三条路都经过它；reason 是 `USER_REQUEST` / `PAYMENT_TIMEOUT` |
 | OrderRefunded | [PaymentService.java:374](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L374) | reason 在 [:442](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L442) 算：订单 LOST → `DELIVERY_LOST`；扣款晚于取消 → `PAID_AFTER_CANCEL`；其他 → `ORDER_CANCELLED` |
 
 - **投递程序为什么不用 `@Scheduled`**：[EventOutboxPublisher.java:67](../../backend/storeService/src/main/java/comp5348/storeservice/events/EventOutboxPublisher.java#L67) 实现 `SmartLifecycle`，自己开一个线程。Spring 默认的 `taskScheduler` **只有 1 个线程**，所有 `@Scheduled` 共用；OutboxProcessor 一轮调 bank 可能好几秒（快速重试），事件就得排在后面等。
@@ -270,7 +270,7 @@ store · DeliveryEventsConsumer.onDeliveryEvent（3 个线程，组 store）    
   - 中间试过 `@Scheduled(scheduler = "自己的bean")`，又想到**只要自己注册一个 `TaskScheduler` bean，Spring Boot 就不再建默认的那个**（**待确认**：这是读 Boot 的 `TaskSchedulingConfigurations` 上 `@ConditionalOnMissingBean` 得出的，没在这个项目里测过），那生产里所有定时任务都会挤到这一个线程上。所以最后用的是不注册成 bean 的私有线程。
 
 ### 2.2 delivery 这边：去重靠唯一约束 + `ON CONFLICT DO NOTHING`
-- 建单：[DeliveryService.java:60](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L60)
+- 建单：[DeliveryService.java:61](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L61)
   ```sql
   INSERT INTO delivery (...) VALUES (..., 'CREATED', ...)
   ON CONFLICT (order_id) DO NOTHING
@@ -281,7 +281,7 @@ store · DeliveryEventsConsumer.onDeliveryEvent（3 个线程，组 store）    
 - 消费配置和错误处理照抄 store：组 `delivery`、`earliest`、`ack-mode=record`、3 个线程，[KafkaConsumerConfig.java](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/events/KafkaConsumerConfig.java) 的三种失败。
 
 ### 2.3 取消标记和取消接口的四种回答
-- 代码：[DeliveryService.java:261](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L261)。**先插、再锁**：
+- 代码：[DeliveryService.java:271](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L271)。**先插、再锁**：
   ```java
   int inserted = jdbc.update("INSERT ... VALUES (0, ?, 'CANCELLED', ...) ON CONFLICT (order_id) DO NOTHING", ...);
   Delivery d = deliveryRepository.findByOrderIdForUpdate(orderId).orElseThrow();   // SELECT ... FOR UPDATE
@@ -299,7 +299,7 @@ store · DeliveryEventsConsumer.onDeliveryEvent（3 个线程，组 store）    
 - OrderCancelled（未付款就取消）走同一个方法；如果回答是 TOO_LATE，说明两边状态不一致（store 以为没付款，货却已经在路上），打 `ALERT`，不改（[OrderEventsConsumer.java:49](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/events/OrderEventsConsumer.java#L49)）。
 
 ### 2.4 store 取消：PAID 就一定先问 delivery
-- 代码：[OrderService.java:238](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L238)、[DeliveryAdapter.java:51](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/DeliveryAdapter.java#L51)
+- 代码：[OrderService.java:243](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L243)、[DeliveryAdapter.java:51](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/DeliveryAdapter.java#L51)
 
 | delivery 说 | store 做 |
 |---|---|
@@ -307,16 +307,26 @@ store · DeliveryEventsConsumer.onDeliveryEvent（3 个线程，组 store）    
 | 409 | 拒绝："已经揽收了" |
 | 5xx / 没回答（5 秒超时） | 拒绝："稍后再试"——**不知道** delivery 那边停没停，不能先退钱 |
 
-- 判断条件从"`deliveryId != null`"改成"订单是 PAID"。这是 4b 红灯的重点（C6）。
+- 判断条件从"`deliveryId != null`"改成"订单是 PAID"。这是 4b 红灯的重点（C6）。**审查后又改了一次**（4b #1，见 2.7）：按钱判断，payment 是 SUCCESS、或已有 deliveryId、或状态 PAID / PROCESSING，任一成立都先问。
 - 调 delivery 的时候订单行一直锁着（最多 5 秒）：同一订单的消费者会等。设计没要求改，记在 09（C8）。
 
 ### 2.5 启动时修 delivery 的旧表、作业提交后再发
 - [DeliverySchemaUpgrade.java:43](../../backend/deliveryService/src/main/java/com/comp5348/delivery/config/DeliverySchemaUpgrade.java#L43)：`DROP NOT NULL`（取消标记没有地址、邮箱）+ `CREATE UNIQUE INDEX IF NOT EXISTS`。和 store 的 `OrderStatusCheckUpgrade` 一样的时机。**建唯一索引失败就让启动失败**：没有它，去重会悄悄失效。
-- [DeliveryService.java:84](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L84)：`TransactionSynchronization.afterCommit` 里才发 RabbitMQ 作业，只发一次。残余风险：提交后、发之前崩溃 → 这张单停在 CREATED（记在 09）。
+- [DeliveryService.java:94](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L94)：`TransactionSynchronization.afterCommit` 里才发 RabbitMQ 作业，只发一次。残余风险：提交后、发之前崩溃 → 这张单停在 CREATED（记在 09）。
 
 ### 2.6 删掉的东西
 - store：`DeliveryAdapter.createDelivery`、`CompensationService`、OutboxProcessor 里的建单和 30 秒补偿、`DeliveryRequestDTO` / `DeliveryResponseDTO`。库里留下的旧 `SUCCESS` / `DELIVERY_FAILED` 任务被标成已处理并打 WARN（[OutboxProcessor.java:249](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java#L249)，❓4 a：升级前人工查一下有没有）。
 - delivery：`/api/deliveries/create`、`/create/batch`、旧的 `/api/deliveries/cancel-by-order`，以及 token 过滤器里放行它们的白名单。`GET /{deliveryId}` 改成只匹配数字，否则 `POST /create` 会匹配到它、回 405 而不是 404。
+
+### 2.7 审查后的修复（4a、4b 独立审查）
+每条都是先写测试看红、再改代码看绿；编号是 Obsidian 17 号失败场景表的。
+| 审查 | 问题 | 修法 | 代码 |
+|---|---|---|---|
+| 4a #1（A17） | 货已揽收还收到 Cancelled → 补完取消、退款（Cancelled 是终态，"不倒退"放行） | Cancelled 只在订单还是 PAID / PROCESSING 时补完；配送单号对不上也不补；其他情况 ALERT + 跳过 | [DeliveryEventService.java:98](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L98) |
+| 4a #2（D10） | 还库存时等锁超时被 `catch` 吞掉 → 事务已作废 → 下一个错误像 bug → 5 次后进 DLT，漏退 | 不再吞：`unholdProduct` / `recordOutTransaction` 重新抛出，`finishCancel` 去掉 try/catch；等锁超时被认成暂时性、原地重试 | [OrderService.java:269](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L269)、[WarehouseService.java:353](../../backend/storeService/src/main/java/comp5348/storeservice/service/WarehouseService.java#L353) |
+| 4b #1（C10） | 订单状态能被没鉴权的老接口改回"未付款"→ 取消时不问 delivery 就退款 | 按钱判断要不要先问 delivery（见 2.4） | [OrderService.java:239](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L239) |
+| 4b #2（B13） | 取消标记比付款先到，标记的 Cancelled 被 store 丢掉 → OrderPaid 撞上标记 → 订单永远 PAID | OrderPaid 撞上 CANCELLED 行时 delivery 再发一条 Cancelled；store 本来就幂等 | [DeliveryService.java:77](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L77) |
+| 4b #3 | 配送单号比对用的是刚从同一条事件记下的号，等于自己比自己 | 改用事件之前就已知的号；不知道就不比（一单只有一个配送单） | [DeliveryEventService.java:70](../../backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java#L70) |
 
 ## 3. 请求路径导读（付款成功 → 建配送单；付完款马上取消）
 
@@ -378,7 +388,7 @@ store 读到 Cancelled → 订单已经 CANCELLED（状态不倒退），什么�
 **① F3 幂等：同一个 OrderPaid 收到两次**
 - 场景：store 的投递程序把 OrderPaid 发出去了，还没来得及标记"已发送"就重启了，下一轮又发一次。delivery 收到两条一样的 OrderPaid。
 - 旧代码怎么错：`order_id` 没有唯一约束，两条都 `save(new Delivery(...))` → 两张配送单 → worker 推进两张 → 用户收到两份货的邮件，仓库发两次货。
-- 新代码：[DeliveryService.java:66](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L66)
+- 新代码：[DeliveryService.java:67](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L67)
   ```sql
   INSERT INTO delivery (...) VALUES (...) ON CONFLICT (order_id) DO NOTHING
   ```
@@ -389,7 +399,7 @@ store 读到 Cancelled → 订单已经 CANCELLED（状态不倒退），什么�
 **② E3 悲观锁锁不住不存在的行：取消和 OrderPaid 同时到**
 - 场景：用户付完款马上点取消。store 调 delivery 取消接口的同一毫秒，delivery 的消费者正在处理这单的 OrderPaid。
 - 如果先 `SELECT ... FOR UPDATE`：两边都查不到这一行（还没建），锁不住任何东西 → 取消插一个标记、OrderPaid 插一张配送单 → 有唯一约束时其中一个报错，没有时两行都在 → 配送单照样发货。
-- 新代码：[DeliveryService.java:263](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L263) 先 `INSERT ... ON CONFLICT DO NOTHING`，再 `findByOrderIdForUpdate`。两个 INSERT 撞上唯一索引，后来的等前一个提交。
+- 新代码：[DeliveryService.java:273](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L273) 先 `INSERT ... ON CONFLICT DO NOTHING`，再 `findByOrderIdForUpdate`。两个 INSERT 撞上唯一索引，后来的等前一个提交。
 - 面试怎么答："FOR UPDATE 只能锁已经存在的行。要防'两边都以为没有'，先插再锁，让唯一索引排队。我的测试让取消和 OrderPaid 用 CountDownLatch 同时放出去，跑 10 个订单都只有一行、都是 CANCELLED。"
 - 什么时候**不**用：行一定已经存在（比如改库存），直接 FOR UPDATE 就行；或者用 SERIALIZABLE 隔离级别，代价是要处理重试。
 
