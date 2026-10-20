@@ -1,11 +1,15 @@
 package comp5348.storeservice.support;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
+import com.comp5348.contracts.bank.v1.Outcome;
+import com.comp5348.contracts.bank.v1.RefundRequest;
+import com.comp5348.contracts.bank.v1.RefundResponse;
+import com.comp5348.contracts.bank.v1.TransferRequest;
+import com.comp5348.contracts.bank.v1.TransferResponse;
 import com.github.tomakehurst.wiremock.WireMockServer;
-import com.github.tomakehurst.wiremock.http.Fault;
-import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
+import com.google.protobuf.Message;
+import comp5348.storeservice.support.FakeBankGrpc.Reply;
+import io.grpc.Status;
 import comp5348.storeservice.adapter.EmailAdapter;
 import comp5348.storeservice.dto.CreateOrderRequest;
 import comp5348.storeservice.dto.OrderDTO;
@@ -38,9 +42,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * store 集成测试的公共底座。
  *
- * 【这一层是什么】集成测试：真的 Spring 容器 + 真的 Postgres（Testcontainers 起在 Docker 里）+ 假的 bank（WireMock）。
+ * 【这一层是什么】集成测试：真的 Spring 容器 + 真的 Postgres（Testcontainers 起在 Docker 里）+ 假的 bank。
  * 【真的】store 的全部代码、事务、数据库的唯一约束和行锁。
- * 【假的】bank 和 delivery 两个外部服务（同一个 WireMock 冒充），发邮件的 EmailAdapter（Mockito）。
+ * 【假的】bank：扣款、退款走 gRPC（FakeBankGrpc，第 2 波 B 起），查余额、开户还是 HTTP（WireMock）；
+ *   delivery（同一个 WireMock 冒充）；发邮件的 EmailAdapter（Mockito）。
  *
  * 为什么不用本机的 webuser 库：那是平时开发用的库，测试往里写会把它弄乱；
  * 并发测试要真正的行锁和唯一约束，H2 这种内存库模拟得不准。
@@ -59,7 +64,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @Import(TestInfraConfig.class)
 public abstract class StoreIntegrationTest {
 
-    /** store 现在调 bank 的读超时是 5 秒（BankAdapter 里写死的）。比它慢就是"超时"。 */
+    /** store 调 bank 的超时（gRPC deadline）是 5 秒：bank.grpc.deadline-ms 的默认值。比它慢就是"超时"。 */
     protected static final int SLOWER_THAN_STORE_TIMEOUT_MS = 6_000;
 
     // ---------- 两个外部替身：只启动一次，所有测试类共用 ----------
@@ -72,18 +77,26 @@ public abstract class StoreIntegrationTest {
     @ServiceConnection
     protected static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16-alpine");
 
-    /** 假 bank（顺便也当假 delivery）。dynamicPort：随便找一个空闲端口，不和本机的 8084 撞。 */
-    protected static final WireMockServer FAKE_BANK = new WireMockServer(wireMockConfig().dynamicPort());
+    /**
+     * 假 bank（顺便也当假 delivery）。先找一个空闲端口再固定下来，不和本机的 8084 撞；
+     * 固定端口是为了 bankUnreachableFor()：停掉再启动后还在同一个地址，store 的配置不用变。
+     */
+    protected static final WireMockServer FAKE_BANK = new WireMockServer(wireMockConfig().port(freePort()));
+
+    /** 假 bank 的 gRPC 那一半：扣款、退款（ADR-10）。也固定在一个空闲端口上，bankUnreachableFor() 停掉再启动。 */
+    protected static final FakeBankGrpc FAKE_BANK_GRPC = new FakeBankGrpc(freePort());
 
     static {
         POSTGRES.start();
         FAKE_BANK.start();
+        FAKE_BANK_GRPC.start();
     }
 
-    /** 把 store 配置里的 bank、delivery 地址改成 WireMock 的地址 */
+    /** 把 store 配置里的 bank、delivery 地址改成假服务的地址 */
     @DynamicPropertySource
     static void externalServices(DynamicPropertyRegistry registry) {
         registry.add("bank.service.url", FAKE_BANK::baseUrl);
+        registry.add("bank.grpc.address", () -> "localhost:" + FAKE_BANK_GRPC.port());
         registry.add("delivery.service.url", FAKE_BANK::baseUrl);
     }
 
@@ -103,12 +116,11 @@ public abstract class StoreIntegrationTest {
     @Autowired protected AccountRepository accountRepository;
     @Autowired protected JdbcTemplate jdbc;
 
-    private static final ObjectMapper JSON = new ObjectMapper();
-
     @BeforeEach
     void resetExternalWorld() {
         // 每个测试从干净的假 bank 开始：清掉上一个测试的剧本和请求记录
         FAKE_BANK.resetAll();
+        FAKE_BANK_GRPC.reset();
         // 默认剧本：查余额总是够；建配送单总是成功（不返回 id，避免 orders.delivery_id 唯一约束在测试之间撞车）
         FAKE_BANK.stubFor(get(urlPathMatching("/api/bank/account/.*/balance"))
                 .willReturn(okJson("{\"success\":true,\"balance\":1000000}")));
@@ -176,7 +188,7 @@ public abstract class StoreIntegrationTest {
         runOutboxRounds(3);
         assertThat(orderOf(order).getStatus()).as("前提：订单已经付款成功").isEqualTo(OrderStatus.PAID);
         assertThat(paymentOf(order).getStatus()).as("前提：Payment 已经成功").isEqualTo(PaymentStatus.SUCCESS);
-        FAKE_BANK.resetRequests();
+        forgetBankRequests();
         return order;
     }
 
@@ -225,14 +237,20 @@ public abstract class StoreIntegrationTest {
                 .toList();
     }
 
-    /** 假 bank 收到的所有扣款请求 */
-    protected List<LoggedRequest> transferRequests() {
-        return FAKE_BANK.findAll(postRequestedFor(urlEqualTo("/api/bank/transfer")));
+    /** 假 bank 收到的所有扣款请求（gRPC 的 TransferRequest，按收到的先后） */
+    protected List<TransferRequest> transferRequests() {
+        return FAKE_BANK_GRPC.transfers();
     }
 
     /** 假 bank 收到的所有退款请求 */
-    protected List<LoggedRequest> refundRequests() {
-        return FAKE_BANK.findAll(postRequestedFor(urlEqualTo("/api/bank/refund")));
+    protected List<RefundRequest> refundRequests() {
+        return FAKE_BANK_GRPC.refunds();
+    }
+
+    /** 清掉假 bank 的请求记录（剧本不动），后面只数从现在起的请求 */
+    protected void forgetBankRequests() {
+        FAKE_BANK.resetRequests();
+        FAKE_BANK_GRPC.forgetRequests();
     }
 
     /** 假 delivery 收到的建配送单请求 */
@@ -241,85 +259,121 @@ public abstract class StoreIntegrationTest {
     }
 
     /**
-     * 从请求里取出幂等键。
-     * 规格要求字段叫 idempotencyKey（照 bank.proto 起名）；现在的代码叫 transactionRef。
-     * 两个都认，这样红灯阶段和绿灯阶段用的是同一个测试。退款现在根本没有键，取出来是 null。
+     * 从 bank 请求里取出幂等键。扣款和退款的 proto 消息里都有 idempotency_key 这个字段，按字段名读，一个方法两种都能用
+     * （写成两个重载的话，测试里的 StoreIntegrationTest::keyOf 会让编译器分不清用哪个）。
      */
-    protected static String keyOf(LoggedRequest request) {
-        try {
-            JsonNode body = JSON.readTree(request.getBodyAsString());
-            if (body.hasNonNull("idempotencyKey")) return body.get("idempotencyKey").asText();
-            if (body.hasNonNull("transactionRef")) return body.get("transactionRef").asText();
-            return null;
-        } catch (Exception e) {
-            throw new IllegalStateException("bank request body is not JSON: " + request.getBodyAsString(), e);
-        }
+    protected static String keyOf(Message request) {
+        return (String) request.getField(request.getDescriptorForType().findFieldByName("idempotency_key"));
     }
 
     // ---------- 给假 bank 写剧本 ----------
-    // WireMock：stubFor 登记"收到什么请求 → 回什么"。后登记的优先，所以测试中途可以"换剧本"。
+    // 剧本 = 第 1 个请求怎么回、第 2 个怎么回……用完了一直用最后一条。后写的剧本覆盖前面的，所以测试中途可以"换剧本"。
+
+    private static TransferResponse transferSucceeded() {
+        return TransferResponse.newBuilder().setOutcome(Outcome.SUCCEEDED).setTransactionId("9001").build();
+    }
 
     protected void bankTransferSucceeds() {
-        FAKE_BANK.stubFor(post(urlEqualTo("/api/bank/transfer"))
-                .willReturn(okJson("{\"success\":true,\"transactionId\":\"9001\",\"message\":\"Transfer successful\"}")));
+        FAKE_BANK_GRPC.onTransfer(Reply.ok(transferSucceeded()));
     }
 
     /** 成功，但慢一点（用来制造"银行处理中，用户这时候点了取消 / 又点了 Pay Now"） */
     protected void bankTransferSucceedsSlowly(int delayMs) {
-        FAKE_BANK.stubFor(post(urlEqualTo("/api/bank/transfer"))
-                .willReturn(okJson("{\"success\":true,\"transactionId\":\"9001\",\"message\":\"Transfer successful\"}")
-                        .withFixedDelay(delayMs)));
+        FAKE_BANK_GRPC.onTransfer(Reply.okAfter(Duration.ofMillis(delayMs), transferSucceeded()));
     }
 
     /**
-     * 结果未知：连接被对方重置，store 收不到任何回答。
-     * 对 store 来说和"超时"是一回事（RestTemplate 都抛 ResourceAccessException）：钱可能扣了，也可能没扣。
+     * 结果未知：gRPC 回 UNAVAILABLE（连接中途断开、bank 连不上都是这个码）。钱可能扣了，也可能没扣。
      * 用它代替真的等 5 秒超时，测试快很多。
      */
     protected void bankTransferResultUnknown() {
-        FAKE_BANK.stubFor(post(urlEqualTo("/api/bank/transfer"))
-                .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
+        FAKE_BANK_GRPC.onTransfer(Reply.error(Status.Code.UNAVAILABLE));
+    }
+
+    /** 前 n 次真的超时（bank 其实收到了、也处理了，只是回答比 store 的 deadline 慢），第 n+1 次起正常成功。 */
+    protected void bankTransferTimesOutThenSucceeds(int timeouts) {
+        Reply[] replies = new Reply[timeouts + 1];
+        for (int i = 0; i < timeouts; i++) {
+            replies[i] = Reply.okAfter(Duration.ofMillis(SLOWER_THAN_STORE_TIMEOUT_MS), transferSucceeded());
+        }
+        replies[timeouts] = Reply.ok(transferSucceeded());
+        FAKE_BANK_GRPC.onTransfer(replies);
+    }
+
+    /** bank 明确拒绝：状态 OK + outcome = REJECTED，reason 写原因（bank.proto 的约定） */
+    protected void bankRejectsTransfer(String reason) {
+        FAKE_BANK_GRPC.onTransfer(Reply.ok(
+                TransferResponse.newBuilder().setOutcome(Outcome.REJECTED).setReason(reason).build()));
+    }
+
+    /** bank 自己出错了（比如它的数据库挂了）：gRPC 的 INTERNAL，不是 bank 的"拒绝"回答。钱动没动，store 不知道。 */
+    protected void bankTransferFailsInternally() {
+        bankTransferFailsWith(Status.Code.INTERNAL);
+    }
+
+    /** bank 回某一个 gRPC 错误码 */
+    protected void bankTransferFailsWith(Status.Code code) {
+        FAKE_BANK_GRPC.onTransfer(Reply.error(code));
+    }
+
+    /** bank 说成功，但没给流水号（proto3 里没设的字符串就是空串 ""） */
+    protected void bankTransferSucceedsWithoutTransactionId() {
+        FAKE_BANK_GRPC.onTransfer(Reply.ok(TransferResponse.newBuilder().setOutcome(Outcome.SUCCEEDED).build()));
+    }
+
+    /** 状态 OK，但 outcome 没设（= OUTCOME_UNSPECIFIED，枚举的 0）：bank 写漏了字段 */
+    protected void bankTransferAnswersWithoutOutcome() {
+        FAKE_BANK_GRPC.onTransfer(Reply.ok(TransferResponse.newBuilder().setTransactionId("9001").build()));
     }
 
     /**
-     * 前 n 次真的超时（bank 其实收到了、也处理了，只是回答比 store 的超时慢），第 n+1 次起正常成功。
-     * Scenario 是 WireMock 的"状态机"：每收到一次请求就把状态往前推一格，按状态决定回什么。
+     * bank 重启了一下：现在停掉 gRPC 服务（断开所有连接），过 downtime 之后在同一个端口重新启动（剧本不变）。
+     * 后台线程负责重启，测试线程同时去跑 OutboxProcessor。
      */
-    protected void bankTransferTimesOutThenSucceeds(int timeouts) {
-        String state = Scenario.STARTED;
-        for (int i = 1; i <= timeouts; i++) {
-            String next = "timed-out-" + i;
-            FAKE_BANK.stubFor(post(urlEqualTo("/api/bank/transfer"))
-                    .inScenario("transfer").whenScenarioStateIs(state).willSetStateTo(next)
-                    .willReturn(okJson("{\"success\":true,\"transactionId\":\"9001\",\"message\":\"Transfer successful\"}")
-                            .withFixedDelay(SLOWER_THAN_STORE_TIMEOUT_MS)));
-            state = next;
-        }
-        FAKE_BANK.stubFor(post(urlEqualTo("/api/bank/transfer"))
-                .inScenario("transfer").whenScenarioStateIs(state)
-                .willReturn(okJson("{\"success\":true,\"transactionId\":\"9001\",\"message\":\"Transfer successful\"}")));
+    protected void bankUnreachableFor(Duration downtime) {
+        FAKE_BANK_GRPC.stop();
+        Thread restarter = new Thread(() -> {
+            try {
+                Thread.sleep(downtime.toMillis());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            FAKE_BANK_GRPC.start();
+        });
+        restarter.setDaemon(true);
+        restarter.start();
     }
 
-    /** bank 明确拒绝（真 bank 的做法：HTTP 400 + success=false） */
-    protected void bankRejectsTransfer(String reason) {
-        FAKE_BANK.stubFor(post(urlEqualTo("/api/bank/transfer"))
-                .willReturn(aResponse().withStatus(400).withHeader("Content-Type", "application/json")
-                        .withBody("{\"success\":false,\"transactionId\":\"9002\",\"message\":\"" + reason + "\"}")));
+    /** 找一个现在没人用的端口：让操作系统分一个，记下号码，再关掉。 */
+    protected static int freePort() {
+        try (java.net.ServerSocket socket = new java.net.ServerSocket(0)) {
+            return socket.getLocalPort();
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException("no free port", e);
+        }
     }
 
     protected void bankRefundSucceeds() {
-        FAKE_BANK.stubFor(post(urlEqualTo("/api/bank/refund"))
-                .willReturn(okJson("{\"success\":true,\"refundTransactionId\":\"9101\",\"message\":\"Refund successful\"}")));
+        FAKE_BANK_GRPC.onRefund(Reply.ok(
+                RefundResponse.newBuilder().setOutcome(Outcome.SUCCEEDED).setRefundTransactionId("9101").build()));
     }
 
     protected void bankRefundResultUnknown() {
-        FAKE_BANK.stubFor(post(urlEqualTo("/api/bank/refund"))
-                .willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
+        FAKE_BANK_GRPC.onRefund(Reply.error(Status.Code.UNAVAILABLE));
+    }
+
+    /** 退款时 bank 回某一个 gRPC 错误码 */
+    protected void bankRefundFailsWith(Status.Code code) {
+        FAKE_BANK_GRPC.onRefund(Reply.error(code));
+    }
+
+    /** 退款：状态 OK，但 outcome 没设（OUTCOME_UNSPECIFIED） */
+    protected void bankRefundAnswersWithoutOutcome() {
+        FAKE_BANK_GRPC.onRefund(Reply.ok(RefundResponse.newBuilder().setRefundTransactionId("9101").build()));
     }
 
     protected void bankRejectsRefund(String reason) {
-        FAKE_BANK.stubFor(post(urlEqualTo("/api/bank/refund"))
-                .willReturn(aResponse().withStatus(400).withHeader("Content-Type", "application/json")
-                        .withBody("{\"success\":false,\"refundTransactionId\":null,\"message\":\"" + reason + "\"}")));
+        FAKE_BANK_GRPC.onRefund(Reply.ok(
+                RefundResponse.newBuilder().setOutcome(Outcome.REJECTED).setReason(reason).build()));
     }
 }

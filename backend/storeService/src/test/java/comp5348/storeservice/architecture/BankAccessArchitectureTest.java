@@ -19,7 +19,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  * 【层】架构测试。不运行程序，ArchUnit 读编译好的 .class 文件，检查"谁调用了谁"。
  * 【为什么需要】规则 1、ADR-04：资金操作只有一个入口。入口只有一个，幂等键、重试、超时才只需要在一个地方做对。
  *   以后有人图省事在 Controller 里直接调 bankAdapter.transfer，这个测试马上变红。
- * 【不管的】查余额、开户、按邮箱查账户（getBalance 等）不动钱，谁调都可以。
+ * 【不管的】开户、按邮箱查账户（createCustomerAccount、getAccountByOwnerEmail）不动钱，谁调都可以。
  */
 class BankAccessArchitectureTest {
 
