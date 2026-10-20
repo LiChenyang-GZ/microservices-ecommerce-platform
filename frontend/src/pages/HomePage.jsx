@@ -47,14 +47,6 @@ const HomePage = () => {
             </Button>
           </div>
 
-          <div className="feature-card" onClick={() => navigate('/add-money')}>
-            <h3>💰 Add Money</h3>
-            <p>Add funds to your bank account</p>
-            <Button onClick={(e) => { e.stopPropagation(); navigate('/add-money'); }}>
-              Manage Balance
-            </Button>
-          </div>
-
           <div className="feature-card" onClick={() => navigate('/deliveries')}>
             <h3>📦 Delivery Tracking</h3>
             <p>Track your package deliveries</p>

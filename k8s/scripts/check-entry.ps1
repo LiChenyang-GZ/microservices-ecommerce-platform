@@ -101,8 +101,10 @@ function Probe($entry, $method, $path) {
     }
 }
 
-# The entry's own 404: Envoy's directResponse "not found", or nginx's own error page.
-function IsEntry404($r) { $r.Status -eq 404 -and ($r.Body.Trim() -eq 'not found' -or $r.Body -match '<center>nginx') }
+# The entry's own 404. Both entries answer with the same body (routes.yaml's
+# not-found filter, nginx.conf's @not_found); a service's 404 is JSON or Go's
+# "404 page not found".
+function IsEntry404($r) { $r.Status -eq 404 -and $r.Body.Trim() -eq 'not found' }
 
 function Verdict($expect, $r) {
     switch ($expect) {

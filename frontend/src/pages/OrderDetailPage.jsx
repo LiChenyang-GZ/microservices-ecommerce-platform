@@ -142,9 +142,6 @@ function OrderDetailPage() {
             } else if (err.message) {
                 errorMessage += err.message;
             }
-            if (errorMessage.toLowerCase().includes('no linked bank account')) {
-                errorMessage += '\n\nPlease go to "Add Money" page to create your bank account first.';
-            }
             alert(errorMessage);
         } finally {
             setIsPaying(false);
@@ -343,7 +340,7 @@ function OrderDetailPage() {
                     {paymentStatusNormalized === 'FAILED' && (
                         <p className="alert-hint">
                             {order.payment?.errorMessage ? `Last attempt failed: ${order.payment.errorMessage}. ` : ''}
-                            Make sure you have sufficient balance in your account. You can add money from the home page.
+                            Make sure you have sufficient balance in your account.
                         </p>
                     )}
                 </div>

@@ -219,7 +219,7 @@ public class OrderProductService {
         if (userAcc.getBankAccountNumber() == null || userAcc.getBankAccountNumber().isEmpty()) {
             String bankAccountNumber = bankAdapter.getAccountByOwnerEmail(userEmail);
             if (bankAccountNumber == null || bankAccountNumber.isEmpty()) {
-                throw new IllegalStateException("User has no linked bank account. Please go to 'Add Money' page to create your bank account first.");
+                throw new IllegalStateException("User has no linked bank account. It is opened when the account is activated.");
             }
             userAcc.setBankAccountNumber(bankAccountNumber);
             accountRepository.save(userAcc);
