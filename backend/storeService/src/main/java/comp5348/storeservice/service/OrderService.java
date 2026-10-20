@@ -261,21 +261,18 @@ public class OrderService {
      */
     public Order finishCancel(Order order, String reason, String cancelReason) {
         Long orderId = order.getId();
-        // Rollback inventory
-        try {
-            if (order.getInventoryTransactionIds() != null && !order.getInventoryTransactionIds().isEmpty()) {
-                List<Long> txIds = Arrays.stream(order.getInventoryTransactionIds().split(","))
-                        .filter(s -> s != null && !s.trim().isEmpty())
-                        .map(Long::valueOf)
-                        .collect(Collectors.toList());
-                if (!txIds.isEmpty()) {
-                    UnholdProductRequest unhold = new UnholdProductRequest();
-                    unhold.setInventoryTransactionIds(txIds);
-                    warehouseService.unholdProduct(unhold);
-                }
+        // Rollback inventory. A failure here is not caught (review 4a #2): the whole cancel rolls back together.
+        // The user's cancel gets an error and can try again; a Cancelled event is retried by the consumer.
+        if (order.getInventoryTransactionIds() != null && !order.getInventoryTransactionIds().isEmpty()) {
+            List<Long> txIds = Arrays.stream(order.getInventoryTransactionIds().split(","))
+                    .filter(s -> s != null && !s.trim().isEmpty())
+                    .map(Long::valueOf)
+                    .collect(Collectors.toList());
+            if (!txIds.isEmpty()) {
+                UnholdProductRequest unhold = new UnholdProductRequest();
+                unhold.setInventoryTransactionIds(txIds);
+                warehouseService.unholdProduct(unhold);
             }
-        } catch (Exception e) {
-            logger.error("CRITICAL: Unhold inventory failed for order {}: {}", orderId, e.getMessage());
         }
 
         order.setStatus(OrderStatus.CANCELLED);

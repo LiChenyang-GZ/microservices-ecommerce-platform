@@ -346,9 +346,11 @@ public class WarehouseService {
 
             logger.info("Total released: {} units", totalReleased);
             return true;
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
+            // Do not swallow (review 4a #2): the shared transaction is already rollback-only and Postgres has
+            // aborted it. Rethrow so the caller sees the real cause (e.g. a lock timeout, which is transient).
             logger.error("Error unholding inventory: {}", e.getMessage(), e);
-            return false;
+            throw e;
         }
     }
 
@@ -441,14 +443,11 @@ public class WarehouseService {
                     transactionsToCreate.size(), orderId, totalRecorded);
             
             return true;
-        } catch (Exception e) {
+        } catch (RuntimeException e) {
+            // Rethrow, same reason as unholdProduct (review 4a #2). No FAILED audit row: the transaction is
+            // aborted, so writing it would fail too, and the whole caller rolls back and is retried anyway.
             logger.error("Error recording OUT transaction: {}", e.getMessage(), e);
-            
-            // Try to get product info for audit log
-            Product product = productRepository.findById(productId).orElse(null);
-            String productName = product != null ? product.getName() : null;
-            recordAuditLog(productId, productName, null, null, quantity, orderId, 0, 0, "OUT", "FAILED", e.getMessage());
-            return false;
+            throw e;
         }
     }
     
