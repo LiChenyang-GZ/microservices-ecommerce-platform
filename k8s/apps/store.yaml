@@ -1,0 +1,102 @@
+# store: orders, accounts, stock, payment orchestration (design figure 2).
+# Variables are the ones compose.yml gives store; passwords come from Secret "store".
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: store
+  namespace: shop
+data:
+  DB_HOST: postgres
+  DB_PORT: '5432'
+  SPRING_RABBITMQ_HOST: rabbitmq
+  # Service names match compose service names, so the addresses are identical.
+  STORE_SERVICE_URL: http://store:8082
+  BANK_SERVICE_URL: http://bank:8084
+  DELIVERY_SERVICE_URL: http://delivery:8081
+  # Wave 2 A removes the webhook; kept while the main-branch image still uses it.
+  DELIVERY_NOTIFICATION_URL: http://store:8082/api/delivery-webhook
+  EMAIL_SERVICE_URL: http://email:8083
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+  BANK_GRPC_ADDRESS: bank:9090
+  # Kubernetes only (not in compose). Probes: /actuator/health/liveness and
+  # /readiness; readiness also checks the database (not RabbitMQ or Kafka).
+  # JVM heap follows the container memory limit.
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: 'true'
+  MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db
+  JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: store
+  namespace: shop
+spec:
+  selector:
+    app: store
+  ports:
+    - { name: http, port: 8082 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: store
+  namespace: shop
+spec:
+  # One replica, and Recreate: the old pod stops before the new one starts.
+  # OutboxProcessor (the only caller of bank) has no lock across instances, so
+  # two store pods side by side would both pick the same PAY task. bank's key
+  # keeps the money right, but a concurrent same-key call can answer 500 (09 A#6).
+  # Decided by Christy 2026-10-20 (checklist Q4). Cost: a short outage per update.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: store
+  template:
+    metadata:
+      labels:
+        app: store
+    spec:
+      enableServiceLinks: false
+      initContainers:
+        # No depends_on in Kubernetes. Wait until store_user can log in (so
+        # db-init has run) and RabbitMQ accepts connections.
+        - name: wait-for-deps
+          image: postgres:16-alpine
+          command: ['sh', '-c']
+          args:
+            - until PGPASSWORD="$STORE_DB_PASSWORD" psql -h postgres -U store_user -d store_db -tAc 'select 1' >/dev/null 2>&1 && nc -z rabbitmq 5672; do echo 'waiting for postgres/store_db and rabbitmq'; sleep 3; done
+          env:
+            - name: STORE_DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: store, key: STORE_DB_PASSWORD } }
+      containers:
+        - name: store
+          image: shop-store:latest
+          # Built locally by compose and loaded with `kind load`; never pulled.
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef: { name: store }
+            - secretRef: { name: store }
+          ports:
+            - containerPort: 8082
+          # Liveness looks at the process only. If it included RabbitMQ or the
+          # database, an outage there would make Kubernetes restart every service
+          # in a loop (09 B#5). Readiness adds the database only.
+          startupProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8082 }
+            periodSeconds: 5
+            failureThreshold: 48 # up to 4 minutes for a cold JVM start
+          livenessProbe:
+            httpGet: { path: /actuator/health/liveness, port: 8082 }
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet: { path: /actuator/health/readiness, port: 8082 }
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 100m, memory: 384Mi }
+            limits: { memory: 768Mi }
