@@ -289,6 +289,23 @@ class DeliveryEventsConsumerIntegrationTest extends DeliveryEventsTestBase {
     }
 
     /**
+     * A17 的守护测试（4b 审查 #3）：store 还不知道配送单号（DeliveryCreated 没到或进了 DLT），就收到带配送单号的 Cancelled。
+     * 没有可比的号，就不比：delivery 一单只有一行（order_id 唯一），这个号只能是这一单的配送单 → 照 A11 补完取消。
+     * 【注意】这个测试一开始就是绿的：以前"先记下事件里的号、再拿它和自己比"，结果碰巧一样；
+     *   它防的是以后有人把比对改成"不认识的号一律拒绝"，把正常的取消挡掉、漏退。
+     */
+    @Test
+    void cancelledEvent_beforeStoreKnowsTheDeliveryId_completesTheCancel() {
+        PlacedOrder order = placePaidOrder();
+        assertThat(orderOf(order).getDeliveryId()).as("前提：store 还不知道配送单号").isNull();
+
+        publish(order, CANCELLED);
+
+        awaitOrderStatus(order, "CANCELLED");
+        assertThat(refundTasksOf(order)).hasSize(1);
+    }
+
+    /**
      * A13：事件里的订单在 store 根本不存在 → 消息本身有问题，进 delivery-events.DLT。
      * 设计：规则 6"消息本身有问题，例如……引用的订单不存在：直接进 .DLT 并告警"。
      */

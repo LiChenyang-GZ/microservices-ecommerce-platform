@@ -67,6 +67,7 @@ public class DeliveryEventService {
                     orderId, order.getStatus(), event.wireName(), eventId);
             return;
         }
+        Long knownDeliveryId = order.getDeliveryId(); // before the line below fills it in from this event
         if (deliveryId != null && order.getDeliveryId() == null && current < FINAL) {
             order.setDeliveryId(deliveryId); // later emails quote it
         }
@@ -92,7 +93,10 @@ public class DeliveryEventService {
             case CANCELLED -> {
                 // Only a still-paid order can be cancelled: once picked up, the goods are on the road (review 4a #1).
                 // A cancel marker has no deliveryId; a real delivery must be the one this order knows about.
-                boolean otherDelivery = deliveryId != null && !deliveryId.equals(order.getDeliveryId());
+                // If store did not know one yet there is nothing to compare: delivery keeps one row per order
+                // (unique order_id), so it can only be this order's delivery (review 4b #3).
+                boolean otherDelivery = deliveryId != null && knownDeliveryId != null
+                        && !deliveryId.equals(knownDeliveryId);
                 if (current != 0 || otherDelivery) {
                     logger.error("ALERT delivery_event_unexpected orderId={} orderStatus={} event={} deliveryId={} orderDeliveryId={} eventId={}",
                             orderId, order.getStatus(), event.wireName(), deliveryId, order.getDeliveryId(), eventId);
