@@ -62,6 +62,8 @@
   - 测试第一版只断言"最后付成功了"，去掉 waitForReady 也是绿的。审查（#5）之后加了一条：这个键的日志里不能出现"结果未知"。只数假 bank 收到几次不够：fail-fast 的调用根本到不了 bank。改坏检查 3 次都红（有一次直接掉进 PAY_UNKNOWN）。
   - 代价：bank 长时间挂掉时，每次调用都要等满 5 秒，一个 PAY 任务 5 次大约 27 秒（和 09 里的 A#5 同一类问题）。
 - `disableRetry()`：gRPC 自带重试，可以按配置自动重发。这里关掉，让 OutboxProcessor 成为唯一一层重试（5 次快速，然后每 10 分钟）。测试 `noAnswer_bankSeesExactly5CallsPerRound` 断言一轮正好 5 次。
+- **关机时的中断**（审查 #2，红 `eebc1bc` → 绿）：store 关机时 Spring 会中断定时任务线程。HTTP 的 `HttpURLConnection` 不理中断；gRPC 的 blocking stub 会理，正在等的调用立刻变成 `CANCELLED`（= 未知）。中断标志还在，后面的 `Thread.sleep` 和调用也立刻返回 → 5 次快速重试几毫秒烧完 → PAY_UNKNOWN、一条假告警、重启后等 10 分钟。修法：每次得到"未知"后先看线程是不是被中断了，是就停手，什么都不标记（[OutboxProcessor.java:235](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java#L235)）。任务还是 PENDING、键不变，重启后第一轮（5 秒）就用同一个键补上。测试 `interruptedDuringCall_doesNotBurnFastRetries`。
+  - 没做的：让这次调用不响应中断、等到 bank 回答（像 HTTP 那样）。现在的做法放弃了在途那次的结果，靠重启后同键重试拿回来，钱一样安全。Spring 关机时到底是不是 `shutdownNow()` 中断线程，**待确认**（测试里是手动中断的）。
 
 ### 2.5 proto3 的默认值：没有 null
 - proto3 的字段没有"没设"这一说：字符串默认 `""`，枚举默认是编号 0 的那个值（这里是 `OUTCOME_UNSPECIFIED`）。

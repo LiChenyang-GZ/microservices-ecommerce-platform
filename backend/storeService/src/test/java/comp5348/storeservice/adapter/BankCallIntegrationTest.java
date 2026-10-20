@@ -170,6 +170,12 @@ class BankCallIntegrationTest extends StoreIntegrationTest {
         assertThat(transferRequests()).as("一次中断不该烧掉 5 次重试").hasSizeLessThan(5);
         // 断言 2：没有因为关机就变成 PAY_UNKNOWN（那样会发假告警，还要等 10 分钟才重试）
         assertThat(paymentOf(order).getStatus()).as("关机 ≠ bank 没回答").isNotEqualTo(PaymentStatus.PAY_UNKNOWN);
+
+        // 断言 3（修复时加的）：任务还在，"重启后"的下一轮（5 秒一轮，不是 10 分钟）用同一个键补上
+        bankTransferSucceeds();
+        outboxProcessor.processOutbox();
+        assertThat(paymentOf(order).getStatus()).as("重启后第一轮就补上").isEqualTo(PaymentStatus.SUCCESS);
+        assertThat(transferRequests()).extracting(StoreIntegrationTest::keyOf).containsOnly(payKeyOf(order));
     }
 
     /**
