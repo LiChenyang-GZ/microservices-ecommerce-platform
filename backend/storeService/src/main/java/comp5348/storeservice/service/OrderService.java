@@ -234,7 +234,12 @@ public class OrderService {
             throw new RuntimeException("Cannot cancel order with status: " + order.getStatus());
         }
 
-        if (order.getStatus() == OrderStatus.PAID || order.getStatus() == OrderStatus.PROCESSING) {
+        // Ask delivery whenever money has moved, not only when the status says PAID (review 4b #1): the status
+        // can be changed from outside, the payment row and a known deliveryId cannot be faked that way.
+        boolean paid = paymentService.getPaymentByOrderId(order.getId())
+                .map(p -> p.getStatus() == PaymentStatus.SUCCESS).orElse(false);
+        if (paid || order.getDeliveryId() != null
+                || order.getStatus() == OrderStatus.PAID || order.getStatus() == OrderStatus.PROCESSING) {
             DeliveryAdapter.CancelAnswer answer = deliveryAdapter.cancelByOrderId(String.valueOf(order.getId()));
             switch (answer) {
                 case AGREED -> logger.info("Delivery agreed to cancel order {}", orderId);
