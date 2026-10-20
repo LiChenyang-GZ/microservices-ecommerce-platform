@@ -24,6 +24,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.kafka.KafkaContainer;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -75,9 +76,21 @@ public abstract class StoreIntegrationTest {
     /** 假 bank（顺便也当假 delivery）。dynamicPort：随便找一个空闲端口，不和本机的 8084 撞。 */
     protected static final WireMockServer FAKE_BANK = new WireMockServer(wireMockConfig().dynamicPort());
 
+    /**
+     * 第 2 波 A：真的 Kafka（和 compose 同一个镜像）。和 compose 一样关掉自动建 topic，topic 由测试自己建（3 分区）。
+     * store 要消费 delivery-events、发布 order-events，测试用 KafkaProbe 往里发事件、读结果。
+     */
+    protected static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.9.1")
+            .withEnv("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "false");
+
+    protected static final KafkaProbe kafka;
+
     static {
         POSTGRES.start();
         FAKE_BANK.start();
+        KAFKA.start();
+        kafka = new KafkaProbe(KAFKA.getBootstrapServers());
+        kafka.createTopics(KafkaProbe.ALL_TOPICS);
     }
 
     /** 把 store 配置里的 bank、delivery 地址改成 WireMock 的地址 */
@@ -85,6 +98,8 @@ public abstract class StoreIntegrationTest {
     static void externalServices(DynamicPropertyRegistry registry) {
         registry.add("bank.service.url", FAKE_BANK::baseUrl);
         registry.add("delivery.service.url", FAKE_BANK::baseUrl);
+        // 契约：compose 里的 SPRING_KAFKA_BOOTSTRAP_SERVERS 自动绑定到这个键
+        registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
     }
 
     /** 邮件不是这一步要测的东西：换成什么都不做的 Mockito 假对象 */

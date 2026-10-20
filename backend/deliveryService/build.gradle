@@ -37,6 +37,13 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-amqp'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // Wave 2 A: integration tests with a throwaway Postgres and Kafka in Docker (same images as compose)
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
+    testImplementation 'org.testcontainers:kafka'
+    testImplementation 'org.apache.kafka:kafka-clients'
+    testImplementation 'org.awaitility:awaitility'
 }
 
 tasks.named('test') {
