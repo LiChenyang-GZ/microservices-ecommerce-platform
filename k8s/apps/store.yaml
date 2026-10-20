@@ -13,8 +13,6 @@ data:
   STORE_SERVICE_URL: http://store:8082
   BANK_SERVICE_URL: http://bank:8084
   DELIVERY_SERVICE_URL: http://delivery:8081
-  # Wave 2 A removes the webhook; kept while the main-branch image still uses it.
-  DELIVERY_NOTIFICATION_URL: http://store:8082/api/delivery-webhook
   EMAIL_SERVICE_URL: http://email:8083
   SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
   BANK_GRPC_ADDRESS: bank:9090

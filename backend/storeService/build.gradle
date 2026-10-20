@@ -27,6 +27,9 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-security'
 	implementation 'org.springframework.boot:spring-boot-starter-amqp'
+	// Wave 2: consume delivery-events, publish to the DLT (and order-events in 4b); events use the shared contracts
+	implementation 'org.springframework.kafka:spring-kafka'
+	implementation project(':contracts')
 	implementation 'io.jsonwebtoken:jjwt-api:0.12.3'
 	implementation 'io.jsonwebtoken:jjwt-impl:0.12.3'
 	implementation 'io.jsonwebtoken:jjwt-jackson:0.12.3'
@@ -47,6 +50,9 @@ dependencies {
 	// Architecture rule: only OutboxProcessor may move money
 	testImplementation 'com.tngtech.archunit:archunit-junit5:1.3.0'
 	testImplementation 'org.awaitility:awaitility'
+	// Wave 2 A: a real Kafka in Docker (same image as compose); tests send and read events with the plain client
+	testImplementation 'org.testcontainers:kafka'
+	testImplementation 'org.apache.kafka:kafka-clients'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 

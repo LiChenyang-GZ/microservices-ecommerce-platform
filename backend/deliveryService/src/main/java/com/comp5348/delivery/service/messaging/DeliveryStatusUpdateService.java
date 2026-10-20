@@ -1,16 +1,16 @@
 package com.comp5348.delivery.service.messaging;
 
 import com.comp5348.delivery.config.RabbitMQConfig;
-import com.comp5348.delivery.dto.NotificationMessage;
-import com.comp5348.delivery.dto.NotificationRequest;
 import com.comp5348.delivery.model.Delivery;
 import com.comp5348.delivery.repository.DeliveryRepository;
+import com.comp5348.delivery.service.events.DeliveryEventRecorder;
 import com.comp5348.delivery.utils.DeliveryStatus;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionStatus;
@@ -31,18 +31,26 @@ public class DeliveryStatusUpdateService {
     private final PlatformTransactionManager transactionManager;
     private final Random random = new Random(); // Used to generate random numbers
 
-    // Constants for simulating delivery
-    private static final int BASE_WAIT_TIME_MS = 10000; // Base wait time: 10 seconds
-    private static final double PACKAGE_LOSS_RATE = 0.00; // 5% package loss rate
+    private final DeliveryEventRecorder eventRecorder;
+
+    // Simulated delivery: wait per step and chance of losing the parcel. Configurable so tests can run fast
+    // and force a loss; the defaults keep the old behaviour (10 seconds, never lost).
+    @Value("${delivery.simulation.step-delay-ms:10000}")
+    private long stepDelayMs;
+
+    @Value("${delivery.simulation.loss-rate:0.0}")
+    private double lossRate;
     private static final int MAX_DELIVERY_RETRIES = 5; // Maximum retry attempts before DLQ
 
     @Autowired
     public DeliveryStatusUpdateService(DeliveryRepository deliveryRepository,
                                        RabbitTemplate rabbitTemplate,
-                                       PlatformTransactionManager transactionManager) {
+                                       PlatformTransactionManager transactionManager,
+                                       DeliveryEventRecorder eventRecorder) {
         this.deliveryRepository = deliveryRepository;
         this.rabbitTemplate = rabbitTemplate;
         this.transactionManager = transactionManager;
+        this.eventRecorder = eventRecorder;
     }
 
     // @RabbitListener tells Spring to keep listening to this queue, and call this method when a message arrives!
@@ -72,7 +80,7 @@ public class DeliveryStatusUpdateService {
             // 2. Simulate real-world shipping delay
             try {
                 // Fixed interval of 10 seconds for each state change
-                Thread.sleep(BASE_WAIT_TIME_MS);
+                Thread.sleep(stepDelayMs);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt(); // Reset interrupt status
                 logger.error("Thread interrupted while waiting", e);
@@ -91,7 +99,7 @@ public class DeliveryStatusUpdateService {
             }
 
             // 3. Simulate possibility of package loss
-            if (random.nextDouble() < PACKAGE_LOSS_RATE) {
+            if (random.nextDouble() < lossRate) {
                 logger.warn("[Simulated Package Loss] Package for delivery ID {} was unfortunately lost!", deliveryId);
                 delivery.setDeliveryStatus(DeliveryStatus.LOST);
             } else {
@@ -101,21 +109,13 @@ public class DeliveryStatusUpdateService {
 
             // 5. Save updated state back to database
             delivery.setUpdateTime(LocalDateTime.now());
+            // The event for this step goes into event_outbox in the same transaction (rule 2). If the save below
+            // hits an optimistic-lock conflict (e.g. cancelled meanwhile), the event is rolled back with it.
+            eventRecorder.recordStatus(delivery);
             Delivery savedDelivery = deliveryRepository.saveAndFlush(delivery); // saveAndFlush writes to database immediately
             transactionManager.commit(status); // !! Manually commit transaction here !!
             logger.info("Delivery ID: {} status updated to -> {}, and saved to database.", deliveryId, delivery.getDeliveryStatus());
 
-            // Email notifications are now handled by Store Service via webhook notifications
-            // No need to send emails directly from Delivery Service
-
-            // 6. Check if notificationUrl exists, if exists send Webhook notification
-            if (savedDelivery.getNotificationUrl() != null && !savedDelivery.getNotificationUrl().isEmpty()) {
-                NotificationRequest payload = new NotificationRequest(savedDelivery.getId(), savedDelivery.getDeliveryStatus());
-                NotificationMessage message = new NotificationMessage(payload, savedDelivery.getNotificationUrl());
-
-                rabbitTemplate.convertAndSend(RabbitMQConfig.NOTIFICATION_QUEUE_NAME, message);
-                logger.info("Created Webhook notification task for delivery ID: {}, sent to queue: {}", savedDelivery.getId(), RabbitMQConfig.NOTIFICATION_QUEUE_NAME);
-            }
 
             // 7. Critical step: Determine if processing should continue
             // If status is not yet final (delivered or lost), put task ID back into queue for next processing

@@ -125,7 +125,6 @@ services:
       STORE_SERVICE_URL: http://store:8082
       BANK_SERVICE_URL: http://bank:8084
       DELIVERY_SERVICE_URL: http://delivery:8081
-      DELIVERY_NOTIFICATION_URL: http://store:8082/api/delivery-webhook
       EMAIL_SERVICE_URL: http://email:8083
       # Wave 2 (docs/wave2-config-contract.md). Unused until the code reads them.
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092

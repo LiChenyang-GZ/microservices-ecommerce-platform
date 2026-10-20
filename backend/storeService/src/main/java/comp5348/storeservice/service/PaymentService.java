@@ -2,6 +2,12 @@ package comp5348.storeservice.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.comp5348.contracts.events.OrderEventType;
+import com.comp5348.contracts.events.payload.OrderPaidPayload;
+import com.comp5348.contracts.events.payload.OrderRefundedPayload;
+import com.comp5348.contracts.events.payload.PaymentFailedPayload;
+import comp5348.storeservice.events.OrderEventRecorder;
+import comp5348.storeservice.model.Account;
 import comp5348.storeservice.model.Order;
 import comp5348.storeservice.model.OrderStatus;
 import comp5348.storeservice.model.Payment;
@@ -24,6 +30,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.EnumSet;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -69,6 +76,16 @@ public class PaymentService {
 
     @Autowired
     private Clock clock;
+
+    @Autowired
+    private OrderEventRecorder orderEventRecorder;
+
+    /** Where delivery ships from and to. Same fixed values the old HTTP delivery request used. */
+    static final String SHIP_TO = "Default Address - 123 Main St";
+    static final List<String> SHIP_FROM = List.of("Warehouse-1, 456 Storage Rd");
+
+    /** The refund reason written when a charge succeeds for an order that was already cancelled */
+    private static final String PAID_AFTER_CANCEL_REASON = "Paid after order was cancelled";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -220,8 +237,9 @@ public class PaymentService {
 
     /**
      * Bank said the charge went through. Lock the order row, then the payment row, and look at the order (rule 1):
-     * - still waiting for payment → PAID, write PAYMENT_SUCCESS (creates the delivery)
-     * - already cancelled (by the user or the 15-minute timeout) → the money must go back: write a REFUND task
+     * - still waiting for payment → PAID, write OrderPaid (delivery reads it and creates the delivery)
+     * - already cancelled (by the user or the 15-minute timeout) → the money must go back: write a REFUND task,
+     *   and no OrderPaid, or delivery would ship a cancelled order (B2)
      */
     @Transactional
     public void onPaySucceeded(Long taskId, String bankTxnId) {
@@ -242,7 +260,7 @@ public class PaymentService {
             payment.setRefundKeyNonce(newKeyNonce());
             paymentRepository.save(payment);
             outboxService.createRefundTask(order.getId(), payment.getId(), refundKey(payment),
-                    "Paid after order was cancelled");
+                    PAID_AFTER_CANCEL_REASON);
             logger.warn("Charge succeeded after order {} was cancelled: refund task written, key={}",
                     order.getId(), refundKey(payment));
         } else {
@@ -250,7 +268,7 @@ public class PaymentService {
             paymentRepository.save(payment);
             order.setStatus(OrderStatus.PAID);
             orderRepository.save(order);
-            outboxService.createPaymentSuccessEvent(order.getId(), bankTxnId);
+            orderEventRecorder.record(order.getId(), OrderEventType.ORDER_PAID, orderPaidPayload(order, payment));
             logger.info("Payment successful: orderId={}, key={}, bankTxnId={}", order.getId(), task.getIdempotencyKey(), bankTxnId);
         }
         closeTask(task, "PROCESSED", "charged");
@@ -263,6 +281,9 @@ public class PaymentService {
         Payment payment = paymentRepository.findByOrderIdForUpdate(task.getOrderId()).orElseThrow();
         if (CHARGE_OPEN.contains(payment.getStatus())) {
             handlePaymentFailure(payment, reason);
+            // Only a definite "no" from bank is a PaymentFailed; a timeout never is (rule 7, B3)
+            orderEventRecorder.record(task.getOrderId(), OrderEventType.PAYMENT_FAILED,
+                    new PaymentFailedPayload(payment.getId(), payment.currentAttempt(), reason));
         }
         closeTask(task, "PROCESSED", "rejected: " + reason);
     }
@@ -336,12 +357,22 @@ public class PaymentService {
     @Transactional
     public void onRefundSucceeded(Long taskId, String refundTxnId) {
         PaymentOutbox task = outboxRepository.findById(taskId).orElseThrow();
+        // Order row first, then the payment row: same lock order as everywhere else
+        Order order = orderRepository.findByIdForUpdate(task.getOrderId()).orElse(null);
         Payment payment = paymentRepository.findByOrderIdForUpdate(task.getOrderId()).orElseThrow();
         if (REFUND_OPEN.contains(payment.getStatus())) {
+            String why = refundEventReason(order, task);
             payment.setStatus(PaymentStatus.REFUNDED);
             payment.setErrorMessage(payloadText(task, "reason"));
             paymentRepository.save(payment);
+            // Timeline B: a lost parcel's order ends as REFUNDED. A cancelled order stays CANCELLED.
+            if (order != null && order.getStatus() == OrderStatus.LOST) {
+                order.setStatus(OrderStatus.REFUNDED);
+                orderRepository.save(order);
+            }
             outboxService.createRefundSuccessEvent(task.getOrderId(), refundTxnId); // refund email
+            orderEventRecorder.record(task.getOrderId(), OrderEventType.ORDER_REFUNDED,
+                    new OrderRefundedPayload(payment.getId(), payment.getAmount(), refundTxnId, why));
             logger.info("Refund successful: orderId={}, key={}, refundTxnId={}", task.getOrderId(), task.getIdempotencyKey(), refundTxnId);
         }
         closeTask(task, "PROCESSED", "refunded");
@@ -396,6 +427,26 @@ public class PaymentService {
         task.setProcessedAt(LocalDateTime.now(clock));
         outboxRepository.save(task);
         logger.info("{} task {} closed as {}: {}", task.getEventType(), task.getId(), status, why);
+    }
+
+    /** OrderPaid carries everything delivery needs to create the delivery, so delivery never calls store back */
+    private OrderPaidPayload orderPaidPayload(Order order, Payment payment) {
+        Account account = accountRepository.findById(order.getUserId()).orElse(null);
+        String email = account != null ? account.getEmail() : "customer@example.com";
+        String name = account != null && account.getUsername() != null ? account.getUsername() : "Customer";
+        return new OrderPaidPayload(payment.getId(), payment.getAmount(), payment.getBankTxnId(), email, name,
+                SHIP_TO, SHIP_FROM, order.getProduct().getName(), order.getQuantity());
+    }
+
+    /** OrderRefunded's reason (contract): why the money went back. Read before the order moves on from LOST. */
+    private String refundEventReason(Order order, PaymentOutbox task) {
+        if (order != null && order.getStatus() == OrderStatus.LOST) {
+            return "DELIVERY_LOST";
+        }
+        if (PAID_AFTER_CANCEL_REASON.equals(payloadText(task, "reason"))) {
+            return "PAID_AFTER_CANCEL";
+        }
+        return "ORDER_CANCELLED";
     }
 
     private static boolean isCancelled(Order order) {

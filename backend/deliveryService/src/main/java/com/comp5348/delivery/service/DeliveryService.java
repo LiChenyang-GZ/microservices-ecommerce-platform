@@ -1,69 +1,119 @@
 package com.comp5348.delivery.service;
 
+import com.comp5348.contracts.events.payload.OrderPaidPayload;
 import com.comp5348.delivery.config.RabbitMQConfig;
 import com.comp5348.delivery.dto.DeliveryOrderDTO;
 import com.comp5348.delivery.dto.DeliveryRequest;
-import com.comp5348.delivery.dto.NotificationMessage;
-import com.comp5348.delivery.dto.NotificationRequest;
 import com.comp5348.delivery.model.Delivery;
 import com.comp5348.delivery.repository.DeliveryRepository;
+import com.comp5348.delivery.service.events.DeliveryEventRecorder;
 import com.comp5348.delivery.utils.DeliveryStatus;
+import com.comp5348.delivery.utils.StringListConverter;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
 import java.time.LocalDateTime;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
+
 
 @Service
 public class DeliveryService {
 
     private static final Logger logger = LoggerFactory.getLogger(DeliveryService.class);
 
+    private static final StringListConverter ADDRESSES = new StringListConverter();
+
     // Dependency injection: repository and RabbitMQ template
     private final DeliveryRepository deliveryRepository;
     private final RabbitTemplate rabbitTemplate;
 
+    private final DeliveryEventRecorder eventRecorder;
+    private final JdbcTemplate jdbc;
+
     @Autowired
-    public DeliveryService(DeliveryRepository deliveryRepository, RabbitTemplate rabbitTemplate) {
+    public DeliveryService(DeliveryRepository deliveryRepository, RabbitTemplate rabbitTemplate,
+                           DeliveryEventRecorder eventRecorder, JdbcTemplate jdbc) {
         this.deliveryRepository = deliveryRepository;
         this.rabbitTemplate = rabbitTemplate;
+        this.eventRecorder = eventRecorder;
+        this.jdbc = jdbc;
     }
 
     /**
-     * Create a new delivery task
-     * @param request Request data received from API
-     * @return DTO object for API response
+     * Create the delivery for an order (sequence A: delivery reads OrderPaid and creates the delivery itself).
+     *
+     * One row per order: INSERT ... ON CONFLICT (order_id) DO NOTHING. If the row is already there, no delivery is
+     * created: either this OrderPaid is a repeat (rule 4, Kafka delivers at least once), or a cancel got here first
+     * and left a cancel marker (sequence C). Either way there is no second delivery and no second DeliveryCreated.
+     * If the row is CANCELLED, Cancelled is published once more, so store cannot be left with a paid order.
+     *
+     * @return the new delivery, or empty if this order already had a row
      */
-    @Transactional // Ensures atomicity of database operations (all success or all failure)
-    public DeliveryOrderDTO createDelivery(DeliveryRequest request) {
-        logger.info("Starting to create new delivery task, requester: {}", request.getEmail());
+    @Transactional
+    public Optional<DeliveryOrderDTO> createDelivery(DeliveryRequest request) {
+        LocalDateTime now = LocalDateTime.now();
+        int inserted = jdbc.update("""
+                INSERT INTO delivery (version, order_id, delivery_status, user_name, to_address, from_address,
+                                      product_name, email, quantity, creation_time, update_time, retry_count)
+                VALUES (0, ?, 'CREATED', ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                ON CONFLICT (order_id) DO NOTHING""",
+                request.getOrderId(), request.getUserName(), request.getToAddress(),
+                ADDRESSES.convertToDatabaseColumn(request.getFromAddress()), request.getProductName(),
+                request.getEmail(), request.getQuantity(), now, now);
+        if (inserted == 0) {
+            Delivery existing = deliveryRepository.findByOrderIdForUpdate(request.getOrderId()).orElseThrow();
+            if (existing.getDeliveryStatus() == DeliveryStatus.CANCELLED) {
+                // Paid, but cancelled here first (review 4b #2). The earlier Cancelled may have reached store before
+                // the order existed or was paid, and been dropped. Say it again now that store has a paid order:
+                // store finishes the cancel and refunds, or skips it if the order is already cancelled.
+                logger.info("Order {} was paid but its delivery is cancelled: publishing Cancelled again",
+                        request.getOrderId());
+                eventRecorder.recordCancelMarker(existing);
+                return Optional.empty();
+            }
+            logger.info("Order {} already has a delivery row (repeat OrderPaid), skipping", request.getOrderId());
+            return Optional.empty();
+        }
 
-        // 1. Convert request DTO to database entity
-        Delivery newDelivery = new Delivery(request);
+        Delivery savedDelivery = deliveryRepository.findByOrderId(request.getOrderId()).orElseThrow();
+        logger.info("Delivery {} created for order {}", savedDelivery.getId(), request.getOrderId());
+        // DeliveryCreated goes out with the new row, in the same transaction (rule 2)
+        eventRecorder.recordStatus(savedDelivery);
 
-        // 2. Save entity to database
-        Delivery savedDelivery = deliveryRepository.save(newDelivery);
-        logger.info("Delivery task successfully saved to database, ID: {}", savedDelivery.getId());
+        // Start the simulated delivery only once the row is committed, and only once. Sent inside the
+        // transaction, a fast worker could look for the row before it exists and drop the job (B12).
+        Long id = savedDelivery.getId();
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                rabbitTemplate.convertAndSend(RabbitMQConfig.DELIVERY_QUEUE_NAME, id);
+                logger.info("Sent new task ID {} to queue {}", id, RabbitMQConfig.DELIVERY_QUEUE_NAME);
+            }
+        });
 
-        // 3. Send a message to RabbitMQ queue to notify background service to process this delivery
-        //    We only send the ID, background service can fetch complete info from database
-        String queueName = "delivery_processing_queue"; // Queue name should be defined in config file
-        rabbitTemplate.convertAndSend(queueName, savedDelivery.getId());
-        logger.info("Sent new task ID {} to queue {}", savedDelivery.getId(), queueName);
+        return Optional.of(new DeliveryOrderDTO(savedDelivery));
+    }
 
-        rabbitTemplate.convertAndSend(RabbitMQConfig.DELIVERY_QUEUE_NAME, savedDelivery.getId());
-        logger.info("Sent new task ID {} to queue {}", savedDelivery.getId(), RabbitMQConfig.DELIVERY_QUEUE_NAME);
-
-        // 4. Convert saved entity to response DTO and return to Controller
-        return new DeliveryOrderDTO(savedDelivery);
+    /** OrderPaid carries everything a delivery needs, so delivery never calls store back */
+    @Transactional
+    public Optional<DeliveryOrderDTO> createDelivery(String orderId, OrderPaidPayload paid) {
+        DeliveryRequest request = new DeliveryRequest();
+        request.setOrderId(orderId);
+        request.setEmail(paid.customerEmail());
+        request.setUserName(paid.customerName());
+        request.setToAddress(paid.toAddress());
+        request.setFromAddress(paid.fromAddresses());
+        request.setProductName(paid.productName());
+        request.setQuantity(paid.quantity());
+        return createDelivery(request);
     }
 
     /**
@@ -86,19 +136,19 @@ public class DeliveryService {
         }
 
         Delivery deliveryToCancel = deliveryOptional.get();
-        
-        // 2. Verify if order belongs to this user
-        if (!deliveryToCancel.getEmail().equals(userEmail)) {
-            logger.warn("Cannot cancel: User {} attempted to cancel delivery order {} that doesn't belong to them (belongs to {})", 
+
+        // 2. Verify if order belongs to this user (a cancel marker has no email, so it never matches)
+        if (!userEmail.equals(deliveryToCancel.getEmail())) {
+            logger.warn("Cannot cancel: User {} attempted to cancel delivery order {} that doesn't belong to them (belongs to {})",
                     userEmail, deliveryId, deliveryToCancel.getEmail());
             return false;
         }
-        
+
         DeliveryStatus currentStatus = deliveryToCancel.getDeliveryStatus();
 
         // 3. Core business rule: cancellation only allowed in specific statuses
-        // Assumption: Once delivery starts (DELIVERING), it cannot be cancelled
-        if (currentStatus == DeliveryStatus.CREATED || currentStatus == DeliveryStatus.PICKED_UP) {
+        // Only CREATED can be cancelled (cancel API table: PICKED_UP and later is TOO_LATE)
+        if (currentStatus == DeliveryStatus.CREATED) {
 
             // 4. Execute cancellation
             deliveryToCancel.setDeliveryStatus(DeliveryStatus.CANCELLED);
@@ -106,15 +156,8 @@ public class DeliveryService {
             Delivery savedDelivery = deliveryRepository.save(deliveryToCancel);
             logger.info("Delivery ID: {} status successfully updated to -> CANCELLED", savedDelivery.getId());
 
-            // 5. [Critical] Send webhook notification to tell Store service "cancellation succeeded"!
-            // This reuses our Phase 3 results, forming a complete closed loop
-            if (savedDelivery.getNotificationUrl() != null && !savedDelivery.getNotificationUrl().isEmpty()) {
-                NotificationRequest payload = new NotificationRequest(savedDelivery.getId(), savedDelivery.getDeliveryStatus());
-                NotificationMessage message = new NotificationMessage(payload, savedDelivery.getNotificationUrl());
-
-                rabbitTemplate.convertAndSend(RabbitMQConfig.NOTIFICATION_QUEUE_NAME, message);
-                logger.info("Created webhook notification for cancellation of delivery ID: {}", savedDelivery.getId());
-            }
+            // 5. Cancelled event in the same transaction; store reads it and completes the cancel (refund, stock)
+            eventRecorder.recordStatus(savedDelivery);
 
             return true; // Return success
 
@@ -125,7 +168,7 @@ public class DeliveryService {
             return false; // Return failure
         }
     }
-    
+
     /**
      * Cancel a delivery task (no user verification, for internal calls)
      * @deprecated Please use cancelDelivery(Long, String) method
@@ -139,47 +182,16 @@ public class DeliveryService {
         }
         Delivery deliveryToCancel = deliveryOptional.get();
         DeliveryStatus currentStatus = deliveryToCancel.getDeliveryStatus();
-        
-        if (currentStatus == DeliveryStatus.CREATED || currentStatus == DeliveryStatus.PICKED_UP) {
+
+        // Only CREATED can be cancelled (cancel API table: PICKED_UP and later is TOO_LATE)
+        if (currentStatus == DeliveryStatus.CREATED) {
             deliveryToCancel.setDeliveryStatus(DeliveryStatus.CANCELLED);
             deliveryToCancel.setUpdateTime(LocalDateTime.now());
             Delivery savedDelivery = deliveryRepository.save(deliveryToCancel);
-            
-            if (savedDelivery.getNotificationUrl() != null && !savedDelivery.getNotificationUrl().isEmpty()) {
-                NotificationRequest payload = new NotificationRequest(savedDelivery.getId(), savedDelivery.getDeliveryStatus());
-                NotificationMessage message = new NotificationMessage(payload, savedDelivery.getNotificationUrl());
-                rabbitTemplate.convertAndSend(RabbitMQConfig.NOTIFICATION_QUEUE_NAME, message);
-            }
+            eventRecorder.recordStatus(savedDelivery);
             return true;
         }
         return false;
-    }
-
-    /**
-     * Create delivery tasks in batch
-     * @param requests List of delivery requests
-     * @return List of created delivery task DTOs
-     */
-    @Transactional
-    public List<DeliveryOrderDTO> createDeliveryBatch(List<DeliveryRequest> requests) {
-        List<Delivery> deliveryOrders = new ArrayList<>();
-
-        for (DeliveryRequest request : requests) {
-            deliveryOrders.add(new Delivery(request));
-        }
-
-        // Save all entities at once, more efficient than saving in loop
-        List<Delivery> savedDeliveries = deliveryRepository.saveAll(deliveryOrders);
-
-        // Send message for each saved entity and convert to DTO
-        for (Delivery savedDelivery : savedDeliveries) {
-            rabbitTemplate.convertAndSend(RabbitMQConfig.DELIVERY_QUEUE_NAME, savedDelivery.getId());
-            logger.info("Sent batch-created new task ID {} to queue {}", savedDelivery.getId(), RabbitMQConfig.DELIVERY_QUEUE_NAME);
-        }
-
-        return savedDeliveries.stream()
-                .map(DeliveryOrderDTO::new)
-                .collect(Collectors.toList());
     }
 
     /**
@@ -191,23 +203,23 @@ public class DeliveryService {
     @Transactional(readOnly = true)
     public DeliveryOrderDTO getDeliveryOrder(Long deliveryId, String userEmail) {
         Optional<Delivery> deliveryOptional = deliveryRepository.findById(deliveryId);
-        
+
         if (deliveryOptional.isEmpty()) {
             return null;
         }
-        
+
         Delivery delivery = deliveryOptional.get();
-        
+
         // Verify if order belongs to this user
-        if (!delivery.getEmail().equals(userEmail)) {
-            logger.warn("User {} attempted to access delivery {} which belongs to {}", 
+        if (!userEmail.equals(delivery.getEmail())) {
+            logger.warn("User {} attempted to access delivery {} which belongs to {}",
                     userEmail, deliveryId, delivery.getEmail());
             return null;
         }
-        
+
         return new DeliveryOrderDTO(delivery);
     }
-    
+
     /**
      * Get detailed information of a single delivery task by ID (no user verification, for internal calls)
      * @deprecated Please use getDeliveryOrder(Long, String) method
@@ -236,32 +248,53 @@ public class DeliveryService {
             .collect(Collectors.toList());
     }
 
+    /** What a cancel-by-order did (the cancel API table in the design) */
+    public enum CancelOutcome { CANCELLED_BEFORE_CREATED, CANCELLED, ALREADY_CANCELLED, TOO_LATE }
+
+    /** @param status the delivery's status after the call (for TOO_LATE: how far it already got) */
+    public record CancelResult(CancelOutcome outcome, DeliveryStatus status) {}
+
     /**
-     * Cancel delivery by order ID: only allowed when status is CREATED
+     * Cancel by order id: store's POST /internal/deliveries/cancel-by-order/{orderId}, and OrderCancelled.
+     *
+     *   no row yet         → insert a cancel marker (status CANCELLED) + Cancelled → CANCELLED_BEFORE_CREATED
+     *   CREATED            → CANCELLED + Cancelled                                  → CANCELLED
+     *   already CANCELLED  → nothing                                                → ALREADY_CANCELLED
+     *   PICKED_UP or later → nothing                                                → TOO_LATE
+     *
+     * First INSERT ... ON CONFLICT DO NOTHING, then SELECT ... FOR UPDATE. If OrderPaid is creating the row at the
+     * same moment, one insert waits for the other's commit; whichever comes second finds the row. Both ways end
+     * with one row, CANCELLED (B7). The row lock also beats a worker step in progress: the worker's save then
+     * fails its @Version check and its event rolls back with it.
      */
     @Transactional
-    public boolean cancelByOrderId(String orderId) {
-        java.util.Optional<Delivery> opt = deliveryRepository.findByOrderId(orderId);
-        if (opt.isEmpty()) return false;
-        Delivery d = opt.get();
-        if (d.getDeliveryStatus() != com.comp5348.delivery.utils.DeliveryStatus.CREATED) {
-            return false;
+    public CancelResult cancelByOrderId(String orderId) {
+        LocalDateTime now = LocalDateTime.now();
+        int inserted = jdbc.update("""
+                INSERT INTO delivery (version, order_id, delivery_status, quantity, creation_time, update_time, retry_count)
+                VALUES (0, ?, 'CANCELLED', 0, ?, ?, 0)
+                ON CONFLICT (order_id) DO NOTHING""", orderId, now, now);
+        Delivery d = deliveryRepository.findByOrderIdForUpdate(orderId).orElseThrow();
+        if (inserted == 1) {
+            logger.info("Order {} cancelled before its delivery existed: cancel marker {} inserted", orderId, d.getId());
+            eventRecorder.recordCancelMarker(d);
+            return new CancelResult(CancelOutcome.CANCELLED_BEFORE_CREATED, DeliveryStatus.CANCELLED);
         }
-        d.setDeliveryStatus(com.comp5348.delivery.utils.DeliveryStatus.CANCELLED);
-        d.setUpdateTime(java.time.LocalDateTime.now());
-        Delivery saved = deliveryRepository.save(d);
-
-        // Email notifications are now handled by Store Service via webhook notifications
-        // No need to send emails directly from Delivery Service
-
-        // If notification URL exists, send webhook notification to StoreService for refund/rollback inventory/email
-        try {
-            if (saved.getNotificationUrl() != null && !saved.getNotificationUrl().isEmpty()) {
-                com.comp5348.delivery.dto.NotificationRequest payload = new com.comp5348.delivery.dto.NotificationRequest(saved.getId(), saved.getDeliveryStatus());
-                com.comp5348.delivery.dto.NotificationMessage message = new com.comp5348.delivery.dto.NotificationMessage(payload, saved.getNotificationUrl());
-                rabbitTemplate.convertAndSend(com.comp5348.delivery.config.RabbitMQConfig.NOTIFICATION_QUEUE_NAME, message);
+        switch (d.getDeliveryStatus()) {
+            case CREATED -> {
+                d.setDeliveryStatus(DeliveryStatus.CANCELLED);
+                d.setUpdateTime(now);
+                Delivery saved = deliveryRepository.save(d);
+                eventRecorder.recordStatus(saved);
+                logger.info("Delivery {} for order {} cancelled", saved.getId(), orderId);
+                return new CancelResult(CancelOutcome.CANCELLED, DeliveryStatus.CANCELLED);
             }
-        } catch (Exception ignore) {}
-        return true;
+            case CANCELLED -> {
+                return new CancelResult(CancelOutcome.ALREADY_CANCELLED, DeliveryStatus.CANCELLED);
+            }
+            default -> {
+                return new CancelResult(CancelOutcome.TOO_LATE, d.getDeliveryStatus());
+            }
+        }
     }
 }

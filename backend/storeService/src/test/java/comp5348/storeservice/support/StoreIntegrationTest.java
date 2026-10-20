@@ -28,6 +28,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.kafka.KafkaContainer;
 
 import java.math.BigDecimal;
 import java.time.Duration;
@@ -59,7 +60,9 @@ import static org.assertj.core.api.Assertions.assertThat;
         "RABBITMQ_PASSWORD=guest",
         // 指向一个没人监听的端口：就算哪段代码绕过了 EmailAdapter，也发不到本机真的 RabbitMQ
         "spring.rabbitmq.port=1",
-        "outbox.processor.enabled=true"
+        "outbox.processor.enabled=true",
+        // 4b：store 的事件投递程序每 200 毫秒跑一轮（生产默认 1 秒），测试等事件不用等太久。红灯时没人读这个键
+        "event-outbox.publisher.interval-ms=200"
 })
 @Import(TestInfraConfig.class)
 public abstract class StoreIntegrationTest {
@@ -86,10 +89,22 @@ public abstract class StoreIntegrationTest {
     /** 假 bank 的 gRPC 那一半：扣款、退款（ADR-10）。也固定在一个空闲端口上，bankUnreachableFor() 停掉再启动。 */
     protected static final FakeBankGrpc FAKE_BANK_GRPC = new FakeBankGrpc(freePort());
 
+    /**
+     * 第 2 波 A：真的 Kafka（和 compose 同一个镜像）。和 compose 一样关掉自动建 topic，topic 由测试自己建（3 分区）。
+     * store 要消费 delivery-events、发布 order-events，测试用 KafkaProbe 往里发事件、读结果。
+     */
+    protected static final KafkaContainer KAFKA = new KafkaContainer("apache/kafka:3.9.1")
+            .withEnv("KAFKA_AUTO_CREATE_TOPICS_ENABLE", "false");
+
+    protected static final KafkaProbe kafka;
+
     static {
         POSTGRES.start();
         FAKE_BANK.start();
         FAKE_BANK_GRPC.start();
+        KAFKA.start();
+        kafka = new KafkaProbe(KAFKA.getBootstrapServers());
+        kafka.createTopics(KafkaProbe.ALL_TOPICS);
     }
 
     /** 把 store 配置里的 bank、delivery 地址改成假服务的地址 */
@@ -98,6 +113,8 @@ public abstract class StoreIntegrationTest {
         registry.add("bank.service.url", FAKE_BANK::baseUrl);
         registry.add("bank.grpc.address", () -> "localhost:" + FAKE_BANK_GRPC.port());
         registry.add("delivery.service.url", FAKE_BANK::baseUrl);
+        // 契约：compose 里的 SPRING_KAFKA_BOOTSTRAP_SERVERS 自动绑定到这个键
+        registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
     }
 
     /** 邮件不是这一步要测的东西：换成什么都不做的 Mockito 假对象 */
@@ -126,6 +143,9 @@ public abstract class StoreIntegrationTest {
                 .willReturn(okJson("{\"success\":true,\"balance\":1000000}")));
         FAKE_BANK.stubFor(post(urlEqualTo("/api/deliveries/create")).willReturn(okJson("{}")));
         FAKE_BANK.stubFor(post(urlPathMatching("/api/deliveries/cancel-by-order/.*")).willReturn(ok()));
+        // 第 2 波 A · 4b 的新取消接口（设计"取消接口"一节）：默认 delivery 同意取消
+        FAKE_BANK.stubFor(post(urlPathMatching("/internal/deliveries/cancel-by-order/.*"))
+                .willReturn(okJson("{\"result\":\"CANCELLED\"}")));
         // OutboxProcessor 每一轮会处理表里所有待办任务，所以清掉别的测试留下的，只留本测试自己的
         jdbc.update("DELETE FROM payment_outbox");
         // 别的测试留下的"待支付"订单直接标成已取消：否则 #14 拨表 16 分钟跑自动取消时，会把它们也取消、触发它们的退款
@@ -256,6 +276,11 @@ public abstract class StoreIntegrationTest {
     /** 假 delivery 收到的建配送单请求 */
     protected List<LoggedRequest> deliveryCreateRequests() {
         return FAKE_BANK.findAll(postRequestedFor(urlEqualTo("/api/deliveries/create")));
+    }
+
+    /** 假 delivery 收到的新取消接口请求（POST /internal/deliveries/cancel-by-order/{orderId}） */
+    protected List<LoggedRequest> deliveryCancelRequests() {
+        return FAKE_BANK.findAll(postRequestedFor(urlPathMatching("/internal/deliveries/cancel-by-order/.*")));
     }
 
     /**

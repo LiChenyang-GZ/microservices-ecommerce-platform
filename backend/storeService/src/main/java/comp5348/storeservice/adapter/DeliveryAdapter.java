@@ -1,30 +1,31 @@
 package comp5348.storeservice.adapter;
 
-import comp5348.storeservice.dto.DeliveryRequestDTO;
-import comp5348.storeservice.dto.DeliveryResponseDTO;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 
 import java.time.Duration;
 
+/**
+ * store's only HTTP call to delivery since wave 2 step 4b: asking it to cancel before store cancels a paid order.
+ * Creating a delivery is no longer an HTTP call: delivery reads OrderPaid from Kafka.
+ */
 @Component
 public class DeliveryAdapter {
-    
+
     private static final Logger logger = LoggerFactory.getLogger(DeliveryAdapter.class);
-    private static final int MAX_RETRIES = 3;
-    private static final long RETRY_DELAY_MS = 1000;
-    
+
     private final RestTemplate restTemplate;
-    
+
     @Value("${delivery.service.url:http://localhost:8081}")
     private String deliveryServiceUrl;
-    
+
     public DeliveryAdapter(RestTemplateBuilder builder) {
         this.restTemplate = builder
                 .requestFactory(() -> {
@@ -35,73 +36,30 @@ public class DeliveryAdapter {
                 })
                 .build();
     }
-    
-    /**
-     * Create delivery request - with retry mechanism
-     */
-    public DeliveryResponseDTO createDelivery(DeliveryRequestDTO request) {
-        logger.info("Calling Delivery service API: orderId={}", request.getOrderId());
-        
-        String url = deliveryServiceUrl + "/api/deliveries/create";
-        
-        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-            try {
-                HttpHeaders headers = new HttpHeaders();
-                headers.setContentType(MediaType.APPLICATION_JSON);
-                HttpEntity<DeliveryRequestDTO> entity = new HttpEntity<>(request, headers);
-                
-                ResponseEntity<java.util.Map> response = restTemplate.postForEntity(
-                        url, entity, java.util.Map.class);
 
-                if (response.getStatusCode().is2xxSuccessful()) {
-                    Object body = response.getBody();
-                    Long deliveryId = null;
-                    if (body instanceof java.util.Map<?, ?> map) {
-                        Object idVal = map.get("id");
-                        if (idVal instanceof Number) {
-                            deliveryId = ((Number) idVal).longValue();
-                        } else if (idVal != null) {
-                            try { deliveryId = Long.parseLong(String.valueOf(idVal)); } catch (Exception ignore) {}
-                        }
-                    }
-                    logger.info("Delivery request successful: orderId={}, deliveryId={}",
-                            request.getOrderId(), deliveryId);
-                    return new DeliveryResponseDTO(true, deliveryId, "Delivery created successfully");
-                }
-                
-            } catch (Exception e) {
-                logger.error("Delivery request attempt {} failed: {}", attempt, e.getMessage());
-                
-                if (attempt == MAX_RETRIES) {
-                    logger.error("Delivery request failed after {} attempts for orderId={}", 
-                            MAX_RETRIES, request.getOrderId());
-                    return new DeliveryResponseDTO(false, null, 
-                            "Delivery service unavailable: " + e.getMessage());
-                }
-                
-                try {
-                    Thread.sleep(RETRY_DELAY_MS);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-        }
-        
-        return new DeliveryResponseDTO(false, null, "Delivery request failed after retries");
+    /** What delivery said to a cancel request */
+    public enum CancelAnswer {
+        /** 200: CANCELLED_BEFORE_CREATED, CANCELLED or ALREADY_CANCELLED. Delivery will not ship this order. */
+        AGREED,
+        /** 409 TOO_LATE: the parcel is already picked up */
+        TOO_LATE,
+        /** No answer, or an error: we cannot tell whether delivery stopped it */
+        UNAVAILABLE
     }
 
-    /**
-     * Cancel delivery (by order ID, only CREATED can be cancelled)
-     */
-    public boolean cancelByOrderId(String orderId) {
-        String url = deliveryServiceUrl + "/api/deliveries/cancel-by-order/" + orderId;
+    /** POST /internal/deliveries/cancel-by-order/{orderId} (the design's cancel API section) */
+    public CancelAnswer cancelByOrderId(String orderId) {
+        String url = deliveryServiceUrl + "/internal/deliveries/cancel-by-order/" + orderId;
         try {
-            ResponseEntity<Void> resp = restTemplate.postForEntity(url, null, Void.class);
-            return resp.getStatusCode().is2xxSuccessful();
+            ResponseEntity<String> resp = restTemplate.postForEntity(url, null, String.class);
+            logger.info("Delivery cancel for order {}: {} {}", orderId, resp.getStatusCode(), resp.getBody());
+            return resp.getStatusCode().is2xxSuccessful() ? CancelAnswer.AGREED : CancelAnswer.UNAVAILABLE;
+        } catch (HttpClientErrorException.Conflict e) {
+            logger.info("Delivery says too late to cancel order {}: {}", orderId, e.getResponseBodyAsString());
+            return CancelAnswer.TOO_LATE;
         } catch (Exception e) {
             logger.warn("Cancel delivery by orderId {} failed: {}", orderId, e.getMessage());
-            return false;
+            return CancelAnswer.UNAVAILABLE;
         }
     }
 }
-

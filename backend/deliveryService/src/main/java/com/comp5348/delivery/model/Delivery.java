@@ -25,26 +25,25 @@ public class Delivery {
     @Version
     private int version;
 
-    private String orderId; // Associated order ID
+    // Associated order ID. Unique (DeliverySchemaUpgrade adds the index): one order, one delivery row, and the
+    // row is also the cancel marker when a cancel arrives before OrderPaid (sequence C).
+    private String orderId;
+
+    // userName, toAddress, fromAddress, productName and email may be null: a cancel marker has none of them
 
     @Column(nullable = false)
     @Enumerated(EnumType.STRING)
     private DeliveryStatus deliveryStatus;
 
-    @Column(nullable = false)
     private String userName;
 
-    @Column(nullable = false)
     private String toAddress;
 
-    @Column(nullable = false)
     @Convert(converter = StringListConverter.class)
     private List<String> fromAddress;
 
-    @Column(nullable = false)
     private String productName;
 
-    @Column(nullable = false)
     private String email;
 
     @Column(nullable = false)

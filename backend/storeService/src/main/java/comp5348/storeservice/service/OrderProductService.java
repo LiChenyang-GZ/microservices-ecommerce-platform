@@ -11,6 +11,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import com.comp5348.contracts.events.OrderEventType;
+import com.comp5348.contracts.events.payload.OrderPlacedPayload;
+import comp5348.storeservice.events.OrderEventRecorder;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -60,6 +63,9 @@ public class OrderProductService {
     @Autowired
     private OutboxService outboxService;
 
+    @Autowired
+    private OrderEventRecorder orderEventRecorder;
+
     /**
      * Create order and process payment
      * This is the core method of integration, handling the entire flow from product selection to payment completion
@@ -97,7 +103,11 @@ public class OrderProductService {
             orderService.cancelOrder(order.getId());
             throw new RuntimeException("Failed to create payment: " + e.getMessage());
         }
-        
+
+        // 4. OrderPlaced, in this same transaction as the order, the stock hold and the PAY task (rule 2)
+        orderEventRecorder.record(order.getId(), OrderEventType.ORDER_PLACED, new OrderPlacedPayload(
+                order.getUserId(), order.getProductId(), order.getQuantity(), order.getTotalAmount()));
+
         return order;
     }
     
