@@ -211,7 +211,7 @@ docs/
 
 ## Design docs
 
-- [docs/adr/](docs/adr/README.md): architecture decision records ADR-01 to ADR-20 (what was decided, why, what it costs, where the code is), and the eight reliability rules that code comments cite.
+- [docs/adr/](docs/adr/README.md): architecture decision records ADR-01 to ADR-22 (what was decided, why, what it costs, where the code is), and the eight reliability rules that code comments cite.
 - [docs/learning/](docs/learning/): one note per change, each explaining the problem, the failing test that reproduced it, the fix and the trade-offs.
   - [00 Event contract](docs/learning/00-event-contract.md) · [01 Idempotent payments](docs/learning/01-idempotent-payments.md) · [02 Docker and a database per service](docs/learning/02-docker-database-per-service.md) · [03 Go tracking consumer](docs/learning/03-go-tracking-consumer.md) · [04 Inventory pessimistic lock](docs/learning/04-inventory-pessimistic-lock.md) · [05 gRPC bank call](docs/learning/05-grpc-bank-call.md) · [06 Kafka delivery events](docs/learning/06-kafka-delivery-events.md) · [08 Kubernetes on kind](docs/learning/08-kubernetes-on-kind.md) · [09 Stuck delivery job sweeper](docs/learning/09-stuck-delivery-job-sweeper.md)
 - Module READMEs: [contracts](backend/contracts/README.md), [delivery](backend/deliveryService/README.md), [tracking](backend/trackingService/README.md), [k8s](k8s/README.md), [scenarios](backend/docker/scenarios/README.md).
@@ -223,5 +223,5 @@ docs/
 - **Single replicas.** Every stateful component runs once, and store runs one replica because `OutboxProcessor` has no lock across instances.
 - **Occasional 503 at the kind entry** (finding I2): a read through Envoy Gateway was once reset before reaching store; a retry passed. Not yet explained.
 - **Scenario scripts 01–03 run on compose only**; 04–08 also run on kind.
-- **Frontend test**: `App.test.js` fails on `main` (it still looks for the "learn react" text from the Create React App template).
+- **Frontend test**: `App.test.js` fails on `main` (it is the Create React App sample test, and jest cannot resolve `react-router-dom` when it runs).
 - **Next**: deploy to a cloud Kubernetes service (AKS is the plan), and replace the RabbitMQ-driven courier simulation with a workflow engine.

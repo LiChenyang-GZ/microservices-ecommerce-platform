@@ -1,5 +1,7 @@
 # ADR-12 · Each service owns its own database
 
+**English** | [中文](12-database-per-service.zh-CN.md)
+
 **Status:** Accepted
 
 ## Context

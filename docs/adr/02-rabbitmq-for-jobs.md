@@ -1,5 +1,7 @@
 # ADR-02 · Jobs go through RabbitMQ, events through Kafka
 
+**English** | [中文](02-rabbitmq-for-jobs.zh-CN.md)
+
 **Status:** Accepted (ADR-18 closes the gap this leaves)
 
 ## Context

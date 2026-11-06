@@ -1,5 +1,7 @@
 # ADR-04 · One path moves money, and every call is idempotent
 
+**English** | [中文](04-single-money-path-idempotent.zh-CN.md)
+
 **Status:** Accepted (key format amended by ADR-16)
 
 ## Context

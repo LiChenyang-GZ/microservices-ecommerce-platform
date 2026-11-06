@@ -1,5 +1,7 @@
 # ADR-14 · What this design leaves as it was
 
+**English** | [中文](14-out-of-scope.zh-CN.md)
+
 **Status:** Accepted
 
 ## Context

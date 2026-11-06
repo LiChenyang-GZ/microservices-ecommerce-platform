@@ -1,5 +1,7 @@
 # ADR-05 · A timeout is not a failure
 
+**English** | [中文](05-timeout-is-not-failure.zh-CN.md)
+
 **Status:** Accepted
 
 ## Context

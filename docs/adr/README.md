@@ -1,5 +1,7 @@
 # Architecture decision records
 
+**English** | [中文](README.zh-CN.md)
+
 Each record says what was decided, why, what it costs, and where the code is. They describe the system as it is on `main`; where building it changed the first plan, the record says so.
 
 ADR-01 to ADR-14 were written before the redesign was built. Code comments refer to them by number ("ADR-06", "rule 4"). ADR-15 onwards were decided while building it.
@@ -26,6 +28,8 @@ ADR-01 to ADR-14 were written before the redesign was built. Code comments refer
 | [18](18-stuck-delivery-sweeper.md) | A sweeper re-sends delivery jobs that stopped moving | Accepted |
 | [19](19-shared-event-contract.md) | One event contract, shared by Java and Go | Accepted |
 | [20](20-stock-pessimistic-lock.md) | Stock is reserved with pessimistic row locks | Accepted |
+| [21](21-schema-changes-at-startup.md) | Schema changes run as idempotent SQL at startup, not Flyway | Accepted |
+| [22](22-grpc-result-mapping.md) | How a gRPC reply from bank maps to succeeded, rejected or unknown | Accepted |
 
 ## Reliability rules
 
@@ -39,7 +43,7 @@ Code comments also cite these rules by number. Each one is part of the ADRs abov
 | 4 | Commit the database before the offset; consumers de-duplicate | 07 |
 | 5 | Status never goes backwards | 07 |
 | 6 | Broken message → DLT; transient trouble → wait in place | 08 |
-| 7 | A timeout is not a failure; retry with the same key | 05 |
+| 7 | A timeout is not a failure; retry with the same key | 05, 22 |
 | 8 | Pay Now locks the payment row and only retries a FAILED payment | 04 |
 
 New records get the next number. A record is not rewritten when a decision changes: a new record says what changed, and the old one's status points to it.

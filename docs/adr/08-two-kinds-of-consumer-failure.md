@@ -1,5 +1,7 @@
 # ADR-08 · Consumer failures: wait out an outage, move a bad message aside
 
+**English** | [中文](08-two-kinds-of-consumer-failure.zh-CN.md)
+
 **Status:** Accepted (refined during implementation into three cases)
 
 ## Context

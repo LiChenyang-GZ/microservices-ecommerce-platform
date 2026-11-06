@@ -1,5 +1,7 @@
 # ADR-15 · The single entry is Gateway API (Envoy Gateway) with an allowlist
 
+**English** | [中文](15-gateway-api-allowlist-entry.zh-CN.md)
+
 **Status:** Accepted (replaces "Ingress" in the first version of ADR-13)
 
 ## Context
@@ -8,6 +10,7 @@ The first plan used an Ingress. By the time the Kubernetes step was built, ingre
 ## Decision
 - The entry is Envoy Gateway, configured with Gateway API resources (`Gateway`, `HTTPRoute`).
 - Routes are an **allowlist**: only the method + path pairs the frontend calls are forwarded, one by one. Everything else under `/api`, plus `/actuator` and `/internal`, gets 404 from the entry itself.
+- Outside paths carry the service name and are rewritten: `/api/store/x` goes to store's `/api/x`, `/api/delivery/x` to delivery's `/api/x`. The Java services keep their own paths, and the frontend uses relative paths, so it only knows the one entry.
 - bank and tracking get no routes; the frontend does not call them.
 - compose has the same list in `frontend/nginx.conf`, so `localhost:3000` behaves like `localhost`; `check-entry.ps1` sends 58 requests to both and reports any difference.
 

@@ -1,5 +1,7 @@
 # ADR-07 · Events are ordered per order, and consumers de-duplicate
 
+**English** | [中文](07-order-by-order-dedupe-in-consumers.zh-CN.md)
+
 **Status:** Accepted
 
 ## Context

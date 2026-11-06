@@ -1,5 +1,7 @@
 # ADR-16 · Idempotency keys carry a random part, and bank compares content
 
+**English** | [中文](16-unguessable-idempotency-keys.zh-CN.md)
+
 **Status:** Accepted (amends ADR-04)
 
 ## Context

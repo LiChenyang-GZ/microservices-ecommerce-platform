@@ -1,5 +1,7 @@
 # ADR-17 · Probes check the service itself; store runs one replica
 
+**English** | [中文](17-probes-and-replicas.zh-CN.md)
+
 **Status:** Accepted
 
 ## Context

@@ -1,5 +1,7 @@
 # ADR-18 · A sweeper re-sends delivery jobs that stopped moving
 
+**English** | [中文](18-stuck-delivery-sweeper.zh-CN.md)
+
 **Status:** Accepted (closes the gap left by ADR-02)
 
 ## Context

@@ -29,7 +29,7 @@
 
 ## 可靠性设计
 
-每条都在代码里实现、有测试覆盖；代码链接见英文版的同名表格，每条决定的理由见[架构决策记录](docs/adr/README.md)（英文）。
+每条都在代码里实现、有测试覆盖；代码链接见英文版的同名表格，每条决定的理由见[架构决策记录](docs/adr/README.zh-CN.md)。
 
 | 问题 | 代码怎么做 |
 |---|---|
@@ -111,7 +111,7 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
 
 - [docs/learning/](docs/learning/)：每次改动一篇，讲问题、复现它的失败测试、修法和取舍（中英文各一份）。
 - 模块说明：[contracts](backend/contracts/README.zh-CN.md)、[delivery](backend/deliveryService/README.zh-CN.md)、[tracking](backend/trackingService/README.zh-CN.md)、[k8s](k8s/README.zh-CN.md)、[场景脚本](backend/docker/scenarios/README.zh-CN.md)。
-- [docs/adr/](docs/adr/README.md)：架构决策记录 ADR-01 到 ADR-20（英文），以及代码注释引用的 8 条可靠性规则。
+- [docs/adr/](docs/adr/README.zh-CN.md)：架构决策记录 ADR-01 到 ADR-22（中英文），以及代码注释引用的 8 条可靠性规则。
 - [docs/legacy/](docs/legacy/)：原课程项目（只有 RabbitMQ 的版本）留下的笔记。
 
 ## 已知限制和下一步
@@ -120,5 +120,5 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
 - **单副本**：所有有状态组件都只有一个；store 只能一个副本，因为 `OutboxProcessor` 没有跨实例的锁。
 - **kind 入口偶发 503**（发现 I2）：一次读请求经过 Envoy Gateway 时在到达 store 之前被重置，重试就过了，原因还没查清。
 - **场景脚本 01–03 只能跑 compose**；04–08 两边都能跑。
-- **前端测试**：`App.test.js` 在 `main` 上失败（还在找 CRA 模板里的 "learn react" 文字）。
+- **前端测试**：`App.test.js` 在 `main` 上失败（它是 CRA 自带的示例测试，跑的时候 jest 找不到 `react-router-dom`）。
 - **下一步**：部署到云上的 Kubernetes（计划 AKS），并把 RabbitMQ 驱动的模拟快递换成工作流引擎。

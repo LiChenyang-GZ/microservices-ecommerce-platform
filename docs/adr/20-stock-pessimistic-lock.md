@@ -1,5 +1,7 @@
 # ADR-20 · Stock is reserved with pessimistic row locks
 
+**English** | [中文](20-stock-pessimistic-lock.zh-CN.md)
+
 **Status:** Accepted
 
 ## Context

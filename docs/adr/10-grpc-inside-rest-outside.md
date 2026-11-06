@@ -1,5 +1,7 @@
 # ADR-10 · gRPC between services for money, REST for the browser
 
+**English** | [中文](10-grpc-inside-rest-outside.zh-CN.md)
+
 **Status:** Accepted
 
 ## Context

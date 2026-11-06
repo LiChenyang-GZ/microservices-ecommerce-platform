@@ -1,5 +1,7 @@
 # ADR-19 · One event contract, shared by Java and Go
 
+**English** | [中文](19-shared-event-contract.zh-CN.md)
+
 **Status:** Accepted
 
 ## Context

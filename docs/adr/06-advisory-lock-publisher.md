@@ -1,5 +1,7 @@
 # ADR-06 · One outbox publisher at a time, by a transaction-scoped advisory lock
 
+**English** | [中文](06-advisory-lock-publisher.zh-CN.md)
+
 **Status:** Accepted
 
 ## Context
