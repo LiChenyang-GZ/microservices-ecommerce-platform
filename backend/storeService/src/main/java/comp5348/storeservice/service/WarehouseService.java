@@ -14,7 +14,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
@@ -27,7 +26,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
-import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 
 @Service
@@ -119,36 +117,45 @@ public class WarehouseService {
         }
     }
 
-    @Async
-    @Transactional(isolation = Isolation.REPEATABLE_READ)
-    public CompletableFuture<WarehouseProductDTO> updateProductQuantity(ProductQuantityUpdateRequest updates) {
-        return CompletableFuture.supplyAsync(() -> {
-            for (ProductQuantityUpdateRequest.ProductQuantityUpdate update : updates.getUpdates()) {
-                try {
-                    WarehouseProduct warehouseProduct = warehouseProductRepository
-                            .findByWarehouseIdAndProductId(update.getWarehouseId(), update.getProductId())
-                            .orElseThrow(() -> new EntityNotFoundException("WarehouseProduct not found"));
+    /**
+     * Admin sets the stock of several warehouse rows in one request: all rows change, or none (one transaction).
+     *
+     * Each row is read with SELECT ... FOR UPDATE, like order holds (ADR-20), so an order holding stock at the same
+     * moment waits instead of failing on @Version. Rows are locked in a fixed order (product, then warehouse) so two
+     * admin requests cannot deadlock each other. A row that does not exist throws EntityNotFoundException, which
+     * rolls back the rows already changed.
+     *
+     * This used to be @Async with the work inside CompletableFuture.supplyAsync: it ran on another thread, outside
+     * the transaction (each save committed on its own), and returned after the first row.
+     */
+    @Transactional
+    public List<WarehouseProductDTO> updateProductQuantity(ProductQuantityUpdateRequest updates) {
+        List<ProductQuantityUpdateRequest.ProductQuantityUpdate> inLockOrder = updates.getUpdates().stream()
+                .sorted(Comparator.comparing(ProductQuantityUpdateRequest.ProductQuantityUpdate::getProductId)
+                        .thenComparing(ProductQuantityUpdateRequest.ProductQuantityUpdate::getWarehouseId))
+                .toList();
+        List<WarehouseProductDTO> updated = new ArrayList<>();
+        for (ProductQuantityUpdateRequest.ProductQuantityUpdate update : inLockOrder) {
+            WarehouseProduct warehouseProduct = warehouseProductRepository
+                    .findByWarehouseIdAndProductIdForUpdate(update.getWarehouseId(), update.getProductId())
+                    .orElseThrow(() -> new EntityNotFoundException("WarehouseProduct not found: warehouse "
+                            + update.getWarehouseId() + ", product " + update.getProductId()));
 
-                    warehouseProduct.setQuantity(update.getNewQuantity());
-                    warehouseProduct.setModifyTime(LocalDateTime.now());
-                    WarehouseProduct savedWarehouseProduct = warehouseProductRepository.save(warehouseProduct);
+            warehouseProduct.setQuantity(update.getNewQuantity());
+            warehouseProduct.setModifyTime(LocalDateTime.now());
+            WarehouseProduct savedWarehouseProduct = warehouseProductRepository.save(warehouseProduct);
 
-                    InventoryTransaction transaction = new InventoryTransaction();
-                    transaction.setProduct(savedWarehouseProduct.getProduct());
-                    transaction.setWarehouse(savedWarehouseProduct.getWarehouse());
-                    transaction.setQuantity(update.getNewQuantity());
-                    transaction.setTransactionTime(LocalDateTime.now());
-                    transaction.setType(InventoryTransactionType.IN);
-                    inventoryTransactionRepository.save(transaction);
+            InventoryTransaction transaction = new InventoryTransaction();
+            transaction.setProduct(savedWarehouseProduct.getProduct());
+            transaction.setWarehouse(savedWarehouseProduct.getWarehouse());
+            transaction.setQuantity(update.getNewQuantity());
+            transaction.setTransactionTime(LocalDateTime.now());
+            transaction.setType(InventoryTransactionType.IN);
+            inventoryTransactionRepository.save(transaction);
 
-                    return new WarehouseProductDTO(warehouseProduct);
-                } catch (OptimisticLockException e) {
-                    logger.error("optimistic lock exception during quantity update: {}", e.getMessage());
-                    throw e;
-                }
-            }
-            return null;
-        });
+            updated.add(new WarehouseProductDTO(savedWarehouseProduct));
+        }
+        return updated;
     }
 
     public WarehouseDTO updateWarehouse(Long id, Warehouse warehouseDetails) throws OptimisticLockException {

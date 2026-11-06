@@ -49,7 +49,7 @@ $balanceEnd = Balance $shopper.account
 $refunds = Sql 'bank_db' "select count(*) from transactions where to_account = '$($shopper.account)' and type = 'REFUND' and status = 'SUCCESS'"
 $stockEnd = Stock $product.id
 $deliveryRow = Sql 'delivery_db' "select delivery_status from delivery where order_id = '$($order.id)'"
-$timeline = Timeline $order.id $shopper.token
+$timeline = Timeline $order.id $shopper.token -Until 'Lost', 'OrderRefunded'
 "4. 订单 $($o.order.status)，付款 $($o.payment.status)；配送单 $deliveryRow"
 "   余额 $balanceStart -> $balanceEnd（应该回到原样），bank 退款 $refunds 笔（应该 1 笔）"
 "   库存 $stockStart -> $stockEnd（应该少 1：丢件不还库存）"

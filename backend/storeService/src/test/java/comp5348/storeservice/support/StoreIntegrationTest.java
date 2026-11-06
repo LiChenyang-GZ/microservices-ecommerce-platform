@@ -54,8 +54,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(properties = {
         // application.properties 里这些值来自环境变量；测试里给假的，避免依赖本机的 .env
         "jwt.secret=test-only-secret-test-only-secret-0123456789abcdef",
-        "DB_USERNAME=unused-overridden-by-testcontainers",
-        "DB_PASSWORD=unused-overridden-by-testcontainers",
         "RABBITMQ_USERNAME=guest",
         "RABBITMQ_PASSWORD=guest",
         // 指向一个没人监听的端口：就算哪段代码绕过了 EmailAdapter，也发不到本机真的 RabbitMQ

@@ -14,7 +14,6 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/api/warehouses")
@@ -87,11 +86,11 @@ public class WarehouseController {
     @PutMapping("/products/quantity")
     public ResponseEntity<BaseResponse> updateProductQuantities(@RequestBody ProductQuantityUpdateRequest updates) {
         try {
-            CompletableFuture<WarehouseProductDTO> warehouseProductDTO = warehouseService.updateProductQuantity(updates);
-            if (warehouseProductDTO.get() == null) {
+            List<WarehouseProductDTO> updated = warehouseService.updateProductQuantity(updates);
+            if (updated.isEmpty()) {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new BaseResponse(ResponseCode.W5.getMessage(), ResponseCode.W5.getResponseCode()));
             }
-            return ResponseEntity.ok().body(new WarehouseResponse(warehouseProductDTO.get().getWarehouse(),
+            return ResponseEntity.ok().body(new WarehouseResponse(updated.get(0).getWarehouse(),
                     ResponseCode.W1.getMessage(), ResponseCode.W1.getResponseCode()));
         } catch (EntityNotFoundException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(new BaseResponse(ResponseCode.W5.getMessage(), ResponseCode.W5.getResponseCode()));

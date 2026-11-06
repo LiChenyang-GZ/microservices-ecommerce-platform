@@ -26,7 +26,7 @@
 
 在 git worktree 里没有 `backend/.env`，就指过去：`./k8s/scripts/up.ps1 -EnvFile E:\study\5348\backend\.env`。
 
-第一次约 5 分钟（要拉节点镜像和 postgres / rabbitmq / kafka），之后约 3 分钟。可以重复跑。
+第一次约 5 分钟（要拉节点镜像和 postgres / rabbitmq / kafka），之后约 3 分钟。可以重复跑：集群已经在的话，节点停着会先启动它，最后会重启各个 Deployment，让它们用上刚加载的镜像。
 
 ## 验证
 

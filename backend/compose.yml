@@ -5,6 +5,10 @@
 # another service's password (no env_file on purpose).
 name: shop
 
+# Ports are published on 127.0.0.1 only: reachable from this machine, not from the network.
+# Application services restart on their own after a crash (unless-stopped: an explicit
+# `docker compose stop`, as the scenario scripts do, keeps them stopped).
+
 x-java-healthcheck: &java-healthcheck
   interval: 10s
   timeout: 5s
@@ -23,7 +27,7 @@ services:
       EMAIL_DB_PASSWORD: ${EMAIL_DB_PASSWORD:?set EMAIL_DB_PASSWORD in backend/.env}
       TRACKING_DB_PASSWORD: ${TRACKING_DB_PASSWORD:?set TRACKING_DB_PASSWORD in backend/.env}
     ports:
-      - '5433:5432' # host 5432 is taken by a locally installed PostgreSQL
+      - '127.0.0.1:5433:5432' # host 5432 is taken by a locally installed PostgreSQL
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -43,8 +47,8 @@ services:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USERNAME:?set RABBITMQ_USERNAME in backend/.env}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?set RABBITMQ_PASSWORD in backend/.env}
     ports:
-      - '5672:5672'
-      - '15672:15672' # management UI
+      - '127.0.0.1:5672:5672'
+      - '127.0.0.1:15672:15672' # management UI
     healthcheck:
       test: ['CMD', 'rabbitmq-diagnostics', '-q', 'ping']
       interval: 10s
@@ -75,7 +79,7 @@ services:
       # once instead of silently creating a new, empty topic.
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'false'
     ports:
-      - '9094:9094'
+      - '127.0.0.1:9094:9094'
     # No volume: `stop` keeps the data, `down` throws it away. Events are not
     # lost with it: they are still in each service's event_outbox in Postgres.
     healthcheck:
@@ -106,13 +110,14 @@ services:
     restart: 'no'
 
   store:
+    restart: unless-stopped
     build:
       context: .
       args:
         SERVICE: storeService
     image: shop-store
     ports:
-      - '8082:8082'
+      - '127.0.0.1:8082:8082'
     environment:
       DB_HOST: postgres
       DB_PORT: '5432'
@@ -141,14 +146,15 @@ services:
       test: ['CMD', 'curl', '-fsS', 'http://localhost:8082/actuator/health']
 
   bank:
+    restart: unless-stopped
     build:
       context: .
       args:
         SERVICE: bankService
     image: shop-bank
     ports:
-      - '8084:8084'
-      - '9090:9090' # gRPC, for store; published so grpcurl can reach it
+      - '127.0.0.1:8084:8084'
+      - '127.0.0.1:9090:9090' # gRPC, for store; published so grpcurl can reach it
     environment:
       DB_HOST: postgres
       DB_PORT: '5432'
@@ -163,13 +169,14 @@ services:
       test: ['CMD', 'curl', '-fsS', 'http://localhost:8084/actuator/health']
 
   delivery:
+    restart: unless-stopped
     build:
       context: .
       args:
         SERVICE: deliveryService
     image: shop-delivery
     ports:
-      - '8081:8081'
+      - '127.0.0.1:8081:8081'
     environment:
       DB_HOST: postgres
       DB_PORT: '5432'
@@ -193,13 +200,14 @@ services:
       test: ['CMD', 'curl', '-fsS', 'http://localhost:8081/actuator/health']
 
   email:
+    restart: unless-stopped
     build:
       context: .
       args:
         SERVICE: emailService
     image: shop-email
     ports:
-      - '8083:8083'
+      - '127.0.0.1:8083:8083'
     environment:
       DB_HOST: postgres
       DB_PORT: '5432'
@@ -221,10 +229,11 @@ services:
 
   # Go read service (ADR-11). Healthcheck is built into the image (Dockerfile).
   tracking:
+    restart: unless-stopped
     build: ./trackingService
     image: shop-tracking
     ports:
-      - '8085:8085'
+      - '127.0.0.1:8085:8085'
     environment:
       DATABASE_URL: postgres://tracking_user:${TRACKING_DB_PASSWORD}@postgres:5432/tracking_db?sslmode=disable
       KAFKA_BROKERS: kafka:9092
@@ -237,11 +246,12 @@ services:
         condition: service_completed_successfully
 
   frontend:
+    restart: unless-stopped
     build: ../frontend
     image: shop-frontend
     ports:
       # Must stay 3000: the backends only allow CORS from http://localhost:3000
-      - '3000:80'
+      - '127.0.0.1:3000:80'
     healthcheck:
       test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1/']
       interval: 10s
