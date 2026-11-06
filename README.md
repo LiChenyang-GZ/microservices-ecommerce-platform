@@ -1,803 +1,226 @@
-# Distributed E-Commerce System
+# Microservices E-Commerce Platform
 
-## COMP5348 Group Project - Enterprise-Scale Software Development
+**English** | [中文](README.zh-CN.md)
 
-A fault-tolerant, distributed e-commerce application built with microservices architecture, demonstrating high availability and reliability through various enterprise patterns including Outbox Pattern, Saga Compensation, and Message-Driven Architecture.
+An online shop split into five services that talk through Kafka events, RabbitMQ jobs and one gRPC call. The point of the project is the hard part of a distributed checkout: a customer must be **charged exactly once**, **refunded exactly once** when something goes wrong, and an order must never get stuck or move backwards, even when a broker, the bank or a consumer is down at the wrong moment.
 
----
+It started as a team project for COMP5348 (Enterprise-Scale Software Development) at the University of Sydney: four Spring Boot services, one shared database and RabbitMQ. I then redesigned and extended it on my own: idempotent payments, a database per service, Kafka with an outbox, a Go read service, gRPC between store and bank, and a local Kubernetes deployment. Each change was built test-first and checked with end-to-end scenario scripts.
 
-## Table of Contents
+## Architecture
 
-1. [System Architecture](#system-architecture)
-2. [Prerequisites](#prerequisites)
-3. [Quick Start Guide](#quick-start-guide)
-4. [Service Details](#service-details)
-5. [Database and Data Initialization](#database-and-data-initialization)
-6. [Testing the Application](#testing-the-application)
-7. [Fault Tolerance Scenarios](#fault-tolerance-scenarios)
-8. [API Documentation](#api-documentation)
-9. [Troubleshooting](#troubleshooting)
+```mermaid
+flowchart LR
+    user([Browser])
 
----
+    subgraph entry[Single entry]
+        gw["compose: nginx in frontend :3000<br/>kind: Envoy Gateway :80<br/>(allowlist of routes)"]
+    end
 
-## System Architecture
+    user --> gw
+    gw --> fe[frontend<br/>React]
+    gw -->|/api/store/...| store
+    gw -->|/api/delivery/...| delivery
+    gw -->|/api/email/...| email
 
-The system consists of 4 microservices and 1 frontend application:
+    store[store<br/>Spring Boot] -->|gRPC Transfer / Refund| bank[bank<br/>Spring Boot]
+    store -->|HTTP /internal cancel| delivery[delivery<br/>Spring Boot]
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Frontend (React)                          │
-│                   http://localhost:3000                      │
-└──────────────────────┬──────────────────────────────────────┘
-                       │
-                       ↓
-┌──────────────────────────────────────────────────────────────┐
-│              Store Service (Spring Boot)                     │
-│                 http://localhost:8082                        │
-│  • Order Management    • Payment Processing                  │
-│  • Warehouse Management • Inventory Control                  │
-└───────┬────────────┬─────────────┬─────────────┬────────────┘
-        │            │             │             │
-        ↓            ↓             ↓             ↓
-   ┌────────┐  ┌─────────┐  ┌──────────┐  ┌──────────┐
-   │  Bank  │  │Delivery │  │  Email   │  │ RabbitMQ │
-   │ :8084  │  │  :8081  │  │  :8083   │  │  :5672   │
-   └────────┘  └─────────┘  └──────────┘  └──────────┘
-```
+    subgraph kafka[Kafka · 3 partitions, key = orderId]
+        oe[(order-events)]
+        de[(delivery-events)]
+        oed[(order-events.DLT)]
+        ded[(delivery-events.DLT)]
+    end
 
-### Technology Stack
+    store -- event_outbox --> oe
+    delivery -- event_outbox --> de
+    oe --> delivery
+    oe --> tracking[tracking<br/>Go]
+    de --> store
+    de --> tracking
+    delivery -. broken message .-> oed
+    store -. broken message .-> ded
+    tracking -. broken message .-> oed
+    tracking -. broken message .-> ded
 
-**Backend:**
-- Java 17+
-- Spring Boot 3.x
-- Spring Data JPA (Hibernate ORM)
-- RabbitMQ (Message Queue)
-- H2/MySQL Database
-- JWT Authentication
-- Gradle Build System
+    subgraph rmq[RabbitMQ · jobs]
+        dq[(delivery_processing_queue)]
+        dlq[(delivery_dead_letter_queue)]
+        eq[(email_queue)]
+    end
 
-**Frontend:**
-- React 19
-- React Router
-- Axios (HTTP Client)
-- Context API (State Management)
+    delivery <--> dq
+    dq -. failed job .-> dlq --> delivery
+    store --> eq --> email[email<br/>Spring Boot]
 
----
-
-## Prerequisites
-
-Ensure you have the following installed on your system:
-
-- **Java Development Kit (JDK) 17 or higher**
-  - Verify: `java -version`
-  
-- **Node.js 16+ and npm**
-  - Verify: `node -v` and `npm -v`
-  
-- **PostgreSQL Database**
-  - Version: PostgreSQL 12+
-  - Verify: `psql --version`
-  - **Required:** Create database `webuser` before starting Store Service
-  
-- **Docker and Docker Compose** (for RabbitMQ)
-  - Verify: `docker -v` and `docker-compose -v`
-  
-- **Git** (for cloning the repository)
-  - Verify: `git --version`
-
----
-
-## Quick Start Guide
-
-### Step 0: Setup PostgreSQL Database
-
-Create the required PostgreSQL database before starting the Store Service:
-
-```bash
-# Connect to PostgreSQL
-psql -U postgres
-
-# Create database
-CREATE DATABASE webuser;
-
-# Exit
-\q
+    store --- sdb[(store_db)]
+    bank --- bdb[(bank_db)]
+    delivery --- ddb[(delivery_db)]
+    email --- edb[(email_db)]
+    tracking --- tdb[(tracking_db)]
 ```
 
-Alternatively, if the database already exists, you can skip this step.
+- **Kafka carries facts** ("order paid", "parcel lost"). Every producer writes the event into its own `event_outbox` table in the same transaction as the business change; a publisher sends it later.
+- **RabbitMQ carries jobs**: delivery's simulated courier steps (one job per step, about 10 s apart) and store's emails.
+- **gRPC** is used for the one call where money moves: store → bank.
+- **One PostgreSQL server, one database and one login per service.** No service reads another service's database.
+- **The entry is an allowlist**: only the method + path pairs the frontend uses are forwarded; `/internal`, `/actuator` and anything unlisted get 404 at the entry ([k8s/gateway/routes.yaml](k8s/gateway/routes.yaml), [frontend/nginx.conf](frontend/nginx.conf)).
 
-### Step 1: Clone the Repository
+## Services
 
-```bash
-git clone https://github.sydney.edu.au/COMP4348-5348-2025/[your-repo-name].git
-cd TUT08-08
+| Service | Language / framework | What it owns | Database | Interfaces |
+|---|---|---|---|---|
+| **store** | Java 17, Spring Boot 3.5 | users and login (JWT), products and warehouse stock, orders, payments; starts every charge and refund | `store_db` | REST `/api/user`, `/api/products`, `/api/orders`, `/api/store/...`, `/api/payments`; produces `order-events`, consumes `delivery-events`; gRPC client of bank; publishes to `email_queue` |
+| **bank** | Java 17, Spring Boot 3.5, grpc-java | accounts and money transfers | `bank_db` | gRPC `BankService.Transfer` / `Refund` on :9090 ([bank.proto](backend/contracts/src/main/proto/bank/v1/bank.proto)); REST `/api/bank/...` for accounts and balances |
+| **delivery** | Java 17, Spring Boot 3.5 | deliveries and the simulated courier (CREATED → PICKED_UP → DELIVERING → RECEIVED, or LOST) | `delivery_db` | REST `/api/deliveries/...`, `/api/admin/dlq/...`, `/internal/deliveries/cancel-by-order/{orderId}`; consumes `order-events`, produces `delivery-events`; RabbitMQ job queue |
+| **email** | Java 17, Spring Boot 3.5 | verification codes and notification emails (Gmail SMTP) | `email_db` | REST `/api/email/...`; consumes `email_queue` |
+| **tracking** | Go 1.27, franz-go, pgx | a read-only timeline of every event per order | `tracking_db` | `GET /api/tracking/orders/{orderId}/timeline`; consumes both topics |
+| frontend | React 19, served by nginx | shop UI | — | the single entry in compose (`localhost:3000`) |
+
+Shared event and gRPC definitions live in [backend/contracts](backend/contracts/README.md): one `EventCodec`, example JSON for every event type, and contract tests that both the Java services and the Go service run against.
+
+## Reliability design
+
+Each rule below is enforced in code and covered by tests; the ADR numbers match comments in the code.
+
+| Problem | What the code does | Where |
+|---|---|---|
+| A retried charge must not charge twice | Every charge and refund carries an idempotency key (`PAY-{paymentId}-{random}` / `REFUND-…`). bank stores it under a unique constraint, locks both account rows in a fixed order and checks the key again under the lock; the same key with different content is rejected as a conflict. A timeout is `PAY_UNKNOWN`, not a failure: it is retried with the **same** key (ADR-04, ADR-05). | [BankService.java](backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java), [PaymentService.java](backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java) |
+| A charge or refund must survive a crash | store never calls bank inside a request. It writes a PAY / REFUND task to `payment_outbox` in the same transaction as the order change; `OutboxProcessor` runs the tasks with fast and slow retries. | [OutboxProcessor.java](backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java) |
+| An event must not be lost between "commit" and "send" | Events are rows in each service's `event_outbox`, written in the business transaction. A publisher sends them in id order, one Kafka ack at a time, under `pg_try_advisory_xact_lock` so two instances never send the same rows (ADR-06). If Kafka is down, orders still get paid; events wait in the table. | store [EventOutboxPublisher.java](backend/storeService/src/main/java/comp5348/storeservice/events/EventOutboxPublisher.java), delivery [EventOutboxPublisher.java](backend/deliveryService/src/main/java/com/comp5348/delivery/service/events/EventOutboxPublisher.java) |
+| Saga compensation: a lost parcel | delivery publishes `Lost`; store marks the order LOST and writes a REFUND task in the same transaction; when bank confirms, the order becomes REFUNDED and `OrderRefunded` is published. | [DeliveryEventService.java](backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java) |
+| Cancel races the delivery being created | If the customer cancels before delivery has read `OrderPaid`, delivery inserts a **cancel marker** (a CANCELLED row for that order). When the late `OrderPaid` arrives it finds the row and creates nothing (ADR-09). | [DeliveryService.java](backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java) |
+| Kafka delivers at least once | Consumers commit the offset only after their database transaction. Duplicates are harmless: delivery keeps one row per order, tracking inserts with `ON CONFLICT (event_id) DO NOTHING`, store ignores events that would not move the order forward. | [OrderEventsConsumer.java](backend/deliveryService/src/main/java/com/comp5348/delivery/service/events/OrderEventsConsumer.java), [store.go](backend/trackingService/internal/store/store.go), [DeliveryEventsConsumer.java](backend/storeService/src/main/java/comp5348/storeservice/events/DeliveryEventsConsumer.java) |
+| Events arrive late or out of order | Status never goes backwards: store ranks CREATED < PICKED_UP < DELIVERING < final and skips any event that is not above the order's current rank. All events of one order share a partition key (`orderId`), so they stay in order (ADR-07). | [DeliveryEventService.java](backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java) |
+| A poison message must not block a partition | A message that cannot be parsed goes straight to `<topic>.DLT`; other errors are retried, then dead-lettered with an `ALERT` log. Go and Java write the same DLT headers (ADR-08). | delivery [KafkaConsumerConfig.java](backend/deliveryService/src/main/java/com/comp5348/delivery/service/events/KafkaConsumerConfig.java), store [KafkaConsumerConfig.java](backend/storeService/src/main/java/comp5348/storeservice/events/KafkaConsumerConfig.java), tracking [dlt.go](backend/trackingService/internal/consumer/dlt.go) |
+| A delivery job lost while RabbitMQ is down | Found by scenario 05: a delivery created while RabbitMQ was down stayed CREATED forever. A sweeper now re-sends the job of any non-final delivery that has not moved for 60 s; it claims the row with a conditional `UPDATE` first, so two instances never both resend. | [StuckDeliveryJobSweeper.java](backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/StuckDeliveryJobSweeper.java), [learning note 09](docs/learning/09-stuck-delivery-job-sweeper.md) |
+
+Also: stock is reserved with pessimistic row locks ([learning note 04](docs/learning/04-inventory-pessimistic-lock.md)); unpaid orders are cancelled automatically after a timeout, re-checked under the order's row lock ([UnpaidOrderCanceller.java](backend/storeService/src/main/java/comp5348/storeservice/scheduler/UnpaidOrderCanceller.java)).
+
+## End-to-end scenarios
+
+Scripts in [backend/docker/scenarios](backend/docker/scenarios/README.md) drive the running system through the HTTP API, then check each service's own database. Each one registers a fresh user, so they can be run again. They need PowerShell 7.
+
+| Scenario | What happens | Run |
+|---|---|---|
+| **Order and pay** | One order goes PAID → PICKED_UP → IN_TRANSIT → DELIVERED; the account is charged once; the tracking timeline shows all six events in order. | `pwsh backend/docker/scenarios/06-sequence-a-order-to-received.ps1` |
+| **Lost parcel → refund** | delivery is restarted with a 100% loss rate; the order goes LOST → REFUNDED, the customer is refunded once and the balance is back where it started. | `pwsh backend/docker/scenarios/07-sequence-b-lost-refund.ps1` |
+| **Cancel races delivery** | Kafka is stopped so `OrderPaid` arrives late; the customer cancels first. The cancel marker stops the late event: no delivery is created, one refund, stock returned. | `pwsh backend/docker/scenarios/08-sequence-c-cancel-before-delivery-reads.ps1` |
+
+Add `-Target kind` to run 04–08 on the Kubernetes cluster instead of compose. Failure scenarios 01–05 cover double Pay Now, cancel after paying, bank down during payment, Kafka down, and RabbitMQ down; see the [scenario README](backend/docker/scenarios/README.md).
+
+## Quick start
+
+You need Docker Desktop and PowerShell 7. All commands run from the repository root.
+
+### Docker Compose
+
+```powershell
+Copy-Item backend/.env.example backend/.env
+# Fill in backend/.env: every *_PASSWORD, and JWT_SECRET (at least 64 characters).
+# MAIL_USERNAME / MAIL_PASSWORD can stay empty: emails are then not sent, the rest works.
+
+docker compose -f backend/compose.yml up -d --build --wait   # first build takes several minutes
+pwsh backend/docker/smoke-order.ps1                          # one order: PAID, charged once, delivery moves
 ```
 
-### Step 2: Start RabbitMQ
+Open http://localhost:3000 and register a user (new users get a bank account with 10,000). Other addresses on this machine:
 
-RabbitMQ is required for asynchronous messaging between services.
+| What | Address |
+|---|---|
+| shop | http://localhost:3000 |
+| store / delivery / email / bank / tracking | `localhost:8082` / `8081` / `8083` / `8084` (gRPC `9090`) / `8085` |
+| PostgreSQL | `localhost:5433` (user `postgres`, databases `store_db`, `bank_db`, ...) |
+| RabbitMQ management | http://localhost:15672 |
+| Kafka (from the host) | `localhost:9094` |
 
-```bash
+Stop with `docker compose -f backend/compose.yml stop`. `down -v` also deletes the database volume.
+
+
+### Kubernetes (kind)
+
+The same images on a one-node [kind](https://kind.sigs.k8s.io/) cluster, behind a single entry at `http://localhost` (Envoy Gateway, Gateway API). Needs kind v0.33 and kubectl 1.33 or newer; details in [k8s/README.md](k8s/README.md).
+
+```powershell
+docker compose -f backend/compose.yml stop     # do not run compose and kind at the same time
+docker compose -f backend/compose.yml build    # kind uses the shop-* images built by compose
+./k8s/scripts/up.ps1                           # creates the cluster, loads images, applies k8s/ (about 5 min the first time)
+./k8s/scripts/smoke-order.ps1
+```
+
+Remove it with `kind delete cluster --name shop` (this deletes the cluster's data; the compose volume is not touched).
+
+### Environment variables
+
+All secrets come from `backend/.env` (git-ignored; template in [backend/.env.example](backend/.env.example)). compose passes each container only the variables it needs, and `k8s/scripts/apply-secrets.ps1` turns the same file into one Secret per service.
+
+| Variable | Used by |
+|---|---|
+| `POSTGRES_PASSWORD` | PostgreSQL superuser |
+| `STORE_DB_PASSWORD`, `BANK_DB_PASSWORD`, `DELIVERY_DB_PASSWORD`, `EMAIL_DB_PASSWORD`, `TRACKING_DB_PASSWORD` | one login per service database, created on the first start of an empty volume |
+| `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD` | RabbitMQ |
+| `JWT_SECRET` | store signs login tokens (HS512, at least 64 characters) |
+| `MAIL_USERNAME`, `MAIL_PASSWORD` | email: a Gmail address and a 16-character app password |
+
+The full list of addresses and settings for Kafka and gRPC is in [docs/wave2-config-contract.md](docs/wave2-config-contract.md).
+
+## Tests
+
+The Java integration tests and the Go integration tests start real PostgreSQL, Kafka and RabbitMQ with Testcontainers, so Docker must be running. Stop the compose stack and the kind node first; they compete for memory and make the containers slow to start.
+
+```powershell
 cd backend
-docker-compose up -d
+./gradlew test                        # every Java module (store has the most tests and takes several minutes)
+./gradlew :bankService:test           # or one module: contracts, storeService, bankService, deliveryService
+
+cd trackingService
+go test ./...                         # unit tests
+go test -tags integration -count=1 ./...   # plus real Postgres + Kafka (2–3 minutes)
 ```
 
-Verify RabbitMQ is running:
-- Access RabbitMQ Management Console: http://localhost:15672
-- Login: `admin` / `admin`
+What the tests cover, beyond unit tests:
 
-### Step 3: Start Backend Services
+- **contracts**: every example event decodes and re-encodes the same in Java; the Go service runs the same examples.
+- **bank**: concurrent transfers from one account, repeated and conflicting idempotency keys.
+- **store**: idempotency keys and unknown results, Pay Now twice, refunds, cancel after payment, unpaid-order auto-cancel, concurrent stock holds, publishing `order-events`, consuming `delivery-events` and the DLT, and an architecture test that only `OutboxProcessor` calls bank.
+- **delivery**: cancel marker, duplicate `OrderPaid`, lost parcels, DLT, and the stuck-job sweeper with RabbitMQ stopped and started again.
+- **tracking**: crashes before and after the database write, broken messages to the DLT, cross-topic ordering, rebalance, replay and graceful shutdown, against real Kafka and Postgres.
 
-Open **4 separate terminal windows** and start each service:
+The end-to-end scenarios above run against a live stack and are the last check before a merge. The frontend has `npm test` (Create React App), but its one test, `App.test.js`, currently fails (see below).
 
-#### Terminal 1 - Bank Service
-
-```bash
-cd backend/bankService
-./gradlew bootRun
-```
-
-Wait for the message: `Started BankApplication in X seconds`
-
-#### Terminal 2 - Email Service
-
-```bash
-cd backend/emailService
-./gradlew bootRun
-```
-
-Wait for the message: `Started EmailApplication in X seconds`
-
-#### Terminal 3 - Delivery Service
-
-```bash
-cd backend/deliveryService
-./gradlew bootRun
-```
-
-Wait for the message: `Started DeliveryApplication in X seconds`
-
-#### Terminal 4 - Store Service (Main Service)
-
-```bash
-cd backend/storeService
-./gradlew bootRun
-```
-
-Wait for the message: `Started StoreServiceApplication in X seconds`
-
-**Service Ports:**
-- Bank Service: http://localhost:8084
-- Email Service: http://localhost:8083
-- Delivery Service: http://localhost:8081
-- Store Service: http://localhost:8082
-
-### Step 4: Start Frontend Application
-
-Open a **5th terminal window**:
-
-```bash
-cd frontend
-npm install        # Only needed for first time
-npm start
-```
-
-The frontend will automatically open in your browser at http://localhost:3000
-
----
-
-## Service Details
-
-### 1. Store Service (Main Application)
-
-**Port:** 8082  
-**Database:** PostgreSQL (localhost:5432/webuser)  
-**Endpoints:** http://localhost:8082/api
-
-**Key Features:**
-- Order creation and management
-- Payment processing with retry mechanism
-- Warehouse and inventory management with optimistic locking
-- Outbox pattern for reliable event delivery
-- Saga compensation for distributed transactions
-- JWT authentication
-
-**Configuration:** `backend/storeService/src/main/resources/application.properties`
-
-**Database Credentials:**
-- Username: `(your database username)`
-- Password: `(your database password)`
-- **Note:** Configure in `application.properties` before running
-
-### 2. Bank Service
-
-**Port:** 8084  
-**Database:** H2 (in-memory) - automatically created on startup  
-**Endpoints:** http://localhost:8084/api/bank
-
-**Key Features:**
-- Account creation and management
-- Fund transfer with transaction logging
-- Refund processing
-- Balance inquiry
-
-**Pre-loaded Accounts:**
-- Store Account: `STORE_ACCOUNT_001` (Balance: 100,000)
-- Customer accounts are created automatically when users register
-
-### 3. Delivery Service
-
-**Port:** 8081  
-**Database:** H2 (in-memory)  
-**Endpoints:** http://localhost:8081/api/deliveries
-
-**Key Features:**
-- Delivery task creation
-- Status updates (CREATED → PICKED_UP → IN_TRANSIT → DELIVERED)
-- Package loss simulation (5% probability)
-- Webhook notifications to Store Service
-- Dead letter queue for failed notifications
-
-### 4. Email Service
-
-**Port:** 8083  
-**Database:** H2 (in-memory)  
-**Message Queue:** RabbitMQ
-
-**Key Features:**
-- Asynchronous email sending via RabbitMQ
-- Manual acknowledgment for reliability
-- Email verification codes
-- Order status notifications
-- Refund confirmations
-
-**Note:** Emails are printed to console (not actually sent)
-
----
-
-## Database and Data Initialization
-
-### Automatic Data Initialization
-
-All services automatically initialize data on startup using Spring Boot's `@PostConstruct` or `DataInitializer` classes.
-
-### Store Service - Initial Data
-
-**File:** `backend/storeService/src/main/java/comp5348/storeservice/config/StoreDataInitializer.java`
-
-**Created Entities:**
-
-1. **Products:** (5 products)
-   - iPhone 13 (Price: 6999.00) - A15 Bionic chip, dual camera system
-   - iPhone 14 (Price: 7999.00) - Longer battery life, crash detection
-   - iPhone 15 (Price: 8999.00) - A16 chip, USB-C, Dynamic Island
-   - iPhone 16 (Price: 9999.00) - Enhanced AI experience, camera upgrade
-   - iPhone 17 (Price: 10999.00) - Next-generation chip and imaging system
-
-2. **Warehouses:** (3 warehouses)
-   - Main Warehouse (Location: Warehouse 1, Chaoyang District, Beijing)
-   - Shanghai Warehouse (Location: Warehouse 2, Pudong New Area, Shanghai)
-   - Guangzhou Warehouse (Location: Warehouse 3, Tianhe District, Guangzhou)
-
-3. **Warehouse Inventory:**
-   - Each product has total inventory of 10 units distributed across warehouses
-   - Some warehouses stock certain products, some don't (realistic distribution)
-   - Total inventory: 50 items (10 per product across all warehouses)
-
-**Note:** No pre-configured demo user. Users must register a new account to use the system.
-
-### Bank Service - Initial Data
-
-**File:** `backend/bankService/src/main/java/com/comp5348/bank/config/DataInitializer.java`
-
-**Created Accounts:**
-- Store Account: `STORE_ACCOUNT_001` (Balance: 100,000)
-- Customer Accounts: Auto-created when users register with initial balance of 10,000
-
-### Viewing Database Data
-
-#### PostgreSQL Database Access (Store Service)
-
-**Prerequisites:** PostgreSQL must be installed and running with database `webuser` created.
-
-```bash
-# Connect to PostgreSQL database
-psql -U postgres -d webuser
-
-# Or use any PostgreSQL client:
-# Host: localhost
-# Port: 5432
-# Database: webuser
-# Username: (your database username)
-# Password: (your database password)
+## Repository layout
 
 ```
-
-**Available Tables:**
-- `account` - User accounts
-- `product` - Product catalog (iPhone 13-17)
-- `warehouse` - Warehouse locations (Beijing, Shanghai, Guangzhou)
-- `warehouse_product` - Inventory (with version for optimistic locking)
-- `orders` - Order records
-- `payment` - Payment transactions
-- `payment_outbox` - Outbox events for reliability
-- `inventory_transaction` - Inventory change history
-
-#### Bank Service Database (H2 Console)
-
-```bash
-# Access H2 console for Bank Service
-# (if H2 console is enabled in Bank Service)
-# JDBC URL: jdbc:h2:mem:bankdb
-# Username: sa
-# Password: (leave empty)
+backend/
+  storeService/  bankService/  deliveryService/  emailService/   Spring Boot services (Gradle multi-project)
+  trackingService/       Go service (own go.mod, Dockerfile, README)
+  contracts/             shared event envelope, topic names, bank.proto, example events
+  compose.yml            the whole system on one machine
+  Dockerfile             one image recipe for every Java service (build arg SERVICE)
+  docker/postgres/init/  creates one database and login per service
+  docker/scenarios/      end-to-end scenario scripts (01–08)
+  docker/smoke-order.ps1 happy-path check
+frontend/                React app; nginx.conf is the compose entry
+k8s/                     kind config, base (Postgres, Kafka, RabbitMQ), apps, gateway, scripts
+docs/
+  learning/              design notes, one per change (English and Chinese)
+  wave2-config-contract.md   ports, addresses and topic names shared by all services
+  legacy/                notes from the original course project (RabbitMQ-only design)
 ```
 
----
-
-## Testing the Application
-
-### 1. Basic User Flow
-
-1. **Register a New Account**
-   - Navigate to http://localhost:3000/register
-   - Enter username, email, password
-   - System automatically creates:
-     - User account in Store Service
-     - Bank account with initial balance of 10,000
-
-2. **Login**
-   - Navigate to http://localhost:3000/login
-   - Use the account you just registered
-
-3. **Browse Products**
-   - Click "View Products" from home page
-   - Browse available iPhone models (iPhone 13-17) with stock information
-
-4. **Place an Order**
-   - Select an iPhone model
-   - Enter quantity (ensure sufficient stock and balance)
-   - Click "Checkout"
-   - Confirm order creation
-   - System will:
-     - Reserve inventory
-     - Process payment
-     - Create delivery
-     - Send confirmation emails
-
-5. **Track Order Status**
-   - View order in "My Orders" section
-   - Check payment status
-   - Track delivery status updates
-
-6. **View Deliveries**
-   - Navigate to "My Deliveries"
-   - See delivery status (CREATED → PICKED_UP → IN_TRANSIT → DELIVERED)
-
-### 2. Cancel Order (Before Pickup)
-
-```bash
-# Using curl
-curl -X POST http://localhost:8082/api/store/orders/{orderId}/cancel \
-  -H "Authorization: Bearer {your-jwt-token}"
-```
-
-**Expected Behavior:**
-- Delivery cancelled (if status is CREATED)
-- Payment refunded
-- Inventory released
-- Confirmation email sent
-
-### 3. Test with Postman/Thunder Client
-
-Import API endpoints:
-- Store API: http://localhost:8082/api
-- Bank API: http://localhost:8084/api/bank
-- Delivery API: http://localhost:8081/api/deliveries
-- Email API: http://localhost:8083/api/email
-
-**Key Endpoints:**
-
-```bash
-# Register a new user first
-POST http://localhost:8082/api/user
-Body: {"username": "testuser", "email": "test@example.com", "password": "password123"}
-
-# Login and get JWT token
-POST http://localhost:8082/api/user/login
-Body: {"email": "test@example.com", "password": "password123"}
-
-# Get all products
-GET http://localhost:8082/api/products
-
-# Get products with stock
-GET http://localhost:8082/api/products/available
-
-# Create order
-POST http://localhost:8082/api/store/orders/create-with-payment
-Body: {
-  "userId": 1,
-  "orderItems": [
-    {"productId": 1, "quantity": 2}
-  ]
-}
-
-# Get user orders
-GET http://localhost:8082/api/store/orders/user/{userId}/with-payment
-
-# Cancel order
-POST http://localhost:8082/api/store/orders/{orderId}/cancel
-```
-
----
-
-## Fault Tolerance Scenarios
-
-The system implements robust fault tolerance mechanisms. Here are demonstration scenarios:
-
-### Scenario 1: Bank Service Temporary Failure
-
-**Setup:**
-1. Start all services normally
-2. Stop Bank Service: Press `Ctrl+C` in Bank Service terminal
-
-**Test:**
-```bash
-# Attempt to create an order
-# The system will retry 3 times (1 second intervals)
-```
-
-**Expected Behavior:**
-- Store Service attempts payment 3 times
-- After 3 failures, creates `PAYMENT_FAILED` outbox event
-- Inventory automatically released
-- Order status set to `CANCELLED`
-- Customer receives failure notification email
-
-**Recovery:**
-```bash
-# Restart Bank Service
-cd backend/bankService
-./gradlew bootRun
-
-# Retry the order - it should succeed now
-```
-
-### Scenario 2: Delivery Service Failure with Compensation
-
-**Setup:**
-1. Create an order and complete payment successfully
-2. Stop Delivery Service before pickup
-
-**Expected Behavior:**
-- Store Service retries delivery creation 3 times
-- Creates `DELIVERY_FAILED` outbox event
-- **Waits 30 seconds** (compensation delay)
-- After 30 seconds:
-  - Triggers automatic refund
-  - Releases inventory
-  - Updates order status to `CANCELLED_SYSTEM`
-  - Sends refund confirmation email
-
-**View Logs:**
-```bash
-# Store Service logs show:
-[OutboxProcessor] Processing DELIVERY_FAILED event for order X
-[OutboxProcessor] Waiting for service recovery... (XX seconds elapsed)
-[CompensationService] Triggering compensation for order X
-[PaymentService] Refund processed successfully
-```
-
-### Scenario 3: Concurrent Orders (Optimistic Locking)
-
-**Setup:**
-1. Set product inventory to 1 (can modify via H2 console)
-2. Simulate concurrent orders from 2 users
-
-**Expected Behavior:**
-- First order succeeds and reserves inventory
-- Second order fails with `OptimisticLockException`
-- No inventory overselling
-- Failed user receives "Out of stock" error
-
-**Test with curl:**
-```bash
-# Terminal 1
-curl -X POST http://localhost:8082/api/store/orders/create-with-payment \
-  -H "Content-Type: application/json" \
-  -d '{"userId": 1, "orderItems": [{"productId": 1, "quantity": 1}]}' &
-
-# Terminal 2 (run immediately)
-curl -X POST http://localhost:8082/api/store/orders/create-with-payment \
-  -H "Content-Type: application/json" \
-  -d '{"userId": 2, "orderItems": [{"productId": 1, "quantity": 1}]}' &
-```
-
-### Scenario 4: RabbitMQ Failure (Outbox Pattern)
-
-**Setup:**
-1. Stop RabbitMQ: `docker-compose down`
-2. Create an order
-
-**Expected Behavior:**
-- Events stored in `payment_outbox` table (database persistence)
-- Order processing continues normally
-- When RabbitMQ restarts:
-  - Outbox processor (runs every 5 seconds) detects pending events
-  - Automatically sends events to queue
-  - Email notifications delivered
-
-**Recovery:**
-```bash
-docker-compose up -d
-# Wait 5-10 seconds for outbox processor to scan
-# Check email service logs for message processing
-```
-
-### Scenario 5: Delivery Package Loss
-
-**Setup:**
-1. Create order normally
-2. Wait for delivery status updates
-
-**Expected Behavior (5% probability):**
-- Delivery status may become `LOST`
-- System automatically triggers compensation:
-  - Refund processed
-  - Order status set to `CANCELLED`
-  - Customer receives notification emails
-
----
-
-## API Documentation
-
-### Authentication
-
-All protected endpoints require JWT token in header:
-
-```bash
-Authorization: Bearer {jwt-token}
-```
-
-**Get Token:**
-```bash
-POST http://localhost:8082/api/user/login
-Body: {"email": "customer@example.com", "password": "COMP5348"}
-Response: {"token": "eyJhbGc...", "userId": 1, "email": "..."}
-```
-
-### Store Service API
-
-#### User Management
-```bash
-POST   /api/user              # Create account
-POST   /api/user/login        # Login
-POST   /api/user/activate     # Activate account
-```
-
-#### Products
-```bash
-GET    /api/products                  # Get all products
-GET    /api/products/available        # Get products with stock
-GET    /api/products/{id}             # Get product by ID
-GET    /api/products/search?name=X    # Search by name
-```
-
-#### Orders
-```bash
-POST   /api/store/orders/create-with-payment    # Create order + payment
-GET    /api/store/orders/user/{userId}/with-payment   # Get user orders
-GET    /api/store/orders/{orderId}/with-payment       # Get order details
-POST   /api/store/orders/{orderId}/cancel             # Cancel order
-```
-
-#### Payments
-```bash
-GET    /api/payments/order/{orderId}      # Get payment by order ID
-POST   /api/payments/{orderId}/refund     # Request refund
-```
-
-### Bank Service API
-
-```bash
-POST   /api/bank/account           # Create account
-GET    /api/bank/account/{accountNumber}/balance    # Get balance
-POST   /api/bank/transfer          # Transfer funds
-POST   /api/bank/refund            # Refund transaction
-```
-
-### Delivery Service API
-
-```bash
-GET    /api/deliveries/me                 # Get my deliveries
-GET    /api/deliveries/{id}               # Get delivery details
-POST   /api/deliveries/{id}/cancel        # Cancel delivery
-```
-
-### Email Service API
-
-```bash
-POST   /api/email/send-verification       # Send verification code
-POST   /api/email/verify-code             # Verify code
-```
-
----
-
-## Troubleshooting
-
-### Issue: Port Already in Use
-
-**Error:** `Port 8082 is already in use`
-
-**Solution:**
-```bash
-# Find process using the port (macOS/Linux)
-lsof -ti:8082
-
-# Kill the process
-kill -9 $(lsof -ti:8082)
-
-# Windows
-netstat -ano | findstr :8082
-taskkill /PID <process-id> /F
-```
-
-### Issue: RabbitMQ Connection Refused
-
-**Error:** `Connection refused: localhost:5672`
-
-**Solution:**
-```bash
-# Check if RabbitMQ container is running
-docker ps
-
-# If not running, start it
-cd backend
-docker-compose up -d
-
-# Check logs
-docker logs rabbitmq-5348
-```
-
-### Issue: H2 Database Lock Error
-
-**Error:** `Database may be already in use`
-
-**Solution:**
-```bash
-# Stop all Spring Boot services
-# Remove H2 database files (if using file-based mode)
-rm -rf ~/.h2/
-# Restart services
-```
-
-### Issue: Gradle Build Fails
-
-**Error:** `Could not resolve dependencies`
-
-**Solution:**
-```bash
-# Clear Gradle cache
-./gradlew clean --refresh-dependencies
-
-# Or delete cache manually
-rm -rf ~/.gradle/caches/
-```
-
-### Issue: Frontend Cannot Connect to Backend
-
-**Error:** `Network Error` or CORS error
-
-**Solution:**
-1. Verify all backend services are running
-2. Check `WebConfig.java` CORS configuration allows `http://localhost:3000`
-3. Clear browser cache and hard refresh (Ctrl+Shift+R)
-
-### Issue: JWT Token Invalid
-
-**Error:** `401 Unauthorized`
-
-**Solution:**
-1. Get new token by logging in again
-2. Ensure token is not expired (default 24 hours)
-3. Check `Authorization` header format: `Bearer {token}`
-
----
-
-## Project Structure
-
-```
-TUT08-08/
-├── backend/
-│   ├── bankService/          # Bank payment service
-│   │   ├── src/main/java/
-│   │   ├── src/main/resources/
-│   │   └── build.gradle
-│   ├── deliveryService/      # Delivery management service
-│   │   ├── src/main/java/
-│   │   ├── src/main/resources/
-│   │   └── build.gradle
-│   ├── emailService/         # Email notification service
-│   │   ├── src/main/java/
-│   │   ├── src/main/resources/
-│   │   └── build.gradle
-│   ├── storeService/         # Main store service
-│   │   ├── src/main/java/
-│   │   │   └── comp5348/storeservice/
-│   │   │       ├── adapter/        # External service integration
-│   │   │       ├── config/         # Configuration classes
-│   │   │       ├── controller/     # REST controllers
-│   │   │       ├── dto/            # Data transfer objects
-│   │   │       ├── model/          # JPA entities
-│   │   │       ├── repository/     # Data access layer
-│   │   │       ├── scheduler/      # Scheduled tasks
-│   │   │       ├── service/        # Business logic
-│   │   │       └── utils/          # Utility classes
-│   │   ├── src/main/resources/
-│   │   │   ├── application.properties
-│   │   │   ├── data.sql            # SQL initialization
-│   │   │   └── logback-spring.xml  # Logging config
-│   │   └── build.gradle
-│   ├── compose.yml               # Docker Compose for RabbitMQ
-│   ├── gradlew                   # Gradle wrapper
-│   └── settings.gradle
-├── frontend/
-│   ├── src/
-│   │   ├── components/           # Reusable components
-│   │   ├── contexts/             # React contexts
-│   │   ├── pages/                # Page components
-│   │   ├── services/             # API services
-│   │   ├── utils/                # Utility functions
-│   │   ├── App.js                # Main app component
-│   │   └── index.js              # Entry point
-│   ├── public/                   # Static assets
-│   └── package.json
-└── README.md                     # This file
-```
-
----
-
-## Key Design Patterns Implemented
-
-1. **Outbox Pattern** - Reliable event delivery even with message broker failures
-2. **Saga Pattern** - Distributed transaction management with compensation
-3. **Retry Pattern** - Automatic retry for transient failures
-4. **Circuit Breaker Pattern** - Graceful degradation (implicit through retry limits)
-5. **Adapter Pattern** - External service integration abstraction
-6. **Repository Pattern** - Data access abstraction
-7. **DTO Pattern** - Layer separation and data transfer
-
----
-
-## Quality Attributes
-
-- **Availability**: 99%+ through retry mechanisms and outbox pattern
-- **Reliability**: Eventual consistency guaranteed through compensation
-- **Scalability**: Microservices can be scaled independently
-- **Performance**: Asynchronous processing, lazy loading, connection pooling
-- **Security**: JWT authentication, BCrypt password hashing, CORS protection
-- **Maintainability**: Clear layered architecture, separation of concerns
-
----
-
-## Demo Credentials
-
-**User Account:**
-- No pre-configured demo account
-- Register a new account at http://localhost:3000/register
-- New users automatically get a bank account with 10,000 initial balance
-
-**PostgreSQL Database:**
-- Host: localhost:5432
-- Database: `webuser`
-- Username: `(your database username)`
-- Password: `(your database password)`
-- **Note:** Configure in `application.properties` before running
-
-**RabbitMQ Management:**
-- URL: http://localhost:15672
-- Username: `admin`
-- Password: `admin`
-
-
-
+## Design docs
+
+- [docs/learning/](docs/learning/): one note per change, each explaining the problem, the failing test that reproduced it, the fix and the trade-offs.
+  - [00 Event contract](docs/learning/00-event-contract.md) · [01 Idempotent payments](docs/learning/01-idempotent-payments.md) · [02 Docker and a database per service](docs/learning/02-docker-database-per-service.md) · [03 Go tracking consumer](docs/learning/03-go-tracking-consumer.md) · [04 Inventory pessimistic lock](docs/learning/04-inventory-pessimistic-lock.md) · [05 gRPC bank call](docs/learning/05-grpc-bank-call.md) · [06 Kafka delivery events](docs/learning/06-kafka-delivery-events.md) · [08 Kubernetes on kind](docs/learning/08-kubernetes-on-kind.md) · [09 Stuck delivery job sweeper](docs/learning/09-stuck-delivery-job-sweeper.md)
+- Module READMEs: [contracts](backend/contracts/README.md), [delivery](backend/deliveryService/README.md), [tracking](backend/trackingService/README.md), [k8s](k8s/README.md), [scenarios](backend/docker/scenarios/README.md).
+- [docs/wave2-config-contract.md](docs/wave2-config-contract.md): configuration shared between services.
+- The architecture decision records (ADR-01 to ADR-14) are in a separate design document that is not in this repository yet; code comments refer to them by number.
+
+## Known limitations and next steps
+
+- **No service-to-service authentication.** delivery's `/internal/...` endpoint and bank's gRPC service accept any caller inside the network, and bank's balance endpoint answers without a token; the entry's allowlist is the only thing keeping them private. Some store and delivery endpoints (for example store's refund endpoint) still need proper authorization checks.
+- **Single replicas.** Every stateful component runs once, and store runs one replica because `OutboxProcessor` has no lock across instances.
+- **Occasional 503 at the kind entry** (finding I2): a read through Envoy Gateway was once reset before reaching store; a retry passed. Not yet explained.
+- **Scenario scripts 01–03 run on compose only**; 04–08 also run on kind.
+- **Frontend test**: `App.test.js` fails on `main` (it still looks for the "learn react" text from the Create React App template).
+- **Next**: deploy to a cloud Kubernetes service (AKS is the plan), and replace the RabbitMQ-driven courier simulation with a workflow engine.
