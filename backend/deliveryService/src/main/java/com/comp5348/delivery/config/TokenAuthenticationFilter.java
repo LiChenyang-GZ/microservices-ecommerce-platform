@@ -35,12 +35,11 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
         
-        // Skip publicly accessible endpoints
+        // Skip publicly accessible endpoints. Only /actuator is left: the old /api/deliveries/create, /cancel-by-order
+        // and /webhook are gone (deliveries come from OrderPaid on Kafka; store cancels through /internal/deliveries/...,
+        // which this filter does not cover).
         String path = request.getRequestURI();
-        // (/api/deliveries/create and /api/deliveries/cancel-by-order are gone in wave 2 step 4b: deliveries come from
-        // OrderPaid on Kafka, and store cancels through /internal/deliveries/..., which this filter does not cover)
-        if (path.startsWith("/api/deliveries/webhook") ||
-            path.startsWith("/actuator")) {
+        if (path.startsWith("/actuator")) {
             filterChain.doFilter(request, response);
             return;
         }

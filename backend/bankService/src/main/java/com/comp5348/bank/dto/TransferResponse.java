@@ -6,7 +6,7 @@ import lombok.NoArgsConstructor;
 /**
  * outcome follows contracts/bank.proto: SUCCEEDED or REJECTED.
  * There is no "unknown" outcome: if the caller gets no answer (timeout, 5xx), the result is unknown.
- * success / message are kept for existing callers (frontend Add Money).
+ * success / message are kept for callers of the REST endpoint.
  */
 @Data
 @NoArgsConstructor
