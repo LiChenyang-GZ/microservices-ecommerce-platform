@@ -81,11 +81,11 @@ Shared event and gRPC definitions live in [backend/contracts](backend/contracts/
 
 ## Reliability design
 
-Each rule below is enforced in code and covered by tests; the ADR numbers match comments in the code.
+Each rule below is enforced in code and covered by tests. The reasoning behind each one is in the [architecture decision records](docs/adr/README.md); code comments cite them by number.
 
 | Problem | What the code does | Where |
 |---|---|---|
-| A retried charge must not charge twice | Every charge and refund carries an idempotency key (`PAY-{paymentId}-{random}` / `REFUND-…`). bank stores it under a unique constraint, locks both account rows in a fixed order and checks the key again under the lock; the same key with different content is rejected as a conflict. A timeout is `PAY_UNKNOWN`, not a failure: it is retried with the **same** key (ADR-04, ADR-05). | [BankService.java](backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java), [PaymentService.java](backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java) |
+| A retried charge must not charge twice | Every charge and refund carries an idempotency key (`PAY-{paymentId}-{attempt}-{random}` / `REFUND-{paymentId}-{random}`). bank stores it under a unique constraint, locks both account rows in a fixed order and checks the key again under the lock; the same key with different content is rejected as a conflict. A timeout is `PAY_UNKNOWN`, not a failure: it is retried with the **same** key ([ADR-04](docs/adr/04-single-money-path-idempotent.md), [ADR-05](docs/adr/05-timeout-is-not-failure.md), [ADR-16](docs/adr/16-unguessable-idempotency-keys.md)). | [BankService.java](backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java), [PaymentService.java](backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java) |
 | A charge or refund must survive a crash | store never calls bank inside a request. It writes a PAY / REFUND task to `payment_outbox` in the same transaction as the order change; `OutboxProcessor` runs the tasks with fast and slow retries. | [OutboxProcessor.java](backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java) |
 | An event must not be lost between "commit" and "send" | Events are rows in each service's `event_outbox`, written in the business transaction. A publisher sends them in id order, one Kafka ack at a time, under `pg_try_advisory_xact_lock` so two instances never send the same rows (ADR-06). If Kafka is down, orders still get paid; events wait in the table. | store [EventOutboxPublisher.java](backend/storeService/src/main/java/comp5348/storeservice/events/EventOutboxPublisher.java), delivery [EventOutboxPublisher.java](backend/deliveryService/src/main/java/com/comp5348/delivery/service/events/EventOutboxPublisher.java) |
 | Saga compensation: a lost parcel | delivery publishes `Lost`; store marks the order LOST and writes a REFUND task in the same transaction; when bank confirms, the order becomes REFUNDED and `OrderRefunded` is published. | [DeliveryEventService.java](backend/storeService/src/main/java/comp5348/storeservice/service/DeliveryEventService.java) |
@@ -203,6 +203,7 @@ backend/
 frontend/                React app; nginx.conf is the compose entry
 k8s/                     kind config, base (Postgres, Kafka, RabbitMQ), apps, gateway, scripts
 docs/
+  adr/                   architecture decision records
   learning/              design notes, one per change (English and Chinese)
   wave2-config-contract.md   ports, addresses and topic names shared by all services
   legacy/                notes from the original course project (RabbitMQ-only design)
@@ -210,11 +211,11 @@ docs/
 
 ## Design docs
 
+- [docs/adr/](docs/adr/README.md): architecture decision records ADR-01 to ADR-20 (what was decided, why, what it costs, where the code is), and the eight reliability rules that code comments cite.
 - [docs/learning/](docs/learning/): one note per change, each explaining the problem, the failing test that reproduced it, the fix and the trade-offs.
   - [00 Event contract](docs/learning/00-event-contract.md) · [01 Idempotent payments](docs/learning/01-idempotent-payments.md) · [02 Docker and a database per service](docs/learning/02-docker-database-per-service.md) · [03 Go tracking consumer](docs/learning/03-go-tracking-consumer.md) · [04 Inventory pessimistic lock](docs/learning/04-inventory-pessimistic-lock.md) · [05 gRPC bank call](docs/learning/05-grpc-bank-call.md) · [06 Kafka delivery events](docs/learning/06-kafka-delivery-events.md) · [08 Kubernetes on kind](docs/learning/08-kubernetes-on-kind.md) · [09 Stuck delivery job sweeper](docs/learning/09-stuck-delivery-job-sweeper.md)
 - Module READMEs: [contracts](backend/contracts/README.md), [delivery](backend/deliveryService/README.md), [tracking](backend/trackingService/README.md), [k8s](k8s/README.md), [scenarios](backend/docker/scenarios/README.md).
 - [docs/wave2-config-contract.md](docs/wave2-config-contract.md): configuration shared between services.
-- The architecture decision records (ADR-01 to ADR-14) are in a separate design document that is not in this repository yet; code comments refer to them by number.
 
 ## Known limitations and next steps
 

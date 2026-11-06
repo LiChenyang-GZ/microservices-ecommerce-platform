@@ -29,11 +29,11 @@
 
 ## 可靠性设计
 
-每条都在代码里实现、有测试覆盖；代码链接见英文版的同名表格。
+每条都在代码里实现、有测试覆盖；代码链接见英文版的同名表格，每条决定的理由见[架构决策记录](docs/adr/README.md)（英文）。
 
 | 问题 | 代码怎么做 |
 |---|---|
-| 重试不能扣两次 | 每笔扣款 / 退款带幂等键（`PAY-{paymentId}-{随机}` / `REFUND-…`）。bank 用唯一约束存键，按固定顺序锁两个账户行，拿到锁后再查一次键；同一个键、内容不同直接判冲突。超时记为 `PAY_UNKNOWN`，不是失败，用**同一个键**重试（ADR-04、ADR-05）。 |
+| 重试不能扣两次 | 每笔扣款 / 退款带幂等键（`PAY-{paymentId}-{attempt}-{随机}` / `REFUND-{paymentId}-{随机}`）。bank 用唯一约束存键，按固定顺序锁两个账户行，拿到锁后再查一次键；同一个键、内容不同直接判冲突。超时记为 `PAY_UNKNOWN`，不是失败，用**同一个键**重试（ADR-04、ADR-05）。 |
 | 扣款 / 退款要扛得住崩溃 | store 不在请求里直接调 bank，而是在改订单的同一个事务里写一条 PAY / REFUND 任务到 `payment_outbox`，由 `OutboxProcessor` 执行，带快重试和慢重试。 |
 | "提交"和"发送"之间不能丢事件 | 事件先作为一行写进各服务的 `event_outbox`，和业务数据同一个事务。发布器按 id 顺序逐条等 Kafka 确认，并持有 `pg_try_advisory_xact_lock`，两个实例不会发同一批（ADR-06）。Kafka 挂着也能正常付款，事件在表里等着。 |
 | Saga 补偿：丢件 | delivery 发 `Lost`；store 在同一个事务里把订单标成 LOST 并写退款任务；bank 确认后订单变 REFUNDED，再发 `OrderRefunded`。 |
@@ -111,7 +111,7 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
 
 - [docs/learning/](docs/learning/)：每次改动一篇，讲问题、复现它的失败测试、修法和取舍（中英文各一份）。
 - 模块说明：[contracts](backend/contracts/README.zh-CN.md)、[delivery](backend/deliveryService/README.zh-CN.md)、[tracking](backend/trackingService/README.zh-CN.md)、[k8s](k8s/README.zh-CN.md)、[场景脚本](backend/docker/scenarios/README.zh-CN.md)。
-- 架构决策记录（ADR-01 到 ADR-14）在另一份设计文档里，暂未放进仓库；代码注释按编号引用。
+- [docs/adr/](docs/adr/README.md)：架构决策记录 ADR-01 到 ADR-20（英文），以及代码注释引用的 8 条可靠性规则。
 - [docs/legacy/](docs/legacy/)：原课程项目（只有 RabbitMQ 的版本）留下的笔记。
 
 ## 已知限制和下一步
