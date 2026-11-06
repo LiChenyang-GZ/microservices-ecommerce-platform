@@ -40,7 +40,7 @@
 | 取消和建配送单赛跑 | 如果用户在 delivery 读到 `OrderPaid` 之前就取消，delivery 先插一行**取消标记**（该订单的 CANCELLED 行）；迟到的 `OrderPaid` 看到这一行就什么都不建（ADR-09）。 |
 | Kafka 至少一次投递 | 消费者在数据库事务提交后才提交 offset。重复消息无害：delivery 每个订单只有一行，tracking 用 `ON CONFLICT (event_id) DO NOTHING`，store 忽略不能让订单往前走的事件。 |
 | 事件迟到或乱序 | 状态不倒退：store 给状态排名 CREATED < PICKED_UP < DELIVERING < 终态，名次不高于当前状态的事件直接跳过。同一订单的事件用 `orderId` 做分区 key，保证有序（ADR-07）。 |
-| 毒消息不能堵住分区 | 解析不了的消息直接进 `<topic>.DLT`；其他错误先重试，再进 DLT 并打 `ALERT` 日志。Go 和 Java 写一样的 DLT 头（ADR-08）。 |
+| 毒消息不能堵住分区，短暂故障不能丢事件 | 失败分两种。解析不了的消息直接进 `<topic>.DLT`；已知的暂时性故障（数据库挂了、锁超时）原地退避重试，直到恢复为止，这期间分区停住等待，保证同一订单的顺序；其他错误重试 5 次后进 DLT 并打 `ALERT` 日志。Go 和 Java 写一样的 DLT 头（ADR-08）。 |
 | RabbitMQ 挂着时丢了配送任务 | 场景 05 发现：RabbitMQ 挂着时建的配送单会永远停在 CREATED。现在有扫表任务：非终态、60 秒没动的配送单会被重发任务；先用条件 `UPDATE` 认领，两个实例不会都重发（[学习文档 09](docs/learning/09-stuck-delivery-job-sweeper.zh-CN.md)）。 |
 
 另外：库存用悲观行锁预留（[学习文档 04](docs/learning/04-inventory-pessimistic-lock.zh-CN.md)）；未支付订单超时自动取消，并在订单行锁下复查。
