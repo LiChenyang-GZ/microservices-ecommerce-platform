@@ -9,6 +9,7 @@ import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -34,19 +35,25 @@ class DeliveryJobAfterCommitIntegrationTest extends DeliveryIntegrationTest {
     @Test
     void newDelivery_jobSentOnce_afterCommit() throws Exception {
         String orderId = newOrderId();
-        // 每次往配送作业队列发 ID 时，记下"这时候从别的连接看，这一行在不在"
-        List<Boolean> rowVisibleWhenSent = new CopyOnWriteArrayList<>(); // 消费者线程写，测试线程读
+        // 每次往配送作业队列发 ID 时，记下"发的是哪张单、这时候从别的连接看，这个订单的行在不在"
+        // 要按 ID 过滤：I1 的扫表补发会给别的测试留下的、没走完的单补发作业，它们也经过这个假对象
+        List<Map.Entry<Long, Boolean>> sends = new CopyOnWriteArrayList<>(); // 消费者线程写，测试线程读
         doAnswer(invocation -> {
-            rowVisibleWhenSent.add(rowCommitted(orderId));
+            sends.add(Map.entry((Long) invocation.getArgument(1), rowCommitted(orderId)));
             return null;
         }).when(rabbitTemplate).convertAndSend(eq(RabbitMQConfig.DELIVERY_QUEUE_NAME), any(Object.class));
 
         publishOrderEvent(orderPaid(orderId));
         awaitDeliveryRow(orderId);
-        await().atMost(EVENT_TIMEOUT).until(() -> !rowVisibleWhenSent.isEmpty());
-        Thread.sleep(500); // 如果有第二次发送，它就紧跟在第一次后面
+        Long deliveryId = deliveryOf(orderId).getId();
+        await().atMost(EVENT_TIMEOUT).until(() -> !visibleWhenSent(sends, deliveryId).isEmpty());
+        Thread.sleep(500); // 如果有第二次发送，它就紧跟在第一次后面（扫表要 2 秒没动才补发，不会落在这 500 毫秒里）
 
-        assertThat(rowVisibleWhenSent).as("只发一次，而且发的时候这一行已经提交了").containsExactly(true);
+        assertThat(visibleWhenSent(sends, deliveryId)).as("只发一次，而且发的时候这一行已经提交了").containsExactly(true);
+    }
+
+    private static List<Boolean> visibleWhenSent(List<Map.Entry<Long, Boolean>> sends, Long deliveryId) {
+        return sends.stream().filter(s -> s.getKey().equals(deliveryId)).map(Map.Entry::getValue).toList();
     }
 
     /** 用一个全新的连接查：只看得到已经提交的数据 */

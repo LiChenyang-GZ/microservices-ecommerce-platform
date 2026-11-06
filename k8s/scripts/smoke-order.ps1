@@ -24,8 +24,10 @@ $login = Invoke-RestMethod -Method Post "$store/user/login" -ContentType 'applic
 $bankAccount = Sql 'store_db' "select bank_account_number from account where email = '$email'"
 "1. user $($login.userId) logged in, bank account $bankAccount"
 
-# 2. Place an order for one iPhone 13
-$product = (Invoke-RestMethod "$store/products").products | Where-Object name -eq 'iPhone 13'
+# 2. Place an order for one phone
+# Cheapest product still in stock (iPhone 13 runs out after a few runs of the scenarios)
+$name = Sql 'store_db' "select p.name from products p join warehouse_products w on w.product_id = p.id group by p.id having sum(w.quantity) > 0 order by p.price limit 1"
+$product = (Invoke-RestMethod "$store/products").products | Where-Object name -eq $name
 $balanceBefore = [decimal](Sql 'bank_db' "select balance from bank_accounts where account_number = '$bankAccount'")
 $order = (Invoke-RestMethod -Method Post "$store/store/orders/create-with-payment" -ContentType 'application/json' `
     -Body (@{ userId = $login.userId; orderItems = @(@{ productId = $product.id; quantity = 1 }) } | ConvertTo-Json -Depth 3)).order

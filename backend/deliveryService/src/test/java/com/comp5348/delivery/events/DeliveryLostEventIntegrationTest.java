@@ -16,7 +16,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   2. 丢件率现在写死在代码里（0%），这个配置键还没人读，所以配送单会走到 PICKED_UP 而不是 LOST。
  *   第 2 点是"测试用的开关还没接上"，不是要证明的问题本身；绿灯时把丢件率改成可配置。
  */
-@TestPropertySource(properties = "delivery.simulation.loss-rate=1.0")
+// 改了配置 → Spring 给这个类单独建一个容器，并且一直缓存着：等于同一个库上的第二个 delivery 实例。
+// 关掉它的扫表补发（I1），否则它会抢先认领别的测试的配送单，把作业发进它自己的假 RabbitMQ
+@TestPropertySource(properties = {"delivery.simulation.loss-rate=1.0", "delivery.stuck-job.enabled=false"})
 class DeliveryLostEventIntegrationTest extends DeliveryIntegrationTest {
 
     @Test
