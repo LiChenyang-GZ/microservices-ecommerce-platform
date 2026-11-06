@@ -187,7 +187,9 @@ function OrderDetailPage() {
     // Pay Now only makes sense after a definite failure (rule 8). While the charge is PENDING or its result is
     // unknown, another attempt could charge twice, so the button is hidden and a status message is shown instead.
     const awaitingPayment = order && !isCancelledStatus && normalizedOrderStatus === 'PENDING_PAYMENT';
-    const needsPayment = awaitingPayment && (!order.payment || paymentStatusNormalized === 'FAILED');
+    const needsPayment = awaitingPayment && paymentStatusNormalized === 'FAILED';
+    // No payment row at all: the backend cannot start a charge for it, so Pay Now would only return an error (A#8).
+    const paymentMissing = awaitingPayment && !order.payment;
     const paymentInProgress = awaitingPayment && paymentStatusNormalized === 'PENDING';
     const paymentUnknown = awaitingPayment && paymentStatusNormalized === 'PAY_UNKNOWN';
 
@@ -321,6 +323,14 @@ function OrderDetailPage() {
             {paymentInProgress && (
                 <div className="payment-alert" role="status">
                     <p className="alert-message">⏳ Payment processing… This page updates automatically.</p>
+                </div>
+            )}
+
+            {paymentMissing && (
+                <div className="payment-alert" role="status">
+                    <p className="alert-message">
+                        ⚠️ The payment record for this order was not found. Please contact support.
+                    </p>
                 </div>
             )}
 
