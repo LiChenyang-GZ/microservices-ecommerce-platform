@@ -45,6 +45,12 @@ public interface WarehouseProductRepository extends JpaRepository<WarehouseProdu
 
     @Query("select wp from WarehouseProduct wp where wp.warehouse.id = :warehouseId and wp.product.id = :productId")
     Optional<WarehouseProduct> findByWarehouseIdAndProductId(@Param("warehouseId") Long warehouseId, @Param("productId") Long productId);
+
+    /** Same row, locked (SELECT ... FOR UPDATE) until the transaction ends: used when an admin sets the quantity. */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select wp from WarehouseProduct wp where wp.warehouse.id = :warehouseId and wp.product.id = :productId")
+    Optional<WarehouseProduct> findByWarehouseIdAndProductIdForUpdate(@Param("warehouseId") Long warehouseId,
+                                                                      @Param("productId") Long productId);
 }
 
 
