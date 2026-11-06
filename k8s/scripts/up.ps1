@@ -14,8 +14,18 @@ function Step($text) { Write-Host "`n== $text" -ForegroundColor Cyan }
 function Run { & $args[0] @($args | Select-Object -Skip 1); if ($LASTEXITCODE -ne 0) { throw "failed: $args" } }
 
 Step '1/6 kind cluster "shop"'
-if ((kind get clusters) -notcontains 'shop') { Run kind create cluster --config "$root\kind-config.yaml" }
-else { Write-Host 'already exists' }
+$fresh = (kind get clusters) -notcontains 'shop'
+if ($fresh) { Run kind create cluster --config "$root\kind-config.yaml" }
+else {
+    Write-Host 'already exists'
+    # The node is a Docker container; after a reboot or `docker stop` it is there but not running,
+    # and every step below would fail. Start it and wait until Kubernetes says the node is Ready.
+    if ((docker inspect -f '{{.State.Running}}' shop-control-plane) -ne 'true') {
+        Write-Host 'node shop-control-plane is stopped: starting it'
+        Run docker start shop-control-plane
+    }
+    Run $kubectl wait --for=condition=Ready node --all --timeout=180s
+}
 
 Step '2/6 Envoy Gateway (the controller behind the single entry)'
 Run $kubectl apply --server-side -f $envoyGateway
@@ -40,6 +50,15 @@ Run $kubectl -n shop wait --for=condition=Complete job/db-init job/kafka-init --
 
 Step '5/6 the six services and the gateway'
 Run $kubectl apply -k "$root\apps"
+if (-not $fresh) {
+    # The image tag is always latest, so a pod that is already running keeps its old image even after
+    # step 3 loaded a new one. Restart every deployment so it starts from the loaded images
+    # (store uses Recreate, so it is briefly down).
+    Run $kubectl -n shop rollout restart deployment
+    foreach ($image in $images) {
+        Run $kubectl -n shop rollout status "deployment/$($image -replace '^shop-', '')" --timeout=600s
+    }
+}
 Run $kubectl apply -f "$root\gateway\gateway.yaml" -f "$root\gateway\routes.yaml"
 Run $kubectl -n shop wait --for=condition=Available deployment --all --timeout=600s
 
