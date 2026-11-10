@@ -16,7 +16,7 @@ published to the Kafka topic `delivery-events`.
   instance publishes at a time.
 - Delivery is at-least-once: a row sent but not marked (crash) is sent again with the
   same `eventId`. Consumers de-duplicate.
-- Design and reasoning: [docs/learning/06-kafka-delivery-events.md](../../docs/learning/06-kafka-delivery-events.md).
+- Design and reasoning: [docs/learning/06-kafka-delivery-events.md](../../docs/learning/06-kafka-delivery-events.md); consuming `order-events` and the cancel marker: [docs/learning/07-kafka-order-events.md](../../docs/learning/07-kafka-order-events.md).
 
 ## Settings
 

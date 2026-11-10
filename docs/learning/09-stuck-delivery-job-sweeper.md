@@ -5,7 +5,7 @@
 > Commits: `493f384 test(red)` → `d903f15 fix` (wave 2 final integration, branch `claude/wave2-integration`)
 > How it was found: scenario [05-rabbitmq-down-at-delivery.ps1](../../backend/docker/scenarios/05-rabbitmq-down-at-delivery.ps1) stops RabbitMQ during an order; the delivery stayed in CREATED for good.
 > Replay time: **30 minutes**
-> Before this: [01 · Idempotent payments](01-idempotent-payments.md) (outbox), [06 · Kafka](06-kafka-delivery-events.md) (4b: OrderPaid creates the delivery, the job is sent after commit).
+> Before this: [01 · Idempotent payments](01-idempotent-payments.md) (outbox), [07 · order-events on Kafka](07-kafka-order-events.md) (OrderPaid creates the delivery, the job is sent after commit).
 
 ---
 

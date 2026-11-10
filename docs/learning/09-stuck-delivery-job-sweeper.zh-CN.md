@@ -5,7 +5,7 @@
 > 对应 commit：`493f384 test(red)` → `d903f15 fix`（第 2 波最终集成，分支 `claude/wave2-integration`）
 > 怎么发现的：集成时关掉 RabbitMQ 跑场景 [05-rabbitmq-down-at-delivery.ps1](../../backend/docker/scenarios/05-rabbitmq-down-at-delivery.ps1)，配送单永远停在 CREATED。
 > 预计回放时间：**30 分钟**
-> 前置：[01 · 幂等扣款与退款](01-idempotent-payments.zh-CN.md)（outbox）、[06 · Kafka](06-kafka-delivery-events.zh-CN.md)（4b：OrderPaid 建单、作业提交后再发）。
+> 前置：[01 · 幂等扣款与退款](01-idempotent-payments.zh-CN.md)（outbox）、[07 · order-events 上 Kafka](07-kafka-order-events.zh-CN.md)（OrderPaid 建单、作业提交后再发）。
 
 ---
 
