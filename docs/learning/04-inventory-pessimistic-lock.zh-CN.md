@@ -12,7 +12,7 @@
 
 **一个热门商品库存 10，8 个人几乎同时各买 1 件，结果只有 1 单成功，其他 7 单报错。**
 
-- 复现测试：[StockHoldConcurrencyIntegrationTest.java:111](../../backend/storeService/src/test/java/comp5348/storeservice/inventory/StockHoldConcurrencyIntegrationTest.java#L111)
+- 复现测试：[StockHoldConcurrencyIntegrationTest#enoughStock_everyoneBuysAtOnce_allSucceed](../../backend/storeService/src/test/java/comp5348/storeservice/inventory/StockHoldConcurrencyIntegrationTest.java)
 - 红灯：`expected: 8, but was: 1`，7 个失败全是 `ObjectOptimisticLockingFailureException`。
 - 不会超卖（库存没变负数），但库存明明够，顾客却被拒绝。商品越热门，失败的人越多。
 
@@ -22,18 +22,18 @@
 
 ### 2.1 旧代码：乐观锁 `@Version`
 **大白话**：每行带一个版本号。保存时说"只有版本号还是我读到的那个才更新"，不是就算冲突。
-- 字段：[WarehouseProduct.java:35](../../backend/storeService/src/main/java/comp5348/storeservice/model/WarehouseProduct.java#L35)
+- 字段：[WarehouseProduct.version](../../backend/storeService/src/main/java/comp5348/storeservice/model/WarehouseProduct.java)
 - Hibernate 保存时生成 `UPDATE warehouse_products SET quantity=?, version=version+1 WHERE id=? AND version=?`。更新到 0 行 → 抛 `OptimisticLockException`，Spring 再包成 `ObjectOptimisticLockingFailureException`。
 - 旧的扣库存：普通 `SELECT` 读出数量 → 内存里减 → 提交时带着版本号写回。8 个人读到同一个版本，第一个提交后版本 +1，其余 7 个全部 0 行 → 全部失败。
 
 ### 2.2 新代码：`@Lock(PESSIMISTIC_WRITE)` → `SELECT … FOR UPDATE`
-- 新查询：[WarehouseProductRepository.java:25](../../backend/storeService/src/main/java/comp5348/storeservice/repository/WarehouseProductRepository.java#L25)
+- 新查询：[WarehouseProductRepository#findByProductIdForUpdate](../../backend/storeService/src/main/java/comp5348/storeservice/repository/WarehouseProductRepository.java)
   ```java
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("select wp from WarehouseProduct wp where wp.product.id = :productId and wp.quantity > 0 order by wp.id")
   List<WarehouseProduct> findByProductIdForUpdate(...);
   ```
-- 扣库存先调它：[WarehouseService.java:194](../../backend/storeService/src/main/java/comp5348/storeservice/service/WarehouseService.java#L194)
+- 扣库存先调它：[WarehouseService#getAndUpdateAvailableWarehouse](../../backend/storeService/src/main/java/comp5348/storeservice/service/WarehouseService.java)
 - 锁一直持有到下单事务提交（`OrderService.createOrder` 上的 `@Transactional`，扣库存的方法加入同一个事务）。
 
 ### 2.3 等锁之后读到的是新数量（READ COMMITTED 的重新检查）
@@ -44,24 +44,24 @@
 ### 2.4 为什么 `order by wp.id`，而不是 `order by quantity`
 - **按 id 加锁防死锁**：一个商品可能在好几个仓库有库存行。两单都按 id 从小到大锁，就不会一个先锁 1 再等 2、另一个先锁 2 再等 1。和 bank 的 `lockAccounts` 同一个道理。
 - **排序列不能是会被改的列**：Postgres 文档提醒，`ORDER BY` + `FOR UPDATE` 是先排序、再逐行加锁；等锁期间如果排序列被别人改了，返回的顺序就不对了。`id` 永远不变，`quantity` 正是别人在改的列。
-- 所以：SQL 里按 id 锁，拿到最新数量后再在内存里按数量排序（[WarehouseService.java:195](../../backend/storeService/src/main/java/comp5348/storeservice/service/WarehouseService.java#L195)），"先从库存少的仓库拿"的规则不变。
+- 所以：SQL 里按 id 锁，拿到最新数量后再在内存里按数量排序（[WarehouseService#getAndUpdateAvailableWarehouse](../../backend/storeService/src/main/java/comp5348/storeservice/service/WarehouseService.java)），"先从库存少的仓库拿"的规则不变。
 
 ### 2.5 为什么能信这次读到的是数据库里的新值（一级缓存）
 - Hibernate 同一个事务里，已经加载过的实体再查一次，返回的是缓存里的那个对象，不会用新查回来的数据覆盖它（01 文档的 ➕ 那条）。
-- 这里安全：下单事务在扣库存之前只用 `SUM` 查过总数（[OrderService.java:114](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L114)），没有把 `WarehouseProduct` 实体加载进缓存。**以后谁在这之前加了一句 `findById`，这把锁就可能读到旧数量。**
+- 这里安全：下单事务在扣库存之前只用 `SUM` 查过总数（[OrderService#createOrder](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java)），没有把 `WarehouseProduct` 实体加载进缓存。**以后谁在这之前加了一句 `findById`，这把锁就可能读到旧数量。**
 
 ---
 
 ## 3. 请求路径导读
 
 ```
-POST /api/store/orders/create-with-payment → StoreController.createOrderWithPayment (controller/StoreController.java:38)
-  → OrderProductService.createOrderWithPayment                        (service/OrderProductService.java:67)
-    → OrderService.createOrder  @Transactional  ── 事务从这里开始     (service/OrderService.java:99)
-        SUM(quantity) 粗查库存够不够                                  (:114)
+POST /api/store/orders/create-with-payment → StoreController.createOrderWithPayment (controller/StoreController.java)
+  → OrderProductService.createOrderWithPayment                        (service/OrderProductService.java)
+    → OrderService.createOrder  @Transactional  ── 事务从这里开始     (service/OrderService.java)
+        SUM(quantity) 粗查库存够不够
         保存临时订单 PENDING_STOCK_HOLD
-        → WarehouseService.getAndUpdateAvailableWarehouse            (service/WarehouseService.java:187)
-            SELECT … FOR UPDATE（按 id）  ← 别的下单在这里排队          (:194)
+        → WarehouseService.getAndUpdateAvailableWarehouse            (service/WarehouseService.java)
+            SELECT … FOR UPDATE（按 id）  ← 别的下单在这里排队          (WarehouseProductRepository#findByProductIdForUpdate)
             内存里按数量排序、逐个仓库扣、写 HOLD 流水
         订单改成 PLACED
     ← 提交：库存更新 + 订单 + HOLD 流水一起落库，锁释放
@@ -98,7 +98,7 @@ POST /api/store/orders/create-with-payment → StoreController.createOrderWithPa
 
 | 八股 | 代码在哪 | 这里的判断 |
 |---|---|---|
-| 📒 E3 乐观 vs 悲观 | `WarehouseProductRepository.java:25` | 选了悲观：热门商品冲突是常态，乐观锁让 8 个人里 7 个失败（测试证明）。**不换**的地方：管理员改库存，冲突少，继续 `@Version` |
+| 📒 E3 乐观 vs 悲观 | `WarehouseProductRepository#findByProductIdForUpdate` | 选了悲观：热门商品冲突是常态，乐观锁让 8 个人里 7 个失败（测试证明）。**不换**的地方：管理员改库存，冲突少，继续 `@Version` |
 | 📒 E3 追问 synchronized | 同上 | 两个下单可能在两个实例上 → 锁要放在共享的数据库里 |
 | 📒 B6 死锁 | `order by wp.id` | 多个仓库行按固定顺序锁，破坏循环等待。**不需要** tryLock + 超时 |
 | 📒 E4 隔离级别 | 等锁后重新检查 `WHERE` | 默认 READ COMMITTED 就能读到新数量；**不需要** SERIALIZABLE |

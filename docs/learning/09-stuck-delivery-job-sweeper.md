@@ -5,7 +5,7 @@
 > Commits: `493f384 test(red)` → `d903f15 fix` (wave 2 final integration, branch `claude/wave2-integration`)
 > How it was found: scenario [05-rabbitmq-down-at-delivery.ps1](../../backend/docker/scenarios/05-rabbitmq-down-at-delivery.ps1) stops RabbitMQ during an order; the delivery stayed in CREATED for good.
 > Replay time: **30 minutes**
-> Before this: [01 · Idempotent payments](01-idempotent-payments.md) (outbox), [06 · Kafka](06-kafka-delivery-events.md) (4b: OrderPaid creates the delivery, the job is sent after commit).
+> Before this: [01 · Idempotent payments](01-idempotent-payments.md) (outbox), [07 · order-events on Kafka](07-kafka-order-events.md) (OrderPaid creates the delivery, the job is sent after commit).
 
 ---
 
@@ -13,13 +13,13 @@
 
 **Writing to the database and sending to RabbitMQ are two steps. If RabbitMQ is down in between, nothing sends the job again, and the delivery is never shipped.**
 
-- delivery reads OrderPaid from Kafka, creates the delivery and commits, then sends the "start simulating" job to RabbitMQ in `afterCommit` ([DeliveryService.java:96](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L96)).
+- delivery reads OrderPaid from Kafka, creates the delivery and commits, then sends the "start simulating" job to RabbitMQ in `afterCommit` ([DeliveryService#createDelivery](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java)).
 - RabbitMQ is down → the send throws → Kafka redelivers OrderPaid → delivery sees the row already exists and skips it as a repeat → **nothing ever sends the job**. The customer paid, the parcel never moves, and no alert fires.
-- The same gap a second time: after each step the worker commits, then puts the job back on the queue ([DeliveryStatusUpdateService.java:123](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/DeliveryStatusUpdateService.java#L123)). RabbitMQ down at that moment leaves the delivery in PICKED_UP or DELIVERING.
+- The same gap a second time: after each step the worker commits, then puts the job back on the queue ([DeliveryStatusUpdateService#processDelivery](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/DeliveryStatusUpdateService.java)). RabbitMQ down at that moment leaves the delivery in PICKED_UP or DELIVERING.
 - Tests (red `493f384`): [StuckDeliveryJobIntegrationTest.java](../../backend/deliveryService/src/test/java/com/comp5348/delivery/events/StuckDeliveryJobIntegrationTest.java)
-  - `jobLostWhenCreated_isSentAgain_afterRabbitComesBack` (line 60): RabbitMQ down when the delivery is created
-  - `jobLostBetweenSteps_isSentAgain_afterRabbitComesBack` (line 78): RabbitMQ down after a step
-  - `finishedDelivery_isNeverSentAgain` (line 99): guard, a finished delivery is never resent
+  - `jobLostWhenCreated_isSentAgain_afterRabbitComesBack`: RabbitMQ down when the delivery is created
+  - `jobLostBetweenSteps_isSentAgain_afterRabbitComesBack`: RabbitMQ down after a step
+  - `finishedDelivery_isNeverSentAgain`: guard, a finished delivery is never resent
 
 ---
 
@@ -36,20 +36,20 @@ DeliveryCreated, in the same method, does not have this problem: it is not sent 
 A callback registered inside a transaction; Spring calls it **after the commit succeeds**. It runs outside the transaction: an exception here cannot roll back committed data, it goes up to the caller (here the Kafka listener). The annotation form is `@TransactionalEventListener`, which runs in the `AFTER_COMMIT` phase by default.
 
 ### 2.3 The sweeper: `StuckDeliveryJobSweeper`
-[StuckDeliveryJobSweeper.java:54](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/StuckDeliveryJobSweeper.java#L54), every 10 seconds:
-1. Find deliveries that are not finished (not RECEIVED / LOST / CANCELLED) and whose `update_time` is more than 60 seconds old (line 58).
-2. **Claim first** (line 64): `UPDATE delivery SET update_time = now WHERE id = ? AND update_time = <the value read>`. Only one updated row counts as a claim. This is a **conditional update** (compare-and-set):
+[StuckDeliveryJobSweeper#resendStuckJobs](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/StuckDeliveryJobSweeper.java), every 10 seconds:
+1. Find deliveries that are not finished (not RECEIVED / LOST / CANCELLED) and whose `update_time` is more than 60 seconds old.
+2. **Claim first**: `UPDATE delivery SET update_time = now WHERE id = ? AND update_time = <the value read>`. Only one updated row counts as a claim. This is a **conditional update** (compare-and-set):
    - two delivery instances that find the same row: only one can claim it;
    - a row whose send fails already has `update_time = now`, so it is tried again after another 60 seconds, not every round.
-3. Then send the job (line 69). On failure, log `ALERT delivery_job_resend_failed` (line 74) and stop the round: with RabbitMQ down each send blocks for about 20 seconds (connection timeout), so there is no point blocking once per row.
+3. Then send the job. On failure, log `ALERT delivery_job_resend_failed` and stop the round: with RabbitMQ down each send blocks for about 20 seconds (connection timeout), so there is no point blocking once per row.
 
 Normally the job is still sent right away in `afterCommit` (the fast path). The sweeper only matters when a job was lost (the slow path, at most about 70 seconds late).
 
 ### 2.4 `@Scheduled` and the scheduler pool
-`@Scheduled(fixedDelayString = "${delivery.stuck-job.check-interval-ms:10000}")`: run again 10 seconds after the previous run ends. Spring Boot's default scheduler has **one thread**, shared by every `@Scheduled` method. delivery also runs the Kafka event publisher every second. A sweeper send that blocks for 20 seconds while RabbitMQ is down would hold the Kafka events up for 20 seconds. So [application.properties:43](../../backend/deliveryService/src/main/resources/application.properties#L43) sets `spring.task.scheduling.pool.size=2`.
+`@Scheduled(fixedDelayString = "${delivery.stuck-job.check-interval-ms:10000}")`: run again 10 seconds after the previous run ends. Spring Boot's default scheduler has **one thread**, shared by every `@Scheduled` method. delivery also runs the Kafka event publisher every second. A sweeper send that blocks for 20 seconds while RabbitMQ is down would hold the Kafka events up for 20 seconds. So [delivery `spring.task.scheduling.pool.size`](../../backend/deliveryService/src/main/resources/application.properties) sets `spring.task.scheduling.pool.size=2`.
 
 ### 2.5 The `@ConditionalOnProperty` switch
-`@ConditionalOnProperty(name = "delivery.stuck-job.enabled", matchIfMissing = true)` (line 35): the bean is created when the key is absent (`matchIfMissing` defaults to false; here it is true) and skipped when the key is false. It exists because of a test pitfall, see §4.3.
+`@ConditionalOnProperty(name = "delivery.stuck-job.enabled", matchIfMissing = true)` (on the class): the bean is created when the key is absent (`matchIfMissing` defaults to false; here it is true) and skipped when the key is false. It exists because of a test pitfall, see §4.3.
 
 ### 2.6 Duplicate jobs
 Resending is at-least-once: if a job was only slow, not lost, two can exist. The worker saves with a `@Version` optimistic lock: two jobs that read the same version, the later save conflicts and is dropped (the `ObjectOptimisticLockingFailureException` branch in [DeliveryStatusUpdateService.java](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/DeliveryStatusUpdateService.java)). One after the other, the delivery moves a step sooner; the states still go forward in order.
@@ -95,10 +95,10 @@ The common industry approach is **a main path that tries not to lose anything pl
 
 | Topic | Where | The call made here |
 |---|---|---|
-| 📒 F4 Outbox (follow-up: why not one transaction) | [DeliveryService.java:96](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L96) | A Postgres transaction cannot cover RabbitMQ; either order has a gap. Instead of an outbox for the job, a safety-net sweep (§4.1). **Not needed** for store's emails: losing one does not matter, send and catch |
+| 📒 F4 Outbox (follow-up: why not one transaction) | [DeliveryService#createDelivery](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java) | A Postgres transaction cannot cover RabbitMQ; either order has a gap. Instead of an outbox for the job, a safety-net sweep (§4.1). **Not needed** for store's emails: losing one does not matter, send and catch |
 | 📒 E3 Optimistic lock | the worker's `@Version` + `ObjectOptimisticLockingFailureException` | Resending may duplicate a job; conflicts are rare → optimistic locking fits, the later one is dropped |
-| ➕ Conditional update (CAS) to claim | [StuckDeliveryJobSweeper.java:64](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/StuckDeliveryJobSweeper.java#L64) | `UPDATE … WHERE update_time = <value read>`; one updated row = claimed; no duplicates across instances and no lock held during the send. **Not needed** with one instance that does not mind duplicates |
-| ➕ Spring's scheduler has one thread by default | [application.properties:43](../../backend/deliveryService/src/main/resources/application.properties#L43) | One blocking `@Scheduled` method holds up all the others → pool of 2. **Not needed** when every scheduled job is quick and never blocks |
+| ➕ Conditional update (CAS) to claim | [StuckDeliveryJobSweeper#resendStuckJobs](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/StuckDeliveryJobSweeper.java) | `UPDATE … WHERE update_time = <value read>`; one updated row = claimed; no duplicates across instances and no lock held during the send. **Not needed** with one instance that does not mind duplicates |
+| ➕ Spring's scheduler has one thread by default | [delivery `spring.task.scheduling.pool.size`](../../backend/deliveryService/src/main/resources/application.properties) | One blocking `@Scheduled` method holds up all the others → pool of 2. **Not needed** when every scheduled job is quick and never blocks |
 | ➕ Reconciliation / safety-net sweep | the whole `StuckDeliveryJobSweeper` | The main path is fast, the sweep makes sure it catches up. **Not needed** for messages that may be lost |
 
 Scenario anchors:

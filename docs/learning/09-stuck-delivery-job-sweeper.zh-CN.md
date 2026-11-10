@@ -5,7 +5,7 @@
 > 对应 commit：`493f384 test(red)` → `d903f15 fix`（第 2 波最终集成，分支 `claude/wave2-integration`）
 > 怎么发现的：集成时关掉 RabbitMQ 跑场景 [05-rabbitmq-down-at-delivery.ps1](../../backend/docker/scenarios/05-rabbitmq-down-at-delivery.ps1)，配送单永远停在 CREATED。
 > 预计回放时间：**30 分钟**
-> 前置：[01 · 幂等扣款与退款](01-idempotent-payments.zh-CN.md)（outbox）、[06 · Kafka](06-kafka-delivery-events.zh-CN.md)（4b：OrderPaid 建单、作业提交后再发）。
+> 前置：[01 · 幂等扣款与退款](01-idempotent-payments.zh-CN.md)（outbox）、[07 · order-events 上 Kafka](07-kafka-order-events.zh-CN.md)（OrderPaid 建单、作业提交后再发）。
 
 ---
 
@@ -13,13 +13,13 @@
 
 **改数据库和发 RabbitMQ 是两步，中间断了没人补：RabbitMQ 挂的那一刻建的配送单，永远不会被配送。**
 
-- 订单付了钱，delivery 从 Kafka 读到 OrderPaid，建配送单并提交，然后在 `afterCommit` 里把"开始模拟配送"的作业发进 RabbitMQ（[DeliveryService.java:96](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L96)）。
+- 订单付了钱，delivery 从 Kafka 读到 OrderPaid，建配送单并提交，然后在 `afterCommit` 里把"开始模拟配送"的作业发进 RabbitMQ（[DeliveryService#createDelivery](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java)）。
 - RabbitMQ 挂着 → 发送抛异常 → Kafka 重投这条 OrderPaid → delivery 看到"这单已经有配送单了"，按重复消息跳过 → **再也没有东西会发作业**。用户付了钱，货不动，也没有告警。
-- 同一类的第二处：worker 每推进一步、提交之后，再把作业放回队列（[DeliveryStatusUpdateService.java:123](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/DeliveryStatusUpdateService.java#L123)）。这一刻 RabbitMQ 挂了，单子停在 PICKED_UP / DELIVERING。
+- 同一类的第二处：worker 每推进一步、提交之后，再把作业放回队列（[DeliveryStatusUpdateService#processDelivery](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/DeliveryStatusUpdateService.java)）。这一刻 RabbitMQ 挂了，单子停在 PICKED_UP / DELIVERING。
 - 复现测试（红灯 `493f384`）：[StuckDeliveryJobIntegrationTest.java](../../backend/deliveryService/src/test/java/com/comp5348/delivery/events/StuckDeliveryJobIntegrationTest.java)
-  - `jobLostWhenCreated_isSentAgain_afterRabbitComesBack`（第 60 行）：建单时 RabbitMQ 挂了
-  - `jobLostBetweenSteps_isSentAgain_afterRabbitComesBack`（第 78 行）：推进一步之后 RabbitMQ 挂了
-  - `finishedDelivery_isNeverSentAgain`（第 99 行）：守护测试，终态的单不能被补发
+  - `jobLostWhenCreated_isSentAgain_afterRabbitComesBack`：建单时 RabbitMQ 挂了
+  - `jobLostBetweenSteps_isSentAgain_afterRabbitComesBack`：推进一步之后 RabbitMQ 挂了
+  - `finishedDelivery_isNeverSentAgain`：守护测试，终态的单不能被补发
 
 ---
 
@@ -36,20 +36,20 @@
 在事务里注册一个回调，Spring 在**提交成功之后**调用它。适合"只有提交了才该做"的事。它已经在事务外面了：这里抛异常不会回滚已提交的数据，异常会冒给调用方（这里是 Kafka 监听器）。Spring 也有注解版：`@TransactionalEventListener`，默认就在 `AFTER_COMMIT` 阶段执行。
 
 ### 2.3 扫表补发：`StuckDeliveryJobSweeper`
-[StuckDeliveryJobSweeper.java:54](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/StuckDeliveryJobSweeper.java#L54)，每 10 秒跑一次：
-1. 找"不是终态（RECEIVED / LOST / CANCELLED 以外）、`update_time` 超过 60 秒没动"的配送单（第 58 行）。
-2. **先认领**（第 64 行）：`UPDATE delivery SET update_time = now WHERE id = ? AND update_time = 读到的值`。改到 1 行才算抢到。这是一个**条件更新**（compare-and-set）：
+[StuckDeliveryJobSweeper#resendStuckJobs](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/StuckDeliveryJobSweeper.java)，每 10 秒跑一次：
+1. 找"不是终态（RECEIVED / LOST / CANCELLED 以外）、`update_time` 超过 60 秒没动"的配送单。
+2. **先认领**：`UPDATE delivery SET update_time = now WHERE id = ? AND update_time = 读到的值`。改到 1 行才算抢到。这是一个**条件更新**（compare-and-set）：
    - 两个 delivery 实例同时扫到同一行，只有一个改得到；
    - 发送失败的行 `update_time` 已经变成 now，要再等 60 秒才会被重试，不会每一轮都去撞。
-3. 再发作业（第 69 行）。发失败就打 `ALERT delivery_job_resend_failed`（第 74 行），这一轮停下：RabbitMQ 挂着时一次发送要卡约 20 秒（连接超时），没必要一行一行都卡一遍。
+3. 再发作业。发失败就打 `ALERT delivery_job_resend_failed`，这一轮停下：RabbitMQ 挂着时一次发送要卡约 20 秒（连接超时），没必要一行一行都卡一遍。
 
 正常情况下作业还是 `afterCommit` 立刻发出去（快路径），扫表只在丢了的时候才起作用（慢路径，最多晚 70 秒）。
 
 ### 2.4 `@Scheduled` 和调度线程池
-`@Scheduled(fixedDelayString = "${delivery.stuck-job.check-interval-ms:10000}")`：上一次跑完后隔 10 秒再跑。Spring Boot 默认的调度器**只有 1 个线程**，所有 `@Scheduled` 方法排队用它。delivery 里还有 Kafka 事件投递程序（每秒一次）。RabbitMQ 挂着时扫表一次发送卡 20 秒，就会把 Kafka 事件也拖住 20 秒。所以 [application.properties:43](../../backend/deliveryService/src/main/resources/application.properties#L43) 设了 `spring.task.scheduling.pool.size=2`。
+`@Scheduled(fixedDelayString = "${delivery.stuck-job.check-interval-ms:10000}")`：上一次跑完后隔 10 秒再跑。Spring Boot 默认的调度器**只有 1 个线程**，所有 `@Scheduled` 方法排队用它。delivery 里还有 Kafka 事件投递程序（每秒一次）。RabbitMQ 挂着时扫表一次发送卡 20 秒，就会把 Kafka 事件也拖住 20 秒。所以 [delivery `spring.task.scheduling.pool.size`](../../backend/deliveryService/src/main/resources/application.properties) 设了 `spring.task.scheduling.pool.size=2`。
 
 ### 2.5 `@ConditionalOnProperty` 开关
-`@ConditionalOnProperty(name = "delivery.stuck-job.enabled", matchIfMissing = true)`（第 35 行）：配置里没写这个键时也创建这个 bean（`matchIfMissing` 默认是 false，这里改成 true）；写成 false 就不创建。加它是因为测试里踩了坑，见 §4.3。
+`@ConditionalOnProperty(name = "delivery.stuck-job.enabled", matchIfMissing = true)`（写在类上）：配置里没写这个键时也创建这个 bean（`matchIfMissing` 默认是 false，这里改成 true）；写成 false 就不创建。加它是因为测试里踩了坑，见 §4.3。
 
 ### 2.6 重复作业怎么办
 扫表补发是"至少一次"：作业只是慢、没丢的话，可能同时有两个。worker 保存时有 `@Version` 乐观锁：两个作业读到同一个版本，后保存的那个冲突、被丢弃（[DeliveryStatusUpdateService.java](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/DeliveryStatusUpdateService.java) 的 `ObjectOptimisticLockingFailureException` 分支）。一前一后的话，单子会走快一步——状态还是按顺序前进，不会跳回去。
@@ -95,10 +95,10 @@
 
 | 八股 | 代码在哪 | 这里的判断 |
 |---|---|---|
-| 📒 F4 Outbox（追问：为什么不在一个事务里） | [DeliveryService.java:96](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java#L96) | Postgres 事务管不到 RabbitMQ，只能排先后，两种顺序都有缺口。这里没把作业也改成 outbox，而是加兜底扫描（§4.1）。**不需要**的地方：store 发邮件，丢一封无所谓，直接发 + catch |
+| 📒 F4 Outbox（追问：为什么不在一个事务里） | [DeliveryService#createDelivery](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/DeliveryService.java) | Postgres 事务管不到 RabbitMQ，只能排先后，两种顺序都有缺口。这里没把作业也改成 outbox，而是加兜底扫描（§4.1）。**不需要**的地方：store 发邮件，丢一封无所谓，直接发 + catch |
 | 📒 E3 乐观锁 | worker 的 `@Version` + `ObjectOptimisticLockingFailureException` | 补发可能造成重复作业，冲突少见 → 乐观锁正合适，冲突了就丢掉后来的那个 |
-| ➕ 条件更新（CAS）认领 | [StuckDeliveryJobSweeper.java:64](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/StuckDeliveryJobSweeper.java#L64) | `UPDATE … WHERE update_time = 读到的值`，改到 1 行才算抢到；多实例不重复，而且发送时不持锁。**不需要**：只有一个实例、也不在乎重复时，直接发就行 |
-| ➕ Spring 调度池默认 1 线程 | [application.properties:43](../../backend/deliveryService/src/main/resources/application.properties#L43) | 一个会阻塞的 `@Scheduled` 会拖住其他所有定时任务 → 池子设成 2。**不需要**：定时任务都很快、不会阻塞时，1 个线程就够 |
+| ➕ 条件更新（CAS）认领 | [StuckDeliveryJobSweeper#resendStuckJobs](../../backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/StuckDeliveryJobSweeper.java) | `UPDATE … WHERE update_time = 读到的值`，改到 1 行才算抢到；多实例不重复，而且发送时不持锁。**不需要**：只有一个实例、也不在乎重复时，直接发就行 |
+| ➕ Spring 调度池默认 1 线程 | [delivery `spring.task.scheduling.pool.size`](../../backend/deliveryService/src/main/resources/application.properties) | 一个会阻塞的 `@Scheduled` 会拖住其他所有定时任务 → 池子设成 2。**不需要**：定时任务都很快、不会阻塞时，1 个线程就够 |
 | ➕ 对账 / 兜底扫描 | 整个 `StuckDeliveryJobSweeper` | 主路径（afterCommit）负责快，兜底负责一定能补。**不需要**：丢了无所谓的消息 |
 
 英文场景锚点：

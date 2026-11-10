@@ -24,9 +24,9 @@
 
 | 会出什么错 | 测试 |
 |---|---|
-| bank 内部出错被当成"拒绝" → Payment FAILED → Pay Now 换新键 → 扣两次 | [BankCallIntegrationTest.java:37](../../backend/storeService/src/test/java/comp5348/storeservice/adapter/BankCallIntegrationTest.java#L37)、[BankGrpcIntegrationTest.java:206](../../backend/bankService/src/test/java/com/comp5348/bank/BankGrpcIntegrationTest.java#L206) |
-| deadline 设在启动时 → 5 秒后所有付款都超时 | [BankCallIntegrationTest.java:78](../../backend/storeService/src/test/java/comp5348/storeservice/adapter/BankCallIntegrationTest.java#L78) |
-| store 放弃等待，bank 其实已经扣了 | [BankGrpcIntegrationTest.java:241](../../backend/bankService/src/test/java/com/comp5348/bank/BankGrpcIntegrationTest.java#L241) |
+| bank 内部出错被当成"拒绝" → Payment FAILED → Pay Now 换新键 → 扣两次 | [BankCallIntegrationTest#bankInternalError_isUnknown_neverRejected](../../backend/storeService/src/test/java/comp5348/storeservice/adapter/BankCallIntegrationTest.java)、[BankGrpcIntegrationTest#grpcTransfer_serviceThrows_errorStatus_notRejected](../../backend/bankService/src/test/java/com/comp5348/bank/BankGrpcIntegrationTest.java) |
+| deadline 设在启动时 → 5 秒后所有付款都超时 | [BankCallIntegrationTest#deadlineIsPerCall_callAfterIdleStillSucceeds](../../backend/storeService/src/test/java/comp5348/storeservice/adapter/BankCallIntegrationTest.java) |
+| store 放弃等待，bank 其实已经扣了 | [BankGrpcIntegrationTest#clientGaveUp_bankStillCommits_retryReturnsSameResult](../../backend/bankService/src/test/java/com/comp5348/bank/BankGrpcIntegrationTest.java) |
 
 ---
 
@@ -42,19 +42,19 @@
 - **状态 OK + `outcome`**：bank 的回答。`SUCCEEDED` → 成功，`REJECTED` → 确定失败。
 - **gRPC 错误状态**（`StatusRuntimeException`，unchecked）：`DEADLINE_EXCEEDED`、`UNAVAILABLE`、`INTERNAL`……**全部** → `UNKNOWN`。
 - **状态 OK，但 `outcome` 没设**：→ `UNKNOWN`（新行为，见 2.5）。
-- 代码：[BankAdapter.java:134](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L134)（`fromOutcome`）、[BankAdapter.java:147](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L147)（`unknown`）。
-- 为什么连 `UNIMPLEMENTED`、`INVALID_ARGUMENT` 这种"听起来肯定没成功"的码也算未知：判成失败的代价是可能扣两次钱，判成未知的代价只是同键多试几次（安全）。宁可后者。测试把所有 16 个错误码都跑了一遍：[BankGrpcMappingIntegrationTest.java:43](../../backend/storeService/src/test/java/comp5348/storeservice/adapter/BankGrpcMappingIntegrationTest.java#L43)
+- 代码：[BankAdapter#fromOutcome](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java)（`fromOutcome`）、[BankAdapter#unknown](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java)（`unknown`）。
+- 为什么连 `UNIMPLEMENTED`、`INVALID_ARGUMENT` 这种"听起来肯定没成功"的码也算未知：判成失败的代价是可能扣两次钱，判成未知的代价只是同键多试几次（安全）。宁可后者。测试把所有 16 个错误码都跑了一遍：[BankGrpcMappingIntegrationTest#everyNonOkStatus_isUnknown](../../backend/storeService/src/test/java/comp5348/storeservice/adapter/BankGrpcMappingIntegrationTest.java)
 - 官方文档对 `DEADLINE_EXCEEDED` 也是这么写的：会改状态的操作，即使已经成功了也可能返回这个码。
 
 ### 2.3 deadline（截止时间）≠ 超时时长
 **大白话**：HTTP 的超时是"等多久"，gRPC 的 deadline 是"到几点为止"。
 - `stub.withDeadlineAfter(5, SECONDS)` 算的是"从**现在**起 5 秒"，生成的是一个绝对时间点。
-- 所以它必须**每次调用前现设**：[BankAdapter.java:80](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L80)。如果在构造函数里设一次，启动 5 秒以后每一次调用都会立刻 `DEADLINE_EXCEEDED`。我做过改坏检查：改成设在 stub 上，`deadlineIsPerCall` 立刻变红。
+- 所以它必须**每次调用前现设**：[BankAdapter#oneCall](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java)。如果在构造函数里设一次，启动 5 秒以后每一次调用都会立刻 `DEADLINE_EXCEEDED`。我做过改坏检查：改成设在 stub 上，`deadlineIsPerCall` 立刻变红。
 - deadline 到了，store 不再等，但**bank 不会自动停**（官方文档：停止服务端的工作是服务端程序自己的责任）。bank 可能照常扣款、提交。这就是"超时不等于失败"，测试见 1 节第三条。
 - 时长和以前一样：`bank.grpc.deadline-ms=5000`。以前 HTTP 是"连接 5 秒 + 读 5 秒"，现在一共 5 秒。
 
 ### 2.4 Channel：一条长连接，和它的重连
-- `ManagedChannel` 是到 bank 的连接（HTTP/2，一条连接上可以同时跑很多调用）。整个 store 只建一个，所有调用共用：[BankAdapter.java:63](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L63)。`@PreDestroy` 关机时关掉。
+- `ManagedChannel` 是到 bank 的连接（HTTP/2，一条连接上可以同时跑很多调用）。整个 store 只建一个，所有调用共用：[BankAdapter#BankAdapter](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java)。`@PreDestroy` 关机时关掉。
 - `usePlaintext()`：不用 TLS。容器网络内部，和原来的 REST 调用一样。
 - **断线重连**：连接断了，gRPC 按退避时间（大约 1 秒、1.6 秒、2.6 秒……）重连。默认（fail-fast）在等重连的时候，新调用**立刻失败**。
 - `withWaitForReady()`：连不上时把调用排队，等到连接好了再发，最多等到 deadline。Christy 定的：加上。
@@ -62,23 +62,23 @@
   - 测试第一版只断言"最后付成功了"，去掉 waitForReady 也是绿的。审查（#5）之后加了一条：这个键的日志里不能出现"结果未知"。只数假 bank 收到几次不够：fail-fast 的调用根本到不了 bank。改坏检查 3 次都红（有一次直接掉进 PAY_UNKNOWN）。
   - 代价：bank 长时间挂掉时，每次调用都要等满 5 秒，一个 PAY 任务 5 次大约 27 秒（和 09 里的 A#5 同一类问题）。
 - `disableRetry()`：gRPC 自带重试，可以按配置自动重发。这里关掉，让 OutboxProcessor 成为唯一一层重试（5 次快速，然后每 10 分钟）。测试 `noAnswer_bankSeesExactly5CallsPerRound` 断言一轮正好 5 次。
-- **关机时的中断**（审查 #2，红 `eebc1bc` → 绿）：store 关机时 Spring 会中断定时任务线程。HTTP 的 `HttpURLConnection` 不理中断；gRPC 的 blocking stub 会理，正在等的调用立刻变成 `CANCELLED`（= 未知）。中断标志还在，后面的 `Thread.sleep` 和调用也立刻返回 → 5 次快速重试几毫秒烧完 → PAY_UNKNOWN、一条假告警、重启后等 10 分钟。修法：每次得到"未知"后先看线程是不是被中断了，是就停手，什么都不标记（[OutboxProcessor.java:235](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java#L235)）。任务还是 PENDING、键不变，重启后第一轮（5 秒）就用同一个键补上。测试 `interruptedDuringCall_doesNotBurnFastRetries`。
+- **关机时的中断**（审查 #2，红 `eebc1bc` → 绿）：store 关机时 Spring 会中断定时任务线程。HTTP 的 `HttpURLConnection` 不理中断；gRPC 的 blocking stub 会理，正在等的调用立刻变成 `CANCELLED`（= 未知）。中断标志还在，后面的 `Thread.sleep` 和调用也立刻返回 → 5 次快速重试几毫秒烧完 → PAY_UNKNOWN、一条假告警、重启后等 10 分钟。修法：每次得到"未知"后先看线程是不是被中断了，是就停手，什么都不标记（[OutboxProcessor#shuttingDown](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java)）。任务还是 PENDING、键不变，重启后第一轮（5 秒）就用同一个键补上。测试 `interruptedDuringCall_doesNotBurnFastRetries`。
   - 没做的：让这次调用不响应中断、等到 bank 回答（像 HTTP 那样）。现在的做法放弃了在途那次的结果，靠重启后同键重试拿回来，钱一样安全。Spring 关机时到底是不是 `shutdownNow()` 中断线程，**待确认**（测试里是手动中断的）。
 
 ### 2.5 proto3 的默认值：没有 null
 - proto3 的字段没有"没设"这一说：字符串默认 `""`，枚举默认是编号 0 的那个值（这里是 `OUTCOME_UNSPECIFIED`）。
 - 三个后果：
-  1. **生成的 setter 不收 null**，`setReason(null)` 直接抛 `NullPointerException`。适配器先把 null 转成 `""`：[BankAdapter.java:158](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L158)。不转的话，异常飞出适配器，OutboxProcessor 只记一条日志，任务每 5 秒重试，**永远不进 PAY_UNKNOWN、也不告警**。
+  1. **生成的 setter 不收 null**，`setReason(null)` 直接抛 `NullPointerException`。适配器先把 null 转成 `""`：[BankAdapter#nullToEmpty](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java)。不转的话，异常飞出适配器，OutboxProcessor 只记一条日志，任务每 5 秒重试，**永远不进 PAY_UNKNOWN、也不告警**。
   2. 成功但流水号是 `""` → 存成 null，和 HTTP 版一样。
   3. bank 忘了写 `outcome` → 收到的是 0 = `OUTCOME_UNSPECIFIED`。旧的 HTTP 版遇到"没写 success"当成**拒绝**；现在当成**未知**（Christy 2026-10-20 定）。
-- 金额是字符串（bank.proto 规定，不用 float）。`BigDecimal.toString()` 遇到 `1E+2` 会原样输出科学计数法，所以用 `toPlainString()`：[BankAdapter.java:153](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L153)
+- 金额是字符串（bank.proto 规定，不用 float）。`BigDecimal.toString()` 遇到 `1E+2` 会原样输出科学计数法，所以用 `toPlainString()`：[BankAdapter#decimal](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java)
 
 ### 2.6 bank 这边：业务的"不"和程序出错要分开
 - [BankGrpcService.java](../../backend/bankService/src/main/java/com/comp5348/bank/grpc/BankGrpcService.java)：继承生成的基类，调**原来的** `BankService`。幂等、行锁、键冲突检查一行没动，REST 和 gRPC 走同一套逻辑。
 - `BankService` 回 `success=false` → OK + `REJECTED` + reason。
-- 金额字符串解析不了 → 也是 OK + `REJECTED`（[BankGrpcService.java:45](../../backend/bankService/src/main/java/com/comp5348/bank/grpc/BankGrpcService.java#L45)）。不用 `INVALID_ARGUMENT`：store 会当成未知，每 10 分钟重试一次，永远不会成功。
-- `BankService` 抛异常 → `INTERNAL`（[BankGrpcService.java:92](../../backend/bankService/src/main/java/com/comp5348/bank/grpc/BankGrpcService.java#L92)），细节只写 bank 自己的日志，不把 SQL、表名发给调用方。**绝不 catch 成 REJECTED。**
-- 回答发不出去（store 已经放弃了）→ 忽略。钱已经提交，store 用同一个键重试会拿到同一个结果：[BankGrpcService.java:102](../../backend/bankService/src/main/java/com/comp5348/bank/grpc/BankGrpcService.java#L102)
+- 金额字符串解析不了 → 也是 OK + `REJECTED`（[BankGrpcService#transfer](../../backend/bankService/src/main/java/com/comp5348/bank/grpc/BankGrpcService.java)）。不用 `INVALID_ARGUMENT`：store 会当成未知，每 10 分钟重试一次，永远不会成功。
+- `BankService` 抛异常 → `INTERNAL`（[BankGrpcService#failInternally](../../backend/bankService/src/main/java/com/comp5348/bank/grpc/BankGrpcService.java)），细节只写 bank 自己的日志，不把 SQL、表名发给调用方。**绝不 catch 成 REJECTED。**
+- 回答发不出去（store 已经放弃了）→ 忽略。钱已经提交，store 用同一个键重试会拿到同一个结果：[BankGrpcService#reply](../../backend/bankService/src/main/java/com/comp5348/bank/grpc/BankGrpcService.java)
 
 ### 2.7 `SmartLifecycle`：gRPC 服务器什么时候启动、什么时候关
 - Spring Boot 自己会起 Tomcat（REST），但不会起 gRPC 服务器。[GrpcServerLifecycle.java](../../backend/bankService/src/main/java/com/comp5348/bank/grpc/GrpcServerLifecycle.java) 实现 `SmartLifecycle`：
@@ -128,16 +128,16 @@
 
 | 八股 | 代码在哪 | 这里的判断 |
 |---|---|---|
-| 📒 F2 怎么让系统更 resilient | [BankAdapter.java:80](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L80) | 超时 + 重试 + 幂等三件套。**每次调用**有 deadline；重试只有一层（OutboxProcessor）。不需要再加熔断器：只有一个调用方，而且已经有"5 次后改成每 10 分钟一次"的退避 |
-| 📒 F3 幂等 | [BankGrpcIntegrationTest.java:241](../../backend/bankService/src/test/java/com/comp5348/bank/BankGrpcIntegrationTest.java#L241) | 换协议后幂等还在：store 放弃等待、bank 照常提交，同键重试拿回同一个流水号。协议变了，键的规则没变 |
+| 📒 F2 怎么让系统更 resilient | [BankAdapter#oneCall](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java) | 超时 + 重试 + 幂等三件套。**每次调用**有 deadline；重试只有一层（OutboxProcessor）。不需要再加熔断器：只有一个调用方，而且已经有"5 次后改成每 10 分钟一次"的退避 |
+| 📒 F3 幂等 | [BankGrpcIntegrationTest#clientGaveUp_bankStillCommits_retryReturnsSameResult](../../backend/bankService/src/test/java/com/comp5348/bank/BankGrpcIntegrationTest.java) | 换协议后幂等还在：store 放弃等待、bank 照常提交，同键重试拿回同一个流水号。协议变了，键的规则没变 |
 | 📒 F7 REST API 设计 | [BankController.java](../../backend/bankService/src/main/java/com/comp5348/bank/controller/BankController.java) | 对浏览器保留 REST（通用、好调试），服务之间用 gRPC（契约严格、代码生成）。不是所有接口都要换 |
-| 📒 A4 checked vs unchecked | [BankAdapter.java:88](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L88) | `StatusRuntimeException` 是 unchecked，编译器不提醒你 catch。适配器在边界上把它变成 `UNKNOWN` 值返回，上层不用处理异常 |
-| 📒 D2 singleton bean 线程安全吗 | [BankAdapter.java:63](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L63) | `BankAdapter` 是单例，channel 和 stub 被所有线程共用。可以，因为它们是线程安全、不可变的：`withDeadlineAfter` 返回一个**新** stub，不改原来的 |
-| 📒 D1 IoC / bean 生命周期 | [GrpcServerLifecycle.java:37](../../backend/bankService/src/main/java/com/comp5348/bank/grpc/GrpcServerLifecycle.java#L37) | `SmartLifecycle` 让 Spring 决定 gRPC 服务器什么时候启动和关闭（依赖准备好之后启动、销毁之前关闭）。只是一个普通 bean 的话，不需要它，`@PostConstruct` 就够 |
+| 📒 A4 checked vs unchecked | [BankAdapter#transfer](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java) | `StatusRuntimeException` 是 unchecked，编译器不提醒你 catch。适配器在边界上把它变成 `UNKNOWN` 值返回，上层不用处理异常 |
+| 📒 D2 singleton bean 线程安全吗 | [BankAdapter#BankAdapter](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java) | `BankAdapter` 是单例，channel 和 stub 被所有线程共用。可以，因为它们是线程安全、不可变的：`withDeadlineAfter` 返回一个**新** stub，不改原来的 |
+| 📒 D1 IoC / bean 生命周期 | [GrpcServerLifecycle#start](../../backend/bankService/src/main/java/com/comp5348/bank/grpc/GrpcServerLifecycle.java) | `SmartLifecycle` 让 Spring 决定 gRPC 服务器什么时候启动和关闭（依赖准备好之后启动、销毁之前关闭）。只是一个普通 bean 的话，不需要它，`@PostConstruct` 就够 |
 | 📒 G4 Testcontainers / 不用假替身 | [FakeBankGrpc.java](../../backend/storeService/src/test/java/comp5348/storeservice/support/FakeBankGrpc.java) | 和"不用 H2"同一个道理：要测网络行为（deadline、断线），替身就得是真的服务器，不能是 Mockito |
-| ➕ gRPC deadline vs timeout | [BankAdapter.java:80](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L80) | deadline 是绝对时间点，每次调用现设。只有一次调用、不往下游传的时候，两者区别不大；链式调用（A→B→C）时 deadline 可以往下传，timeout 不能 |
-| ➕ gRPC 状态码怎么映射 | [BankAdapter.java:147](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L147) | 会改状态的调用：错误码一律当"未知"。只读调用（比如查余额）可以按码细分，因为重试和误判都不花钱 |
-| ➕ proto3 默认值 | [BankAdapter.java:158](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L158) | 没有 null，`""` 和 0 就是"没设"。枚举的 0 号值留给 `UNSPECIFIED`，读到它要当成"不知道"，不能当成某个业务值 |
+| ➕ gRPC deadline vs timeout | [BankAdapter#oneCall](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java) | deadline 是绝对时间点，每次调用现设。只有一次调用、不往下游传的时候，两者区别不大；链式调用（A→B→C）时 deadline 可以往下传，timeout 不能 |
+| ➕ gRPC 状态码怎么映射 | [BankAdapter#unknown](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java) | 会改状态的调用：错误码一律当"未知"。只读调用（比如查余额）可以按码细分，因为重试和误判都不花钱 |
+| ➕ proto3 默认值 | [BankAdapter#nullToEmpty](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java) | 没有 null，`""` 和 0 就是"没设"。枚举的 0 号值留给 `UNSPECIFIED`，读到它要当成"不知道"，不能当成某个业务值 |
 
 **英文场景锚点**：
 - "Switching to gRPC, the risky part wasn't the plumbing. It was mapping status codes. Every error code maps to 'unknown', because a wrong 'failed' can mean charging twice."
