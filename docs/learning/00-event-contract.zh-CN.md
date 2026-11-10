@@ -13,10 +13,10 @@
 **服务之间用 Kafka 传消息时，一条格式不对的消息会被悄悄收下，等到几步之后才出错，或者只在另一种语言（Go）那边出错。**
 
 复现的测试（`test(red)` 时 14 个红）：
-- 缺字段被当成 null 收下：[EventEnvelopeContractTest.java:46](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L46)、[:61](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L61)
-- `orderId: 42`（数字）被自动转成 `"42"`：[:71](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L71)
-- payload 是一段文字也被收下：[:84](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L84)
-- 配送状态 `CREATED` 找不到事件 `DeliveryCreated`：[DeliveryEventContractTest.java:22](../../backend/deliveryService/src/test/java/com/comp5348/delivery/contracts/DeliveryEventContractTest.java#L22)
+- 缺字段被当成 null 收下：[EventEnvelopeContractTest#eventEnvelope_missingRequiredField_failsValidation](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java)、[EventEnvelopeContractTest#eventEnvelope_nullRequiredField_failsValidation](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java)
+- `orderId: 42`（数字）被自动转成 `"42"`：[EventEnvelopeContractTest#orderId_sentAsJsonNumber_isRejected](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java)
+- payload 是一段文字也被收下：[EventEnvelopeContractTest#payload_notAnObject_isRejected](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java)
+- 配送状态 `CREATED` 找不到事件 `DeliveryCreated`：[DeliveryEventContractTest#everyDeliveryStatus_hasMatchingEventType](../../backend/deliveryService/src/test/java/com/comp5348/delivery/contracts/DeliveryEventContractTest.java)
 
 ---
 
@@ -30,19 +30,19 @@
 ### 2.2 Java record 和紧凑构造器（compact constructor）
 - `record` 是 Java 16 起正式的"只装数据的类"：写出字段，编译器自动生成构造器、getter（`eventId()`）、`equals`、`hashCode`、`toString`。字段都是 `final`，造好就不能改。
 - **紧凑构造器**：在 record 里写 `public EventEnvelope { ... }`，不写参数列表。它在字段被赋值**之前**运行，适合做检查。检查不通过就抛异常，对象根本造不出来。
-- 代码：[EventEnvelope.java:28](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventEnvelope.java#L28)
+- 代码：[EventEnvelope#EventEnvelope](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventEnvelope.java)
 
 ### 2.3 Jackson 怎么把 JSON 变成 record
 - Jackson 是 Spring Boot 默认的 JSON 库。`ObjectMapper.readValue(json, EventEnvelope.class)` 会：读 JSON → 找到 record 的构造器 → 按字段名把值传进去。
 - **JSON 里缺了某个字段时，Jackson 不报错，直接传 null。** 这就是第一类红灯的原因。
-- 因为 Jackson 一定会调用构造器，所以只要在紧凑构造器里检查，**读消息时就自动被检查**。构造器抛出的异常会被 Jackson 包成 `JsonProcessingException`，`EventCodec` 再统一转成 `InvalidEventException`：[EventCodec.java:37](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java#L37)
-- 小坑：JSON 里写 `"payload": null` 时，`JsonNode` 类型的字段拿到的不是 Java 的 `null`，而是一个 `NullNode` 对象。所以检查写成 `payload == null || !payload.isObject()`：[EventEnvelope.java:34](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventEnvelope.java#L34)
+- 因为 Jackson 一定会调用构造器，所以只要在紧凑构造器里检查，**读消息时就自动被检查**。构造器抛出的异常会被 Jackson 包成 `JsonProcessingException`，`EventCodec` 再统一转成 `InvalidEventException`：[EventCodec#parse](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java)
+- 小坑：JSON 里写 `"payload": null` 时，`JsonNode` 类型的字段拿到的不是 Java 的 `null`，而是一个 `NullNode` 对象。所以检查写成 `payload == null || !payload.isObject()`：[EventEnvelope#EventEnvelope](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventEnvelope.java)
 - **后来补的（PR #9）**：Jackson 默认**遇到多出来的字段也会报错**（`FAIL_ON_UNKNOWN_PROPERTIES`）。这和契约"只加字段、旧消费者照样能读"矛盾，第一版漏掉了，是写 Go tracking 的 agent 拿 README 对照时发现的。修法：关掉这个开关。注意它和"必填字段不能缺"是两回事：缺字段靠构造器拦，多字段直接忽略。测试 `newFieldAddedByProducer_isIgnoredByOlderConsumer`。
 
 ### 2.4 Jackson 的类型强制转换（coercion）
 - coercion = "类型不对时，自动帮你转"。Jackson 默认会把数字 `42` 转成字符串 `"42"`，填进 `String` 字段。
 - Jackson 2.12 起有 `CoercionConfig`：可以按"目标类型 + 输入形状"决定怎么处理。`CoercionAction` 有四种：`Fail`（报错）、`TryConvert`（尝试转换）、`AsNull`、`AsEmpty`。
-- 我们的设置：`String` 类字段（`LogicalType.Textual`）收到整数、小数、布尔值 → `Fail`：[EventCodec.java:27](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java#L27)
+- 我们的设置：`String` 类字段（`LogicalType.Textual`）收到整数、小数、布尔值 → `Fail`：[EventCodec#newMapper](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java)
 - 为什么要关：Go 的 `encoding/json` 遇到"数字填进 string 字段"会返回 `UnmarshalTypeError`。Java 放过、Go 报错，问题就会藏到集成时才出现。
 
 ### 2.5 checked 异常 `InvalidEventException`
@@ -51,7 +51,7 @@
 
 ### 2.6 枚举里写明对应关系
 - `DeliveryEventType.valueOf("CREATED")` 按**常量名**找，但常量叫 `DELIVERY_CREATED`，所以找不到。
-- 修法：每个常量带一个字段写明对应哪个状态，`fromStatus` 逐个比较：[DeliveryEventType.java:10](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java#L10)、[:35](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java#L35)
+- 修法：每个常量带一个字段写明对应哪个状态，`fromStatus` 逐个比较：[DeliveryEventType.DELIVERY_CREATED](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java)、[DeliveryEventType#fromStatus](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java)
 
 ### 2.7 Kafka 的 key 和分区
 - 每条 Kafka 消息有一个 key。**key 相同的消息进同一个分区，同一个分区里的顺序是有保证的。**
@@ -108,8 +108,8 @@ delivery 的消费者
 
 | 八股 | 代码在哪 | 这里的判断 |
 |---|---|---|
-| 📒 **A2 HashMap / B2 ConcurrentHashMap** | `DeliveryEventType.fromStatus()`：逐个比较 6 个值（[DeliveryEventType.java:35](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java#L35)） | **现在**：6 个值，循环最简单。**什么时候换**：调用量非常大时，可以在类加载时建一个 `static final Map<String, DeliveryEventType>` 当索引，查找从逐个比较变成一次 hash。**不需要 ConcurrentHashMap**：这个 Map 建好后只读，多个线程只读是安全的。只有多个线程**同时写**（比如一个会不断加东西的缓存）才需要它 |
-| 📒 **B1 / D2 线程安全** + ➕ **ObjectMapper 线程安全** | `EventCodec` 里只有一个 `static final ObjectMapper`，所有线程共用（[EventCodec.java:15](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java#L15)） | ObjectMapper 创建很贵（要扫描类、建缓存），所以只建一个。**配置好以后**，多个线程同时用它读写 JSON 是安全的。坑：不能在用的过程中再改配置（比如某个请求里调 `MAPPER.configure(...)`），会影响所有线程。跟 D2 "singleton bean 是不是线程安全"是同一个道理：没有可变状态，才线程安全 |
+| 📒 **A2 HashMap / B2 ConcurrentHashMap** | `DeliveryEventType.fromStatus()`：逐个比较 6 个值（[DeliveryEventType#fromStatus](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java)） | **现在**：6 个值，循环最简单。**什么时候换**：调用量非常大时，可以在类加载时建一个 `static final Map<String, DeliveryEventType>` 当索引，查找从逐个比较变成一次 hash。**不需要 ConcurrentHashMap**：这个 Map 建好后只读，多个线程只读是安全的。只有多个线程**同时写**（比如一个会不断加东西的缓存）才需要它 |
+| 📒 **B1 / D2 线程安全** + ➕ **ObjectMapper 线程安全** | `EventCodec` 里只有一个 `static final ObjectMapper`，所有线程共用（[EventCodec.MAPPER](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java)） | ObjectMapper 创建很贵（要扫描类、建缓存），所以只建一个。**配置好以后**，多个线程同时用它读写 JSON 是安全的。坑：不能在用的过程中再改配置（比如某个请求里调 `MAPPER.configure(...)`），会影响所有线程。跟 D2 "singleton bean 是不是线程安全"是同一个道理：没有可变状态，才线程安全 |
 | 📒 **A1 equals / hashCode** | record 按所有字段自动生成 `equals` 和 `hashCode` | 所以 payload 可以直接当 HashMap 的 key，或者放进 HashSet 去重。手写的类如果只重写 `equals`、不重写 `hashCode`，放进 HashSet 去重会失效，这就是 A1 的经典坑。record 不会犯这个错 |
 | 📒 **A4 checked vs unchecked** | `InvalidEventException extends Exception`（checked） | 故意用 checked：编译器逼消费者单独处理"坏消息"（送 DLT），不会和"暂时失败"（要重试）混在一起。如果用 unchecked，忘了 catch 也能编译，坏消息就会被当成普通异常一直重试 |
 | 📒 **A6 Modern Java** | `record` + 紧凑构造器 | 被问"用过哪些新特性"时，能指着一行真代码说：用 record 定义不可变的消息格式，在紧凑构造器里做检查 |

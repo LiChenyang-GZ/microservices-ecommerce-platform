@@ -12,7 +12,7 @@
 
 **A hot product has 10 in stock. 8 people buy 1 each at almost the same time. Only 1 order succeeds and the other 7 fail.**
 
-- Reproducing test: [StockHoldConcurrencyIntegrationTest.java:111](../../backend/storeService/src/test/java/comp5348/storeservice/inventory/StockHoldConcurrencyIntegrationTest.java#L111)
+- Reproducing test: [StockHoldConcurrencyIntegrationTest#enoughStock_everyoneBuysAtOnce_allSucceed](../../backend/storeService/src/test/java/comp5348/storeservice/inventory/StockHoldConcurrencyIntegrationTest.java)
 - Red: `expected: 8, but was: 1`. All 7 failures are `ObjectOptimisticLockingFailureException`.
 - No overselling (stock never goes negative), but customers are turned away while there is stock. The hotter the product, the more people fail.
 
@@ -22,18 +22,18 @@
 
 ### 2.1 Old code: optimistic lock with `@Version`
 **Plain words**: each row has a version number. A save says "update only if the version is still the one I read". If not, that's a conflict.
-- Field: [WarehouseProduct.java:35](../../backend/storeService/src/main/java/comp5348/storeservice/model/WarehouseProduct.java#L35)
+- Field: [WarehouseProduct.version](../../backend/storeService/src/main/java/comp5348/storeservice/model/WarehouseProduct.java)
 - Hibernate saves with `UPDATE warehouse_products SET quantity=?, version=version+1 WHERE id=? AND version=?`. Zero rows updated → `OptimisticLockException`, which Spring wraps as `ObjectOptimisticLockingFailureException`.
 - Old stock hold: plain `SELECT` → subtract in memory → write back with the version. All 8 read the same version. The first commit bumps it, and the other 7 update zero rows and fail.
 
 ### 2.2 New code: `@Lock(PESSIMISTIC_WRITE)` → `SELECT … FOR UPDATE`
-- New query: [WarehouseProductRepository.java:25](../../backend/storeService/src/main/java/comp5348/storeservice/repository/WarehouseProductRepository.java#L25)
+- New query: [WarehouseProductRepository#findByProductIdForUpdate](../../backend/storeService/src/main/java/comp5348/storeservice/repository/WarehouseProductRepository.java)
   ```java
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("select wp from WarehouseProduct wp where wp.product.id = :productId and wp.quantity > 0 order by wp.id")
   List<WarehouseProduct> findByProductIdForUpdate(...);
   ```
-- Holding stock calls it first: [WarehouseService.java:194](../../backend/storeService/src/main/java/comp5348/storeservice/service/WarehouseService.java#L194)
+- Holding stock calls it first: [WarehouseService#getAndUpdateAvailableWarehouse](../../backend/storeService/src/main/java/comp5348/storeservice/service/WarehouseService.java)
 - The lock is held until the order transaction commits (`@Transactional` on `OrderService.createOrder`; the stock method joins that transaction).
 
 ### 2.3 After waiting, you read the new quantity (READ COMMITTED re-check)
@@ -44,24 +44,24 @@
 ### 2.4 Why `order by wp.id`, not `order by quantity`
 - **Lock in id order to avoid deadlock**: a product can have stock rows in several warehouses. If every order locks them from the smallest id up, one can't hold 1 and wait for 2 while another holds 2 and waits for 1. Same idea as `lockAccounts` in the bank.
 - **Don't sort by a column others are changing**: the Postgres docs warn that `ORDER BY` + `FOR UPDATE` sorts first, then locks row by row. If the sort column changes while you wait, rows can come back out of order. `id` never changes. `quantity` is exactly the column others are changing.
-- So: lock by id in SQL, then sort by the fresh quantity in memory ([WarehouseService.java:195](../../backend/storeService/src/main/java/comp5348/storeservice/service/WarehouseService.java#L195)). The "take from the smallest stock first" rule is unchanged.
+- So: lock by id in SQL, then sort by the fresh quantity in memory ([WarehouseService#getAndUpdateAvailableWarehouse](../../backend/storeService/src/main/java/comp5348/storeservice/service/WarehouseService.java)). The "take from the smallest stock first" rule is unchanged.
 
 ### 2.5 Why we can trust the value is fresh (first-level cache)
 - Within one transaction, if Hibernate already loaded an entity, querying it again returns the cached object. The freshly queried data does not overwrite it (the ➕ item in doc 01).
-- Safe here: before holding stock, the order transaction only runs a `SUM` query ([OrderService.java:114](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L114)), so no `WarehouseProduct` entity is in the cache. **If someone later adds a `findById` before this, the lock could read a stale quantity.**
+- Safe here: before holding stock, the order transaction only runs a `SUM` query ([OrderService#createOrder](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java)), so no `WarehouseProduct` entity is in the cache. **If someone later adds a `findById` before this, the lock could read a stale quantity.**
 
 ---
 
 ## 3. Request path
 
 ```
-POST /api/store/orders/create-with-payment → StoreController.createOrderWithPayment (controller/StoreController.java:38)
-  → OrderProductService.createOrderWithPayment                        (service/OrderProductService.java:67)
-    → OrderService.createOrder  @Transactional  ── transaction starts (service/OrderService.java:99)
+POST /api/store/orders/create-with-payment → StoreController.createOrderWithPayment (controller/StoreController.java)
+  → OrderProductService.createOrderWithPayment                        (service/OrderProductService.java)
+    → OrderService.createOrder  @Transactional  ── transaction starts (service/OrderService.java)
         SUM(quantity): rough check that there is enough
         save temporary order PENDING_STOCK_HOLD
-        → WarehouseService.getAndUpdateAvailableWarehouse            (service/WarehouseService.java:187)
-            SELECT … FOR UPDATE (by id)  ← other orders queue here      (:194)
+        → WarehouseService.getAndUpdateAvailableWarehouse            (service/WarehouseService.java)
+            SELECT … FOR UPDATE (by id)  ← other orders queue here      (WarehouseProductRepository#findByProductIdForUpdate)
             sort by quantity in memory, take from each warehouse, write HOLD rows
         order → PLACED
     ← commit: stock update + order + HOLD rows together; lock released
@@ -98,7 +98,7 @@ Known, not fixed (in the Obsidian backlog):
 
 | Topic | Where | The call made here |
 |---|---|---|
-| 📒 E3 optimistic vs pessimistic | `WarehouseProductRepository.java:25` | Pessimistic: conflicts are normal on a hot product; optimistic failed 7 of 8 (the test shows it). **Not changed**: admin edits, conflicts are rare, keep `@Version` |
+| 📒 E3 optimistic vs pessimistic | `WarehouseProductRepository#findByProductIdForUpdate` | Pessimistic: conflicts are normal on a hot product; optimistic failed 7 of 8 (the test shows it). **Not changed**: admin edits, conflicts are rare, keep `@Version` |
 | 📒 E3 follow-up synchronized | same | Two orders may hit two instances → the lock lives in the shared database |
 | 📒 B6 deadlock | `order by wp.id` | Lock warehouse rows in a fixed order, which breaks circular wait. **No need** for tryLock + timeout |
 | 📒 E4 isolation | re-check of `WHERE` after waiting | Default READ COMMITTED reads the new quantity; **no need** for SERIALIZABLE |

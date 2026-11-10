@@ -16,10 +16,10 @@
 
 | 问题 | 复现的测试 | 旧代码为什么错 |
 |---|---|---|
-| 超时后重试扣了两次 | [PaymentTimeoutIntegrationTest.java:33](../../backend/storeService/src/test/java/comp5348/storeservice/payment/PaymentTimeoutIntegrationTest.java#L33) | 每次扣款随机生成流水号；而且下一单会写**两条** PAY 任务 |
-| 两个标签页同时点 Pay Now，扣两次 | [PayNowIntegrationTest.java:101](../../backend/storeService/src/test/java/comp5348/storeservice/payment/PayNowIntegrationTest.java#L101) | Pay Now 绕过 outbox 直接调 bank，流水号带毫秒，没有锁 |
-| 扣款成功时订单已取消，钱没退 | [PaymentResultIntegrationTest.java:57](../../backend/storeService/src/test/java/comp5348/storeservice/payment/PaymentResultIntegrationTest.java#L57) | 扣款结果回来不看订单状态，直接把订单改回 PAID |
-| 同一账户同时转 10 笔，只扣了 1 笔的钱 | [BankConcurrencyIntegrationTest.java:64](../../backend/bankService/src/test/java/com/comp5348/bank/BankConcurrencyIntegrationTest.java#L64) | bank "读余额 → 内存里减 → 写回"，账户行没加锁（丢失更新） |
+| 超时后重试扣了两次 | [PaymentTimeoutIntegrationTest#payTimeout_retriesWithSameKey_neverChargesTwice](../../backend/storeService/src/test/java/comp5348/storeservice/payment/PaymentTimeoutIntegrationTest.java) | 每次扣款随机生成流水号；而且下一单会写**两条** PAY 任务 |
+| 两个标签页同时点 Pay Now，扣两次 | [PayNowIntegrationTest#payNow_twoTabsAtOnce_onlyOneTask](../../backend/storeService/src/test/java/comp5348/storeservice/payment/PayNowIntegrationTest.java) | Pay Now 绕过 outbox 直接调 bank，流水号带毫秒，没有锁 |
+| 扣款成功时订单已取消，钱没退 | [PaymentResultIntegrationTest#paySucceeds_afterOrderCancelled_writesRefund_orderStaysCancelled](../../backend/storeService/src/test/java/comp5348/storeservice/payment/PaymentResultIntegrationTest.java) | 扣款结果回来不看订单状态，直接把订单改回 PAID |
+| 同一账户同时转 10 笔，只扣了 1 笔的钱 | [BankConcurrencyIntegrationTest#concurrentTransfersSameAccount_noLostUpdate](../../backend/bankService/src/test/java/com/comp5348/bank/BankConcurrencyIntegrationTest.java) | bank "读余额 → 内存里减 → 写回"，账户行没加锁（丢失更新） |
 
 ---
 
@@ -27,59 +27,59 @@
 
 ### 2.1 幂等键（idempotency key）
 **大白话**：给每一笔"要做的事"起一个固定的名字。同一个名字的请求，不管来几次，bank 只做一次，后面几次都回答"第一次的结果"。
-- 扣款：`PAY-{paymentId}-{attempt}-{随机段}`；退款：`REFUND-{paymentId}-{随机段}`（随机段是审查之后加的，见 2.12）。名字在**写任务的时候**就定下来，存在 `payment_outbox.idempotency_key` 里，之后每次重试都用它：[PaymentService.java:76](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L76)
-- `attempt` 只在 bank **明确拒绝**之后、用户点 Pay Now 时才加 1：[PaymentService.java:121](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L121)
-- bank 那边：`transactions.transaction_ref` 有唯一约束，存的就是这个键。先查键，查到就返回第一次的结果：[BankService.java:53](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java#L53)
+- 扣款：`PAY-{paymentId}-{attempt}-{随机段}`；退款：`REFUND-{paymentId}-{随机段}`（随机段是审查之后加的，见 2.12）。名字在**写任务的时候**就定下来，存在 `payment_outbox.idempotency_key` 里，之后每次重试都用它：[PaymentService#payKey](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)
+- `attempt` 只在 bank **明确拒绝**之后、用户点 Pay Now 时才加 1：[PaymentService#payNow](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)
+- bank 那边：`transactions.transaction_ref` 有唯一约束，存的就是这个键。先查键，查到就返回第一次的结果：[BankService#transfer](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java)
 
 ### 2.2 三种结果：成功 / 拒绝 / 不知道
 - 调一次 bank 只有三种结果：`SUCCEEDED`（成功）、`REJECTED`（bank 明确说不行，比如余额不足）、`UNKNOWN`（超时、连接断了、5xx，**不知道钱动没动**）：[BankCallResult.java](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankCallResult.java)
-- 怎么判断：只有 bank 自己回的 `success=false`（HTTP 400 + JSON）才算拒绝；其他一切都算"不知道"：[BankAdapter.java:91](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L91)
+- 怎么判断：只有 bank 自己回的 `success=false`（HTTP 400 + JSON）才算拒绝；其他一切都算"不知道"：[BankAdapter#post（`950f409` 时的版本）](https://github.com/LiChenyang-GZ/microservices-ecommerce-platform/blob/950f409/backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L91)
 - 旧代码的错：`RestTemplate` 遇到 4xx 会抛 `HttpClientErrorException`，旧的 `BankAdapter` 一律 catch 住、重试 3 次，最后说"bank 不可用"。所以"余额不足"被当成"bank 挂了"，"超时"又被当成"失败"。两个方向都错。
 - `RestTemplate` 的异常分两类：`HttpClientErrorException`（4xx，对方回答了）和 `ResourceAccessException`（I/O 错误，包括超时，对方没回答）。后者是 `RestClientException` 的子类。
 
 ### 2.3 规则 7：超时不等于失败
-- 结果 `UNKNOWN`：**同一个键**马上再试，最多 5 次；还是不知道 → `PAY_UNKNOWN`（退款是 `REFUND_UNKNOWN`）+ 告警，之后每 10 分钟用同一个键试一次：[OutboxProcessor.java:163](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java#L163)、[PaymentService.java:255](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L255)
+- 结果 `UNKNOWN`：**同一个键**马上再试，最多 5 次；还是不知道 → `PAY_UNKNOWN`（退款是 `REFUND_UNKNOWN`）+ 告警，之后每 10 分钟用同一个键试一次：[OutboxProcessor#runPayTask](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java)、[PaymentService#onPayStillUnknown](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)
 - **绝对不能**标成 FAILED、也不能 attempt + 1：钱可能已经扣了，换新键再扣就是扣两次。
 - "过 10 分钟"用的是 `nextAttemptAt` 字段 + 注入的 `Clock`，测试里拨表就行。
 
 ### 2.4 悲观锁：`SELECT … FOR UPDATE`
 **大白话**：读这一行的时候就把它锁住，别的事务想改它只能排队，等我提交了再说。
-- Spring Data JPA 写法：在 repository 方法上加 `@Lock(LockModeType.PESSIMISTIC_WRITE)`，Hibernate 生成的 SQL 末尾带 `FOR UPDATE`：[BankAccountRepository.java:28](../../backend/bankService/src/main/java/com/comp5348/bank/repository/BankAccountRepository.java#L28)、[PaymentRepository.java:26](../../backend/storeService/src/main/java/comp5348/storeservice/repository/PaymentRepository.java#L26)
+- Spring Data JPA 写法：在 repository 方法上加 `@Lock(LockModeType.PESSIMISTIC_WRITE)`，Hibernate 生成的 SQL 末尾带 `FOR UPDATE`：[BankAccountRepository#findByAccountNumberForUpdate](../../backend/bankService/src/main/java/com/comp5348/bank/repository/BankAccountRepository.java)、[PaymentRepository#findByOrderIdForUpdate](../../backend/storeService/src/main/java/comp5348/storeservice/repository/PaymentRepository.java)
 - 锁在事务结束时（提交或回滚）自动释放。所以**锁住的那段事务里绝不能调外部服务**，否则一个慢请求就把所有人卡住。
 - 用在三个地方：
-  1. bank 转账/退款锁两个账户行（修 #16 的丢失更新）：[BankService.java:62](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java#L62)
-  2. Pay Now 锁 Payment 行（修 #13 两个标签页）：[PaymentService.java:121](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L121)
-  3. 扣款结果回来、取消订单时锁订单行（修 #7）：[PaymentService.java:208](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L208)、[OrderService.java:187](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java#L187)
+  1. bank 转账/退款锁两个账户行（修 #16 的丢失更新）：[BankService#transfer](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java)
+  2. Pay Now 锁 Payment 行（修 #13 两个标签页）：[PaymentService#payNow](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)
+  3. 扣款结果回来、取消订单时锁订单行（修 #7）：[PaymentService#onPaySucceeded](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)、[OrderService#cancelOrder](../../backend/storeService/src/main/java/comp5348/storeservice/service/OrderService.java)
 
 ### 2.5 按固定顺序加锁，防死锁
 - 转账 A→B 锁 A 再锁 B，同时另一笔 B→A 锁 B 再锁 A，就会互相等，永远等下去。
-- bank：两个账户永远**按账号排序**再加锁：[BankService.java:187](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java#L187)
+- bank：两个账户永远**按账号排序**再加锁：[BankService#lockAccounts](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java)
 - store：永远**先锁订单行、再锁 Payment 行**（取消、扣款结果、补偿都这样）。
 - Postgres 发现死锁会让其中一个事务失败，但那是兜底，不是设计。
 
 ### 2.6 READ COMMITTED 下"锁完再查一次"
 - Postgres 默认隔离级别是 READ COMMITTED：**每条语句**开始时看到的是"到这一刻为止已经提交的数据"。
-- 同一个键的两个请求同时到 bank（#3）：两个都查到"没有这个键"，都去锁账户。第一个拿到锁、扣钱、提交；第二个等锁，拿到锁后**再查一次键**，这时能看到第一个已经提交的记录，于是返回第一次的结果：[BankService.java:64](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java#L64)
+- 同一个键的两个请求同时到 bank（#3）：两个都查到"没有这个键"，都去锁账户。第一个拿到锁、扣钱、提交；第二个等锁，拿到锁后**再查一次键**，这时能看到第一个已经提交的记录，于是返回第一次的结果：[BankService#transfer](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java)
 - 旧代码只靠唯一约束：第二个请求插入时撞上约束，事务被标成"只能回滚"，调用方拿到 `UnexpectedRollbackException`。钱没错，但 store 会以为"扣款失败"。
 - 唯一约束现在还在，是兜底。
 
 ### 2.7 Outbox：资金操作只有一个入口（规则 1、规则 2）
 - 下单、Pay Now、取消、丢件、补偿、退款接口，全部**只往 `payment_outbox` 写一条 PAY 或 REFUND 任务**，和业务改动在同一个事务里：[OutboxService.java](../../backend/storeService/src/main/java/comp5348/storeservice/service/OutboxService.java)
-- 全系统只有 `OutboxProcessor` 调 bank：[OutboxProcessor.java:171](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java#L171)。ArchUnit 测试保证以后也没人能绕过：[BankAccessArchitectureTest.java:42](../../backend/storeService/src/test/java/comp5348/storeservice/architecture/BankAccessArchitectureTest.java#L42)
+- 全系统只有 `OutboxProcessor` 调 bank：[OutboxProcessor#runPayTask](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java)。ArchUnit 测试保证以后也没人能绕过：[BankAccessArchitectureTest#onlyOutboxProcessorCallsBankTransferOrRefund](../../backend/storeService/src/test/java/comp5348/storeservice/architecture/BankAccessArchitectureTest.java)
 - 好处：重试、超时、幂等键只需要在一个地方做对。代价：支付结果是异步的，前端要显示"支付处理中"。
 
 ### 2.8 `@Transactional` 的范围：为什么拆掉了大事务
 - 旧的 `processOutbox()` 整个方法是一个 `@Transactional`：一轮里所有任务、包括等 bank 回答的那 5 秒，都在同一个事务里。
 - 新的做法：`processOutbox()` 不加事务。每一步调 `PaymentService` 的一个 `@Transactional` 方法（另一个 bean，所以经过 Spring 代理，事务生效），每个事务都很短；**调 bank 的时候手里没有任何锁**。
 - `@Transactional` 是 AOP 代理：只有"从外面调进来"的方法调用才会开事务，同一个类里自己调自己（self-invocation）不会。所以事务方法放在 `PaymentService`，由 `OutboxProcessor` 调用。
-- 非资金类的旧事件（建配送单、发邮件、补偿）用 `TransactionTemplate`（编程式事务）包起来，每条一个事务：[OutboxProcessor.java:124](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java#L124)
+- 非资金类的旧事件（建配送单、发邮件、补偿）用 `TransactionTemplate`（编程式事务）包起来，每条一个事务：[OutboxProcessor#processOutbox](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java)
 
 ### 2.9 注入 `Clock`
 - 代码问"现在几点"时用 `LocalDateTime.now(clock)`，`clock` 是一个 Spring bean：[ClockConfig.java](../../backend/storeService/src/main/java/comp5348/storeservice/config/ClockConfig.java)
 - 测试里换成可以手动拨的 `MutableClock`，"过 10 分钟""过 15 分钟"不用真等：[MutableClock.java](../../backend/storeService/src/test/java/comp5348/storeservice/support/MutableClock.java)
 
 ### 2.10 告警 = 带固定标记的日志
-- `ALERT payment_unknown …`、`ALERT refund_unknown …`、`ALERT refund_rejected …`：[PaymentService.java:262](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L262)、[:337](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L337)
+- `ALERT payment_unknown …`、`ALERT refund_unknown …`、`ALERT refund_rejected …`：[PaymentService#onPayStillUnknown](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)、[PaymentService#onRefundRejected](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)
 - 运维按这个标记搜日志或配日志告警。测试用 Spring Boot 的 `OutputCaptureExtension` 抓控制台输出来断言。告警表留到以后。
 
 ### 2.11 测试工具（这一步新用到的）
@@ -204,20 +204,20 @@ POST /api/store/orders/{id}/retry-payment
 
 | 八股 | 代码在哪 | 这里的判断 |
 |---|---|---|
-| 📒 E3 乐观锁 vs 悲观锁 | [BankAccountRepository.java:28](../../backend/bankService/src/main/java/com/comp5348/bank/repository/BankAccountRepository.java#L28) | **选了悲观锁**：商店账户是热点行，冲突是常态，乐观锁会大量失败重试；锁的范围很短。**什么时候换乐观锁**：冲突少、或者"读"和"写"隔着用户操作（比如管理员编辑商品，保留 `@Version`）。**哪里不需要**：只读的余额查询不加锁 |
-| 📒 E3 追问 synchronized | [OutboxProcessor.java:124](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java#L124) | 两个标签页是两个 HTTP 请求，可能落在不同实例上；`synchronized` 只管一个 JVM。锁必须放在大家共享的数据库里 |
-| 📒 B6 死锁 | [BankService.java:187](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java#L187) | 按账号排序加锁，破坏"循环等待"。store 统一"先订单、后 Payment"。**不需要** tryLock + 超时：顺序固定就不会形成环 |
-| 📒 E4 隔离级别 | [BankService.java:64](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java#L64) | 保持 Postgres 默认的 READ COMMITTED：锁住行之后的下一条 SELECT 能看到别人已提交的数据，所以"锁完再查一次键"成立。**不需要**把全局调成 SERIALIZABLE |
-| 📒 F3 幂等 | [PaymentService.java:76](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L76) | 笔记里说"唯一约束拦住第二次插入"，这一步发现**光有它不够**：第二个请求拿到的是错误，调用方会以为失败（#3 红灯）。所以再加"锁 + 再查一次"，让重复请求拿到第一次的结果 |
+| 📒 E3 乐观锁 vs 悲观锁 | [BankAccountRepository#findByAccountNumberForUpdate](../../backend/bankService/src/main/java/com/comp5348/bank/repository/BankAccountRepository.java) | **选了悲观锁**：商店账户是热点行，冲突是常态，乐观锁会大量失败重试；锁的范围很短。**什么时候换乐观锁**：冲突少、或者"读"和"写"隔着用户操作（比如管理员编辑商品，保留 `@Version`）。**哪里不需要**：只读的余额查询不加锁 |
+| 📒 E3 追问 synchronized | [OutboxProcessor#processOutbox](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java) | 两个标签页是两个 HTTP 请求，可能落在不同实例上；`synchronized` 只管一个 JVM。锁必须放在大家共享的数据库里 |
+| 📒 B6 死锁 | [BankService#lockAccounts](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java) | 按账号排序加锁，破坏"循环等待"。store 统一"先订单、后 Payment"。**不需要** tryLock + 超时：顺序固定就不会形成环 |
+| 📒 E4 隔离级别 | [BankService#transfer](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java) | 保持 Postgres 默认的 READ COMMITTED：锁住行之后的下一条 SELECT 能看到别人已提交的数据，所以"锁完再查一次键"成立。**不需要**把全局调成 SERIALIZABLE |
+| 📒 F3 幂等 | [PaymentService#payKey](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java) | 笔记里说"唯一约束拦住第二次插入"，这一步发现**光有它不够**：第二个请求拿到的是错误，调用方会以为失败（#3 红灯）。所以再加"锁 + 再查一次"，让重复请求拿到第一次的结果 |
 | 📒 F4 Outbox | [OutboxService.java](../../backend/storeService/src/main/java/comp5348/storeservice/service/OutboxService.java) | 退款也变成任务，和取消在同一个事务里写；bank 用幂等键处理"任务被执行两次"。笔记里的 SKIP LOCKED（多实例）这一步**还没做**，现在单实例 |
-| 📒 F2 resilience | [BankAdapter.java:91](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L91) | 超时 → 同键重试 → 结果未知 → 低频重试 + 告警。去掉了 adapter 里的重试，避免两层重试相乘 |
-| 📒 F5 Saga | [CompensationService.java:74](../../backend/storeService/src/main/java/comp5348/storeservice/service/CompensationService.java#L74) | 补偿（建配送单失败 → 退款）现在只写 REFUND 任务，补偿本身也能重试 |
-| 📒 D4 @Transactional | [OutboxProcessor.java:124](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java#L124) | 去掉大事务；事务方法放在另一个 bean（PaymentService），避开 self-invocation 失效 |
-| 📒 C3 监控 | [PaymentService.java:262](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L262) | 告警先用固定标记日志，测试会检查它；告警表留到以后 |
+| 📒 F2 resilience | [BankAdapter#post（`950f409` 时的版本）](https://github.com/LiChenyang-GZ/microservices-ecommerce-platform/blob/950f409/backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L91) | 超时 → 同键重试 → 结果未知 → 低频重试 + 告警。去掉了 adapter 里的重试，避免两层重试相乘 |
+| 📒 F5 Saga | [CompensationService#compensateDeliveryFailed（`950f409` 时的版本，`a9d6fc6` 删除）](https://github.com/LiChenyang-GZ/microservices-ecommerce-platform/blob/950f409/backend/storeService/src/main/java/comp5348/storeservice/service/CompensationService.java#L74) | 补偿（建配送单失败 → 退款）现在只写 REFUND 任务，补偿本身也能重试 |
+| 📒 D4 @Transactional | [OutboxProcessor#processOutbox](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java) | 去掉大事务；事务方法放在另一个 bean（PaymentService），避开 self-invocation 失效 |
+| 📒 C3 监控 | [PaymentService#onPayStillUnknown](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java) | 告警先用固定标记日志，测试会检查它；告警表留到以后 |
 | 📒 G4 Testcontainers | [StoreIntegrationTest.java](../../backend/storeService/src/test/java/comp5348/storeservice/support/StoreIntegrationTest.java) | 行锁、唯一约束、READ COMMITTED 的行为都要真 Postgres 才测得准 |
-| ➕ HTTP 4xx / 5xx / 超时怎么分 | [BankAdapter.java:98](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L98) | 对方回答了"不行"才是失败；没回答、回答看不懂都是"不知道" |
+| ➕ HTTP 4xx / 5xx / 超时怎么分 | [BankAdapter#post（`950f409` 时的版本）](https://github.com/LiChenyang-GZ/microservices-ecommerce-platform/blob/950f409/backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java#L98) | 对方回答了"不行"才是失败；没回答、回答看不懂都是"不知道" |
 | ➕ 注入 Clock | [ClockConfig.java](../../backend/storeService/src/main/java/comp5348/storeservice/config/ClockConfig.java) | 和时间有关的逻辑都能测，不用 sleep |
-| ➕ Hibernate 一级缓存 + FOR UPDATE | [PaymentService.java:159](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java#L159) | 同一个事务里如果已经读过这个实体，再用 FOR UPDATE 查，拿到的可能是缓存里的旧对象。所以每个事务**第一次读就加锁** |
+| ➕ Hibernate 一级缓存 + FOR UPDATE | [PaymentService#startPayAttempt](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java) | 同一个事务里如果已经读过这个实体，再用 FOR UPDATE 查，拿到的可能是缓存里的旧对象。所以每个事务**第一次读就加锁** |
 
 **英文场景锚点**：
 - *"The store account is a hot row. Every payment touches it. So I lock it, briefly, instead of letting most writers fail and retry."*
