@@ -134,6 +134,10 @@ services:
       # Wave 2 (docs/wave2-config-contract.md). Unused until the code reads them.
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       BANK_GRPC_ADDRESS: bank:9090
+      # Service credentials (ADR-23). store is the caller of all three, so it holds all three.
+      BANK_SERVICE_TOKEN: ${BANK_SERVICE_TOKEN:?set BANK_SERVICE_TOKEN in backend/.env}
+      DELIVERY_SERVICE_TOKEN: ${DELIVERY_SERVICE_TOKEN:?set DELIVERY_SERVICE_TOKEN in backend/.env}
+      EMAIL_SERVICE_TOKEN: ${EMAIL_SERVICE_TOKEN:?set EMAIL_SERVICE_TOKEN in backend/.env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -163,6 +167,8 @@ services:
       BANK_GRPC_PORT: '9090'
     depends_on:
       postgres:
+      # Callers of gRPC and REST must send this (ADR-23). bank refuses to start without it.
+      BANK_SERVICE_TOKEN: ${BANK_SERVICE_TOKEN:?set BANK_SERVICE_TOKEN in backend/.env}
         condition: service_healthy
     healthcheck:
       <<: *java-healthcheck
@@ -190,6 +196,8 @@ services:
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
     depends_on:
       postgres:
+      # Callers of /internal/* must send this (ADR-23). delivery refuses to start without it.
+      DELIVERY_SERVICE_TOKEN: ${DELIVERY_SERVICE_TOKEN:?set DELIVERY_SERVICE_TOKEN in backend/.env}
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
@@ -220,6 +228,8 @@ services:
       STORE_SERVICE_URL: http://store:8082
     depends_on:
       postgres:
+      # Callers of the password-reset endpoints must send this (ADR-23). email refuses to start without it.
+      EMAIL_SERVICE_TOKEN: ${EMAIL_SERVICE_TOKEN:?set EMAIL_SERVICE_TOKEN in backend/.env}
         condition: service_healthy
       rabbitmq:
         condition: service_healthy

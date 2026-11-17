@@ -27,8 +27,12 @@ foreach ($name in 'store', 'bank', 'delivery', 'email', 'tracking') {
     $extra = $k8s | Where-Object { $_ -notin $want }
     # Any *_PASSWORD that is not this service's own (RabbitMQ / mail are shared on purpose, as in compose).
     $foreign = $k8s | Where-Object { $_ -match '_DB_PASSWORD$' -and $_ -ne "$($name.ToUpper())_DB_PASSWORD" }
+    # Any *_SERVICE_TOKEN that is not this service's own. store is the caller of all three, so it may hold all (ADR-23).
+    if ($name -ne 'store') {
+        $foreign = @($foreign) + @($k8s | Where-Object { $_ -match '_SERVICE_TOKEN$' -and $_ -ne "$($name.ToUpper())_SERVICE_TOKEN" }) | Where-Object { $_ }
+    }
     $ok = -not ($missing -or $extra -or $foreign)
     if (-not $ok) { $fail = $true }
-    "{0,-9} {1}  keys={2}  missing=[{3}] extra=[{4}] other-db-passwords=[{5}]" -f $name, ($(if ($ok) { 'OK  ' } else { 'FAIL' })), $k8s.Count, ($missing -join ','), ($extra -join ','), ($foreign -join ',')
+    "{0,-9} {1}  keys={2}  missing=[{3}] extra=[{4}] other-services-secrets=[{5}]" -f $name, ($(if ($ok) { 'OK  ' } else { 'FAIL' })), $k8s.Count, ($missing -join ','), ($extra -join ','), ($foreign -join ',')
 }
 if ($fail) { exit 1 }

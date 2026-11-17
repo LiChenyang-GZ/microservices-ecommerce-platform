@@ -32,6 +32,9 @@ A 和 B 本来都要改 `backend/compose.yml` 和 `.env.example`；C 写 ConfigM
 | `BANK_GRPC_ADDRESS` | store | `bank:9090` | B：store 的 gRPC 客户端连哪里 |
 | `DATABASE_URL` | tracking | `postgres://tracking_user:${TRACKING_DB_PASSWORD}@postgres:5432/tracking_db?sslmode=disable` | 已有。密码放进了 URL，所以不能含 `@ : / ? #` |
 | `STORE_URL` | tracking | `http://store:8082` | 已有（校验 token） |
+| `BANK_SERVICE_TOKEN` | bank、store | 来自 `backend/.env`（密钥） | 第 2 波之后加的（ADR-23）：bank 在 gRPC 和 REST 上检查，store 发送 |
+| `DELIVERY_SERVICE_TOKEN` | delivery、store | 来自 `backend/.env`（密钥） | ADR-23：delivery 在 `/internal/*` 上检查，store 发送 |
+| `EMAIL_SERVICE_TOKEN` | email、store | 来自 `backend/.env`（密钥） | ADR-23：email 在找回密码的两个接口上检查，store 发送 |
 
 消费者组 id，写在各服务自己的配置里：store = `store`，delivery = `delivery`，tracking = `tracking`。
 

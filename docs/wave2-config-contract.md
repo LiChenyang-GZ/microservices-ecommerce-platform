@@ -32,6 +32,9 @@ So the shared part is fixed here first and merged before the three branches star
 | `BANK_GRPC_ADDRESS` | store | `bank:9090` | B: where store's gRPC client connects |
 | `DATABASE_URL` | tracking | `postgres://tracking_user:${TRACKING_DB_PASSWORD}@postgres:5432/tracking_db?sslmode=disable` | exists. The password goes into a URL, so it must not contain `@ : / ? #` |
 | `STORE_URL` | tracking | `http://store:8082` | exists (token check) |
+| `BANK_SERVICE_TOKEN` | bank, store | from `backend/.env` (secret) | added after wave 2 (ADR-23): bank checks it on gRPC and REST, store sends it |
+| `DELIVERY_SERVICE_TOKEN` | delivery, store | from `backend/.env` (secret) | ADR-23: delivery checks it on `/internal/*`, store sends it |
+| `EMAIL_SERVICE_TOKEN` | email, store | from `backend/.env` (secret) | ADR-23: email checks it on the password-reset endpoints, store sends it |
 
 Consumer group ids, set in each service's own config: store = `store`, delivery = `delivery`, tracking = `tracking`.
 
