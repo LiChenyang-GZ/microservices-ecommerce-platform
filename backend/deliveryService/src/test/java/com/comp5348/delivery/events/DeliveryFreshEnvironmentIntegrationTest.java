@@ -48,7 +48,9 @@ import static org.awaitility.Awaitility.await;
         "RABBITMQ_PASSWORD=guest",
         "spring.rabbitmq.port=1",
         "spring.rabbitmq.listener.simple.auto-startup=false",
-        "event-outbox.publisher.interval-ms=200"
+        "event-outbox.publisher.interval-ms=200",
+        // delivery refuses to start without a service token (ServiceToken); this test does not call /internal/*
+        "delivery.service-token=test-delivery-service-token"
 })
 class DeliveryFreshEnvironmentIntegrationTest {
 

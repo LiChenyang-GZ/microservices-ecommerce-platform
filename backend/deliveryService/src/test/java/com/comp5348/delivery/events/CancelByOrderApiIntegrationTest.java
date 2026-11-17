@@ -4,6 +4,7 @@ import com.comp5348.delivery.support.DeliveryIntegrationTest;
 import com.comp5348.delivery.utils.DeliveryStatus;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,12 +35,21 @@ class CancelByOrderApiIntegrationTest extends DeliveryIntegrationTest {
 
     private static final String CANCEL = "/internal/deliveries/cancel-by-order/";
 
+    /**
+     * 扮演 store 调取消接口：带对的服务凭据，走过滤器（mvcWithFilters）。
+     * 用不带过滤器的 mvc() 会绕过 ServiceTokenFilter，测的就不是真部署里的样子了。
+     * 没凭据 / 凭据错的情况在 CancelByOrderAuthIntegrationTest。
+     */
+    private static MockHttpServletRequestBuilder cancel(String orderId) {
+        return post(CANCEL + orderId).header(SERVICE_TOKEN_HEADER, SERVICE_TOKEN);
+    }
+
     /** C1：配送单还不存在（delivery 还没读到 OrderPaid）→ 取消标记 + Cancelled 事件（deliveryId 为 null） */
     @Test
     void cancel_beforeDeliveryExists_insertsMarker() throws Exception {
         String orderId = newOrderId();
 
-        mvc().perform(post(CANCEL + orderId))
+        mvcWithFilters().perform(cancel(orderId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("CANCELLED_BEFORE_CREATED"));
 
@@ -53,10 +63,10 @@ class CancelByOrderApiIntegrationTest extends DeliveryIntegrationTest {
         String orderId = newOrderId();
         createDelivery(orderId);
 
-        mvc().perform(post(CANCEL + orderId))
+        mvcWithFilters().perform(cancel(orderId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("CANCELLED"));
-        mvc().perform(post(CANCEL + orderId))
+        mvcWithFilters().perform(cancel(orderId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("ALREADY_CANCELLED"));
 
@@ -73,7 +83,7 @@ class CancelByOrderApiIntegrationTest extends DeliveryIntegrationTest {
         Long id = createDelivery(orderId);
         worker.processDelivery(id); // → PICKED_UP
 
-        mvc().perform(post(CANCEL + orderId))
+        mvcWithFilters().perform(cancel(orderId))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.result").value("TOO_LATE"))
                 .andExpect(jsonPath("$.status").value("PICKED_UP"));
@@ -98,7 +108,7 @@ class CancelByOrderApiIntegrationTest extends DeliveryIntegrationTest {
                 orders.add(orderId);
                 CountDownLatch go = new CountDownLatch(1);
                 Future<RecordMetadata> paid = pool.submit(() -> { go.await(); return publishOrderEvent(orderPaid(orderId)); });
-                Future<?> cancel = pool.submit(() -> { go.await(); return mvc().perform(post(CANCEL + orderId)).andReturn(); });
+                Future<?> cancel = pool.submit(() -> { go.await(); return mvcWithFilters().perform(cancel(orderId)).andReturn(); });
                 go.countDown(); // 两件事一起放
                 paidRecords.add(paid.get());
                 cancel.get();

@@ -6,7 +6,9 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * Filter configuration
+ * Filter configuration: two filters, two path sets, never both on one request.
+ *   /api/*      → TokenAuthenticationFilter (a user's login token, frontend calls)
+ *   /internal/* → ServiceTokenFilter        (X-Service-Token, store calls)
  */
 @Configuration
 public class FilterConfig {
@@ -20,6 +22,15 @@ public class FilterConfig {
         registration.setFilter(tokenAuthenticationFilter);
         registration.addUrlPatterns("/api/*"); // Only apply filter to API paths
         registration.setOrder(1); // Set filter order
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<ServiceTokenFilter> serviceTokenFilterRegistration(ServiceToken serviceToken) {
+        FilterRegistrationBean<ServiceTokenFilter> registration = new FilterRegistrationBean<>();
+        registration.setFilter(new ServiceTokenFilter(serviceToken));
+        registration.addUrlPatterns("/internal/*");
+        registration.setOrder(2);
         return registration;
     }
 }
