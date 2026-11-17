@@ -9,9 +9,11 @@ import com.comp5348.contracts.bank.v1.TransferResponse;
 import comp5348.storeservice.dto.BankRefundRequest;
 import comp5348.storeservice.dto.BankTransferRequest;
 import io.grpc.ManagedChannel;
+import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
+import io.grpc.stub.MetadataUtils;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,11 +45,19 @@ public class BankAdapter {
     @Value("${bank.service.url:http://localhost:8084}")
     private String bankServiceUrl;
 
+    /** bank's own service token goes in this HTTP header (REST) and this metadata key (gRPC); bank checks both */
+    static final String SERVICE_TOKEN_HEADER = "X-Service-Token";
+    private static final Metadata.Key<String> SERVICE_TOKEN_KEY =
+            Metadata.Key.of("x-service-token", Metadata.ASCII_STRING_MARSHALLER);
+
     public BankAdapter(RestTemplateBuilder builder,
                        @Value("${bank.client.connect-timeout-ms:5000}") int connectTimeoutMs,
                        @Value("${bank.client.read-timeout-ms:5000}") int readTimeoutMs,
                        @Value("${bank.grpc.address:localhost:9090}") String grpcAddress,
-                       @Value("${bank.grpc.deadline-ms:5000}") long deadlineMs) {
+                       @Value("${bank.grpc.deadline-ms:5000}") long deadlineMs,
+                       @Value("${bank.service-token:}") String serviceToken) {
+        // defaultHeader: every REST call from this RestTemplate carries bank's token. This RestTemplate only
+        // ever talks to bank, so bank's token never reaches another service (each callee has its own token).
         this.restTemplate = builder
                 .requestFactory(() -> {
                     SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -55,12 +65,18 @@ public class BankAdapter {
                     factory.setReadTimeout(readTimeoutMs);
                     return factory;
                 })
+                .defaultHeader(SERVICE_TOKEN_HEADER, serviceToken)
                 .build();
+        Metadata token = new Metadata();
+        token.put(SERVICE_TOKEN_KEY, serviceToken);
         // One long-lived HTTP/2 connection to bank, shared by every call.
         // usePlaintext: no TLS inside the compose / k8s network (same as the REST calls).
         // disableRetry: OutboxProcessor is the only place that retries (5 fast, then every 10 minutes);
         //   a second retry layer here would multiply the calls and the time per task.
-        this.channel = NettyChannelBuilder.forTarget(grpcAddress).usePlaintext().disableRetry().build();
+        // intercept: adds x-service-token to the metadata of every call on this channel (transfer and refund).
+        this.channel = NettyChannelBuilder.forTarget(grpcAddress).usePlaintext().disableRetry()
+                .intercept(MetadataUtils.newAttachHeadersInterceptor(token))
+                .build();
         this.bank = BankServiceGrpc.newBlockingStub(channel);
         this.deadlineMs = deadlineMs;
     }
@@ -97,6 +113,7 @@ public class BankAdapter {
                     .build());
             result = fromOutcome(response.getOutcome(), response.getTransactionId(), response.getReason());
         } catch (StatusRuntimeException e) {
+            alertIfAuthFailed(e, request.getIdempotencyKey());
             result = unknown(e);
         }
         logger.info("Bank transfer result: key={}, outcome={}, txnId={}, message={}",
@@ -119,6 +136,7 @@ public class BankAdapter {
                     .build());
             result = fromOutcome(response.getOutcome(), response.getRefundTransactionId(), response.getReason());
         } catch (StatusRuntimeException e) {
+            alertIfAuthFailed(e, request.getIdempotencyKey());
             result = unknown(e);
         }
         logger.info("Bank refund result: key={}, outcome={}, refundTxnId={}, message={}",
@@ -147,6 +165,18 @@ public class BankAdapter {
     private static BankCallResult unknown(StatusRuntimeException e) {
         Status status = e.getStatus();
         return BankCallResult.unknown("gRPC " + status.getCode() + ": " + status.getDescription());
+    }
+
+    /**
+     * UNAUTHENTICATED = bank refused store's service token (wrong or missing in store's config). The result stays
+     * UNKNOWN like every other error (it is our fault, not the buyer's: no FAILED, no new key), but unlike a timeout
+     * it will not fix itself, so it gets its own ALERT. Only this code: a bank restart (UNAVAILABLE) must not alert.
+     */
+    private static void alertIfAuthFailed(StatusRuntimeException e, String idempotencyKey) {
+        if (e.getStatus().getCode() == Status.Code.UNAUTHENTICATED) {
+            logger.error("ALERT bank_auth_failed key={} (bank refused store's service token; check bank.service-token)",
+                    idempotencyKey);
+        }
     }
 
     /** Decimal string for bank.proto: toPlainString gives "100", never "1E+2"; the scale stays ("129.90"). */

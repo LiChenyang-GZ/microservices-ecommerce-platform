@@ -11,7 +11,12 @@ import comp5348.storeservice.dto.AccountDTO;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import java.beans.Transient;
 import java.math.BigDecimal;
 import java.util.Optional;
@@ -19,15 +24,26 @@ import java.util.Optional;
 @Service
 public class AccountService {
 
+    private static final Logger logger = LoggerFactory.getLogger(AccountService.class);
+
     private final AccountRepository accountRepository;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
-    private final RestTemplate restTemplate = new RestTemplate();
+    /** Only talks to email (the two password-reset calls), so it carries email's own service token on every call */
+    private final RestTemplate emailRestTemplate;
     @Value("${email.service.url:http://localhost:8083}")
     private String emailServiceUrl;
-    
+
     @Autowired
-    public AccountService(AccountRepository accountRepository) {
+    public AccountService(AccountRepository accountRepository,
+                          RestTemplateBuilder restTemplateBuilder,
+                          @Value("${email.service-token:}") String emailServiceToken) {
         this.accountRepository = accountRepository;
+        // SimpleClientHttpRequestFactory: plain HTTP/1.1, same as the old `new RestTemplate()` and the adapters.
+        // The builder's default (JDK HttpClient) first tries an HTTP/2 upgrade, which some servers reset.
+        this.emailRestTemplate = restTemplateBuilder
+                .requestFactory(SimpleClientHttpRequestFactory.class)
+                .defaultHeader("X-Service-Token", emailServiceToken)
+                .build();
     }
 
     @Autowired
@@ -168,8 +184,11 @@ public class AccountService {
             String url = emailServiceUrl + "/api/email/send-password-reset";
             PasswordResetRequest request = new PasswordResetRequest(email);
             
-            PasswordResetResponse response = restTemplate.postForObject(url, request, PasswordResetResponse.class);
+            PasswordResetResponse response = emailRestTemplate.postForObject(url, request, PasswordResetResponse.class);
             return response != null && response.success;
+        } catch (HttpClientErrorException.Unauthorized e) {
+            alertEmailAuthFailed("send-password-reset");
+            return false;
         } catch (Exception e) {
             System.err.println("Failed to send password reset email: " + e.getMessage());
             return false;
@@ -191,7 +210,7 @@ public class AccountService {
             String url = emailServiceUrl + "/api/email/verify-password-reset";
             PasswordResetVerifyRequest request = new PasswordResetVerifyRequest(email, code);
             
-            PasswordResetVerifyResponse response = restTemplate.postForObject(url, request, PasswordResetVerifyResponse.class);
+            PasswordResetVerifyResponse response = emailRestTemplate.postForObject(url, request, PasswordResetVerifyResponse.class);
             if (response == null || !response.success) {
                 return false;
             }
@@ -206,10 +225,23 @@ public class AccountService {
                 return true;
             }
             return false;
+        } catch (HttpClientErrorException.Unauthorized e) {
+            // The code was NOT checked, so the password must not change: return before the update above
+            alertEmailAuthFailed("verify-password-reset");
+            return false;
         } catch (Exception e) {
             System.err.println("Password reset failed: " + e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * email refused store's service token (wrong or missing in store's config). The user only sees "failed";
+     * without this line nobody would know every password reset is broken until the token is fixed.
+     */
+    private static void alertEmailAuthFailed(String endpoint) {
+        logger.error("ALERT email_auth_failed endpoint={} (email refused store's service token; "
+                + "check email.service-token)", endpoint);
     }
 
     // Inner class for API calls
