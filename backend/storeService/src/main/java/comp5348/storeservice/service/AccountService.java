@@ -1,6 +1,7 @@
 package comp5348.storeservice.service;
 
 
+import comp5348.storeservice.config.ServiceTokens;
 import comp5348.storeservice.model.Account;
 import comp5348.storeservice.repository.AccountRepository;
 import org.springframework.beans.BeanUtils;
@@ -38,11 +39,12 @@ public class AccountService {
                           RestTemplateBuilder restTemplateBuilder,
                           @Value("${email.service-token:}") String emailServiceToken) {
         this.accountRepository = accountRepository;
+        ServiceTokens.require("email.service-token", "EMAIL_SERVICE_TOKEN", "email", emailServiceToken);
         // SimpleClientHttpRequestFactory: plain HTTP/1.1, same as the old `new RestTemplate()` and the adapters.
         // The builder's default (JDK HttpClient) first tries an HTTP/2 upgrade, which some servers reset.
         this.emailRestTemplate = restTemplateBuilder
                 .requestFactory(SimpleClientHttpRequestFactory.class)
-                .defaultHeader("X-Service-Token", emailServiceToken)
+                .defaultHeader(ServiceTokens.HEADER, emailServiceToken)
                 .build();
     }
 

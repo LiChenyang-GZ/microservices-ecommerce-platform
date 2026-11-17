@@ -6,6 +6,7 @@ import com.comp5348.contracts.bank.v1.RefundRequest;
 import com.comp5348.contracts.bank.v1.RefundResponse;
 import com.comp5348.contracts.bank.v1.TransferRequest;
 import com.comp5348.contracts.bank.v1.TransferResponse;
+import comp5348.storeservice.config.ServiceTokens;
 import comp5348.storeservice.dto.BankRefundRequest;
 import comp5348.storeservice.dto.BankTransferRequest;
 import io.grpc.ManagedChannel;
@@ -45,8 +46,7 @@ public class BankAdapter {
     @Value("${bank.service.url:http://localhost:8084}")
     private String bankServiceUrl;
 
-    /** bank's own service token goes in this HTTP header (REST) and this metadata key (gRPC); bank checks both */
-    static final String SERVICE_TOKEN_HEADER = "X-Service-Token";
+    /** bank's own service token goes in the X-Service-Token header (REST) and this metadata key (gRPC) */
     private static final Metadata.Key<String> SERVICE_TOKEN_KEY =
             Metadata.Key.of("x-service-token", Metadata.ASCII_STRING_MARSHALLER);
 
@@ -56,6 +56,7 @@ public class BankAdapter {
                        @Value("${bank.grpc.address:localhost:9090}") String grpcAddress,
                        @Value("${bank.grpc.deadline-ms:5000}") long deadlineMs,
                        @Value("${bank.service-token:}") String serviceToken) {
+        ServiceTokens.require("bank.service-token", "BANK_SERVICE_TOKEN", "bank", serviceToken);
         // defaultHeader: every REST call from this RestTemplate carries bank's token. This RestTemplate only
         // ever talks to bank, so bank's token never reaches another service (each callee has its own token).
         this.restTemplate = builder
@@ -65,7 +66,7 @@ public class BankAdapter {
                     factory.setReadTimeout(readTimeoutMs);
                     return factory;
                 })
-                .defaultHeader(SERVICE_TOKEN_HEADER, serviceToken)
+                .defaultHeader(ServiceTokens.HEADER, serviceToken)
                 .build();
         Metadata token = new Metadata();
         token.put(SERVICE_TOKEN_KEY, serviceToken);

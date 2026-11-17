@@ -1,5 +1,6 @@
 package comp5348.storeservice.adapter;
 
+import comp5348.storeservice.config.ServiceTokens;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -28,6 +29,7 @@ public class DeliveryAdapter {
 
     public DeliveryAdapter(RestTemplateBuilder builder,
                            @Value("${delivery.service-token:}") String serviceToken) {
+        ServiceTokens.require("delivery.service-token", "DELIVERY_SERVICE_TOKEN", "delivery", serviceToken);
         // defaultHeader: delivery's own token on every call. This RestTemplate only talks to delivery.
         this.restTemplate = builder
                 .requestFactory(() -> {
@@ -36,7 +38,7 @@ public class DeliveryAdapter {
                     factory.setReadTimeout((int) Duration.ofSeconds(5).toMillis());
                     return factory;
                 })
-                .defaultHeader("X-Service-Token", serviceToken)
+                .defaultHeader(ServiceTokens.HEADER, serviceToken)
                 .build();
     }
 
