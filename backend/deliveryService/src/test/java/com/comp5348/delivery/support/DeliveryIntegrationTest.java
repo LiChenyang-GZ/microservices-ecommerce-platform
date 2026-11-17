@@ -14,6 +14,7 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.producer.RecordMetadata;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -62,8 +63,12 @@ import static org.awaitility.Awaitility.await;
         // 集成发现 I1 的绿灯配置键（红灯时没人读）：不是终态、2 秒没动的配送单算"卡住"，每 500 毫秒找一次
         // 2 秒 > 上面的每步 1 秒，正常推进中的单不会被当成卡住
         "delivery.stuck-job.stale-after-ms=2000",
-        "delivery.stuck-job.check-interval-ms=500"
+        "delivery.stuck-job.check-interval-ms=500",
+        // 鉴权 PR ① 的绿灯配置键（红灯时没人读）：store 调 /internal/* 要带的服务凭据，只在测试里用的假值
+        "delivery.service-token=" + DeliveryIntegrationTest.SERVICE_TOKEN
 })
+// 让 Spring 准备一个"带 servlet 过滤器"的 MockMvc（下面的 mvcWithFilters()）；不影响 mvc()
+@AutoConfigureMockMvc
 public abstract class DeliveryIntegrationTest {
 
     /** 测试里"等一条事件出现"最多等多久。红灯时根本没有事件，每个测试会在这里等满再失败。 */
@@ -108,12 +113,27 @@ public abstract class DeliveryIntegrationTest {
     @Autowired protected JdbcTemplate jdbc;
     @Autowired protected WebApplicationContext web;
 
+    /** 带过滤器的 MockMvc，由 @AutoConfigureMockMvc 准备：FilterRegistrationBean 的路径规则也照样生效 */
+    @Autowired private MockMvc filteredMvc;
+
+    /** delivery 认的服务凭据（假值）和它所在的 HTTP 头。头名和 bank 一样，密钥是 delivery 自己的一把 */
+    protected static final String SERVICE_TOKEN = "test-delivery-service-token";
+    protected static final String SERVICE_TOKEN_HEADER = "X-Service-Token";
+
     /** 契约：delivery 的消费者组 id */
     protected static final String DELIVERY_GROUP = "delivery";
 
     /** MockMvc：直接对 Spring MVC 发 HTTP 请求，不经过真的网络（测取消接口用） */
     protected MockMvc mvc() {
         return MockMvcBuilders.webAppContextSetup(web).build();
+    }
+
+    /**
+     * 和 mvc() 的区别：请求会先经过 servlet 过滤器，再到 controller，和真的 Tomcat 里一样。
+     * mvc() 是 webAppContextSetup(...).build()，不带任何过滤器 —— 用它测鉴权，过滤器写得再对也永远测不到。
+     */
+    protected MockMvc mvcWithFilters() {
+        return filteredMvc;
     }
 
     // ---------- 扮演 store：往 order-events 发事件（4b） ----------
