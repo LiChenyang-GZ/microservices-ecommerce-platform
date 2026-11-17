@@ -33,8 +33,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 【字段名】按 bank.proto 起名：idempotencyKey、originalTransactionId。
  */
 @SpringBootTest(properties = {
-        "DB_USERNAME=unused-overridden-by-testcontainers",
-        "DB_PASSWORD=unused-overridden-by-testcontainers",
         // gRPC server on a random free port: never clashes with a bank already running on 9090
         "bank.grpc.port=0"
 })

@@ -32,7 +32,7 @@ Start-Sleep -Seconds 3 # Received 事件到 tracking 可能比到 store 晚一�
 $balanceEnd = Balance $shopper.account
 $transfers = Sql 'bank_db' "select count(*) from transactions where from_account = '$($shopper.account)' and status = 'SUCCESS'"
 $deliveryRows = @(Sql 'delivery_db' "select delivery_status from delivery where order_id = '$($order.id)'")
-$timeline = Timeline $order.id $shopper.token
+$timeline = Timeline $order.id $shopper.token -Until 'OrderPlaced', 'OrderPaid', 'DeliveryCreated', 'PickedUp', 'Delivering', 'Received'
 "2. bank：余额 $balanceStart -> $balanceEnd，成功扣款 $transfers 笔（应该 1 笔）"
 "   delivery_db：$($deliveryRows.Count) 行，$($deliveryRows -join ',')"
 "   tracking 时间线：$($timeline -join ' -> ')"

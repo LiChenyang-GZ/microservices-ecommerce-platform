@@ -26,7 +26,7 @@ From the repository root (PowerShell 7):
 
 A git worktree has no `backend/.env`; point to one: `./k8s/scripts/up.ps1 -EnvFile E:\study\5348\backend\.env`.
 
-About 5 minutes the first time (it pulls the node image and postgres / rabbitmq / kafka), about 3 after that. Safe to run again.
+About 5 minutes the first time (it pulls the node image and postgres / rabbitmq / kafka), about 3 after that. Safe to run again: if the cluster already exists it starts a stopped node first, and restarts the deployments at the end so they run the images it just loaded.
 
 ## Check
 

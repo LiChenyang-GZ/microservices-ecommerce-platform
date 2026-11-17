@@ -44,35 +44,6 @@ const adminService = {
     }
   },
 
-  // Get order inventory records for a specific order
-  getOrderInventoryRecords: async (orderId) => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/orders/${orderId}/inventory-records`);
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  },
-
-  // Get warehouse inventory records for a specific warehouse
-  getWarehouseInventoryRecords: async (warehouseId) => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/warehouses/${warehouseId}/inventory-records`);
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  },
-
-  // Get product inventory records for a specific product
-  getProductInventoryRecords: async (productId) => {
-    try {
-      const response = await axios.get(`${API_BASE_URL}/products/${productId}/inventory-records`);
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  },
 };
 
 export default adminService;

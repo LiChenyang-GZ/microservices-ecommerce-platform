@@ -166,16 +166,6 @@ export const userAPI = {
     }
   },
 
-  // Check if email is verified
-  checkEmailVerified: async (email) => {
-    try {
-      const response = await api.get(`/user/check-verified/${email}`);
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  },
-
   // Send forgot password email
   forgotPassword: async (email) => {
     try {
@@ -231,15 +221,6 @@ export const emailAPI = {
     }
   },
 
-  // Check if email is verified
-  checkEmailVerified: async (email) => {
-    try {
-      const response = await emailApi.get(`/email/check-verified/${email}`);
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  }
 };
 
 // Create a new axios instance specifically for connecting to your DeliveryCo service
@@ -309,16 +290,6 @@ export const deliveryAPI = {
     return deliveryApi.get(`/deliveries/me`);
   },
   
-  /**
-   * Get all delivery tasks by email (deprecated, please use getMyDeliveries)
-   * @deprecated Please use getMyDeliveries(), email parameter is no longer needed
-   * @param {string} email
-   * @returns Promise
-   */
-  getAllDeliveriesByEmail: (email) => {
-    return deliveryApi.get(`/deliveries/all/${email}`);
-  },
-
   /**
    * Get a single delivery task by ID
    * @param {string|number} id
@@ -451,28 +422,10 @@ export const productAPI = {
     } catch (e) { throw e; }
   },
 
-  // Search by name
-  searchByName: async (name) => {
-    try {
-      const res = await api.get('/products/search', { params: { name } });
-      return res.data?.products || [];
-    } catch (e) { throw e; }
-  },
 };
 
 // Payment related API
 export const paymentAPI = {
-  // Query payment status by order ID
-  getPaymentByOrderId: async (orderId) => {
-    try {
-      const response = await api.get(`/payments/order/${orderId}`);
-      return response.data;
-    } catch (error) {
-      // Error already formatted in interceptor, just throw it
-      console.error('[Query Payment Status Failed]', error.errorDetails || error);
-      throw error;
-    }
-  },
 
   // Apply for refund
   refundPayment: async (orderId, reason = 'Customer requested refund') => {

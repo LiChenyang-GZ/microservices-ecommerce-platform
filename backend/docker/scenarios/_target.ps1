@@ -75,26 +75,36 @@ function Set-DeliveryLossRate($rate) {
     }
 }
 
-# tracking 时间线里的事件类型，按发生先后。带上登录时的 token，tracking 拿它回 store 校验
-function Timeline($orderId, $token) {
+# tracking 时间线里的事件类型，按发生先后。带上登录时的 token，tracking 拿它回 store 校验。
+# -Until：列出的事件都到齐了才返回（同名事件按次数算，比如两条 Cancelled），最多等 30 秒；到时间
+# 就把当时读到的返回，交给调用方判断。为什么要等：事件要经过 outbox 发布器、Kafka、tracking 才到，
+# 订单状态变了不代表时间线已经更新（N1：kind 上的 07 读得太早，少了最后一条 OrderRefunded）。
+function Timeline($orderId, $token, [string[]]$Until = @()) {
     $headers = @{ Authorization = "Bearer $token" }
-    if ($Target -ne 'kind') {
-        return @((Invoke-RestMethod "http://localhost:8085/api/tracking/orders/$orderId/timeline" -Headers $headers).eventType)
+    $base = 'http://localhost:8085'
+    $forward = $null
+    if ($Target -eq 'kind') {
+        $forward = Start-Process $kubectl -ArgumentList '-n', 'shop', 'port-forward', 'svc/tracking', '18085:8085' `
+            -PassThru -WindowStyle Hidden
+        $base = 'http://localhost:18085'
     }
-    $forward = Start-Process $kubectl -ArgumentList '-n', 'shop', 'port-forward', 'svc/tracking', '18085:8085' `
-        -PassThru -WindowStyle Hidden
     try {
-        $deadline = (Get-Date).AddSeconds(20)
+        $deadline = (Get-Date).AddSeconds(30)
         while ($true) {
             try {
-                return @((Invoke-RestMethod "http://localhost:18085/api/tracking/orders/$orderId/timeline" -Headers $headers).eventType)
+                $events = @((Invoke-RestMethod "$base/api/tracking/orders/$orderId/timeline" -Headers $headers).eventType)
+                $complete = $true
+                foreach ($group in ($Until | Group-Object)) {
+                    if (@($events | Where-Object { $_ -eq $group.Name }).Count -lt $group.Count) { $complete = $false }
+                }
+                if ($complete -or (Get-Date) -gt $deadline) { return $events }
             } catch {
-                if ((Get-Date) -gt $deadline) { throw }
-                Start-Sleep -Milliseconds 500 # port-forward 还没连上
+                if ((Get-Date) -gt $deadline) { throw } # kind：port-forward 还没连上
             }
+            Start-Sleep -Milliseconds 500
         }
     } finally {
-        Stop-Process -Id $forward.Id -ErrorAction SilentlyContinue
+        if ($forward) { Stop-Process -Id $forward.Id -ErrorAction SilentlyContinue }
     }
 }
 

@@ -29,8 +29,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 【修法（Christy 已定）】转账、退款时对涉及的账户行 SELECT … FOR UPDATE，按账号排序加锁，防止两笔反方向的转账互相等待（死锁）。
  */
 @SpringBootTest(properties = {
-        "DB_USERNAME=unused-overridden-by-testcontainers",
-        "DB_PASSWORD=unused-overridden-by-testcontainers",
         // gRPC server on a random free port: never clashes with a bank already running on 9090
         "bank.grpc.port=0"
 })

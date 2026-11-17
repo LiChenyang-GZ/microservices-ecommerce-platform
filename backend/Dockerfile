@@ -8,7 +8,17 @@
 FROM eclipse-temurin:17-jdk AS build
 ARG SERVICE
 WORKDIR /src
-COPY . .
+# Copy only what this service needs, so that changing one service's code does not
+# invalidate the build layer of the other three: the Gradle files of every project
+# (settings.gradle includes them all), then the sources of contracts and SERVICE.
+COPY gradlew settings.gradle build.gradle ./
+COPY gradle gradle
+COPY bankService/build.gradle bankService/
+COPY deliveryService/build.gradle deliveryService/
+COPY emailService/build.gradle emailService/
+COPY storeService/build.gradle storeService/
+COPY contracts contracts
+COPY ${SERVICE} ${SERVICE}
 # A Windows checkout can give gradlew CRLF line endings, which Linux cannot run.
 RUN sed -i 's/\r$//' gradlew && chmod +x gradlew
 # Tests need a database, so they run outside the image build (gradlew test).

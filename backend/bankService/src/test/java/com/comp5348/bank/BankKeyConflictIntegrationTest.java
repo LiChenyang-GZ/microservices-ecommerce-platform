@@ -31,8 +31,6 @@ import static org.assertj.core.api.Assertions.assertThat;
  *   （同一个键、内容一样 → 还是返回第一次的结果，那是 #2、#3、#10 的安全网，不能被这次修坏。）
  */
 @SpringBootTest(properties = {
-        "DB_USERNAME=unused-overridden-by-testcontainers",
-        "DB_PASSWORD=unused-overridden-by-testcontainers",
         // gRPC server on a random free port: never clashes with a bank already running on 9090
         "bank.grpc.port=0"
 })

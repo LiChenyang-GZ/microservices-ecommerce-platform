@@ -126,3 +126,16 @@ test('result unknown (PAY_UNKNOWN): says the bank is still processing, hides Pay
     });
     expect(orderAPI.getOrderWithPayment).toHaveBeenCalledTimes(1);
 });
+
+// A#8（第 1 波审查）：订单在等付款，但后端没有它的 payment 行（正常下单不会这样，是数据坏了）。
+// 旧代码 needsPayment 里写着 "!order.payment"，照样显示 Pay Now；点了后端只回错误，用户什么也做不了。
+// 应该：不给按钮，告诉用户付款记录找不到、请联系客服。
+test('no payment record: hides Pay Now and says to contact support', async () => {
+    orderAPI.getOrderWithPayment.mockResolvedValue({ ...orderWith('PENDING_PAYMENT', 'PENDING'), payment: null });
+
+    renderPage();
+    await flush();
+
+    expect(screen.queryByRole('button', { name: /Pay Now/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/payment record for this order was not found/i)).toBeInTheDocument();
+});

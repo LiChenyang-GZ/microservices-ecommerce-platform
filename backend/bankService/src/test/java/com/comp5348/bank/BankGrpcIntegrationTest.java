@@ -48,10 +48,7 @@ import static org.mockito.Mockito.doThrow;
  * 【怎么读结果】bank.proto 的约定：状态 OK + outcome 才是 bank 的回答；业务上的"不"是 OK + REJECTED，
  *   绝不能用 gRPC 错误码表示（store 会把错误码当成"不知道"，一直重试）。
  */
-@SpringBootTest(properties = {
-        "DB_USERNAME=unused-overridden-by-testcontainers",
-        "DB_PASSWORD=unused-overridden-by-testcontainers"
-})
+@SpringBootTest
 class BankGrpcIntegrationTest {
 
     @ServiceConnection

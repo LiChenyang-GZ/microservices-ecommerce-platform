@@ -23,3 +23,12 @@ REVOKE CONNECT, TEMPORARY ON DATABASE :"svc_db" FROM PUBLIC;
 SQL
   echo "created ${svc}_db owned by ${svc}_user"
 done
+
+# The default databases. Every login may connect to them by default; take that away
+# too, so a service login really can connect to its own database only. (It can still
+# read the names of all databases and logins: pg_database and pg_roles are shared
+# catalogs, visible from any database.)
+psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres <<'SQL'
+REVOKE CONNECT, TEMPORARY ON DATABASE postgres FROM PUBLIC;
+REVOKE CONNECT, TEMPORARY ON DATABASE template1 FROM PUBLIC;
+SQL
