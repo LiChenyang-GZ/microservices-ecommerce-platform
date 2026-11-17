@@ -19,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /**
  * store 调 bank 时带上服务凭据；bank 说"凭据不对"时 store 怎么办。
- * 失败场景表（Obsidian 36 号文件）C3，以及 C7 的 store 这一半（bank 开始检查以后，store 不带就全被拒）。
+ * 失败场景表（Obsidian 36 号文件）C3、C3b（REST 那一半），以及 C7 的 store 这一半（bank 开始检查以后，store 不带就全被拒）。
  *
  * 【层】集成测试：真 Spring 里真的 BankAdapter，连假 bank（gRPC 的 FakeBankGrpc + HTTP 的 WireMock）。
  *   直接调 bankAdapter 的方法，只测"一次调用"。假 bank 不检查凭据，只把收到的记下来给测试看。
@@ -119,6 +119,49 @@ class BankServiceTokenIntegrationTest extends StoreIntegrationTest {
         assertThat(result.outcome()).isEqualTo(BankCallResult.Outcome.UNKNOWN);
         assertThat(output.getAll())
                 .containsPattern("ALERT bank_auth_failed.*key=" + Pattern.quote(request.getIdempotencyKey()));
+    }
+
+    // ---------- bank 的 REST 说凭据不对（C3b，独立审查 🟠1 补的） ----------
+    // C3 原来只写了 gRPC，红灯和绿灯就跟着只做了 gRPC。REST 这两个调用被拒的后果更难查：
+    // 开户失败的用户没有银行账号，Pay Now 报 "no linked bank account"，日志里只有一行 WARN。
+
+    /** C3b：开户回 401 → 仍返回 null（调用方的处理不变），但要打 ALERT，而且 ALERT 行里不写明文邮箱。现在：只有 WARN。 */
+    @Test
+    void bankRestSays401_createAccount_raisesAlert_withoutEmail(CapturedOutput output) {
+        FAKE_BANK.stubFor(post(urlEqualTo("/api/bank/account")).willReturn(aResponse().withStatus(401)));
+
+        String account = bankAdapter.createCustomerAccount("alert-user@test.local", new BigDecimal("10000"));
+
+        FAKE_BANK.verify(postRequestedFor(urlEqualTo("/api/bank/account")));
+        assertThat(account).isNull();
+        assertThat(output.getAll()).contains("ALERT bank_auth_failed op=create-account");
+        assertThat(output.getAll()).as("ALERT 行不写明文邮箱（告警会被转发到别的系统）")
+                .doesNotContainPattern("ALERT bank_auth_failed[^\\n]*alert-user@test\\.local");
+    }
+
+    /** C3b：按邮箱查账号回 401 → 仍返回 null，打 ALERT，不写明文邮箱。现在：只有 WARN。 */
+    @Test
+    void bankRestSays401_accountByOwner_raisesAlert_withoutEmail(CapturedOutput output) {
+        FAKE_BANK.stubFor(get(urlPathMatching("/api/bank/account/by-owner/.*")).willReturn(aResponse().withStatus(401)));
+
+        String account = bankAdapter.getAccountByOwnerEmail("alert-owner@test.local");
+
+        FAKE_BANK.verify(getRequestedFor(urlPathMatching("/api/bank/account/by-owner/.*")));
+        assertThat(account).isNull();
+        assertThat(output.getAll()).contains("ALERT bank_auth_failed op=account-by-owner");
+        assertThat(output.getAll()).as("ALERT 行不写明文邮箱")
+                .doesNotContainPattern("ALERT bank_auth_failed[^\\n]*alert-owner@test\\.local");
+    }
+
+    /** 反过来：bank 的 REST 回 500（它自己出错了）不打这个告警，免得把别的故障说成"钥匙错了"。本来就绿。 */
+    @Test
+    void bankRestOtherErrors_doNotRaiseTheAuthAlert(CapturedOutput output) {
+        FAKE_BANK.stubFor(post(urlEqualTo("/api/bank/account")).willReturn(aResponse().withStatus(500)));
+
+        bankAdapter.createCustomerAccount("server-error@test.local", new BigDecimal("10000"));
+
+        FAKE_BANK.verify(postRequestedFor(urlEqualTo("/api/bank/account")));
+        assertThat(output.getAll()).doesNotContain("ALERT bank_auth_failed");
     }
 
     /** 反过来：别的错误码（这里用 UNAVAILABLE，bank 重启时就是它）不打这个告警，免得一重启就告警。本来就绿。 */
