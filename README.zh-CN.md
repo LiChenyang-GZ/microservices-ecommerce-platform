@@ -72,7 +72,7 @@ docker compose -f backend/compose.yml up -d --build --wait   # 第一次构建�
 pwsh backend/docker/smoke-order.ps1                          # 下一单：PAID、只扣一次、配送往前走
 ```
 
-打开 http://localhost:3000 注册用户（新用户自动开一个余额 10,000 的银行账户）。端口：store 8082、delivery 8081、email 8083、bank 8084（gRPC 9090）、tracking 8085、PostgreSQL 5433、RabbitMQ 管理界面 15672、Kafka（宿主机）9094。
+打开 http://localhost:3000 注册用户（新用户自动开一个余额 10,000 的银行账户）。端口：store 8082、delivery 8081、email 8083、bank 8084（gRPC 9090 只在 compose 网络内部可达）、tracking 8085、PostgreSQL 5433、RabbitMQ 管理界面 15672、Kafka（宿主机）9094。
 
 停止：`docker compose -f backend/compose.yml stop`。`down -v` 会连数据卷一起删。
 
@@ -116,7 +116,7 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
 
 ## 已知限制和下一步
 
-- **服务之间没有鉴权**：delivery 的 `/internal/...` 和 bank 的 gRPC 接受网络内任何调用方，bank 查余额不需要 token；现在只靠入口白名单挡在外面。store、delivery 的部分接口（比如 store 的退款接口）还缺权限检查。
+- **服务间鉴权用共享密钥，不是 mTLS**（ADR-23）：bank、delivery 的 `/internal/...`、email 的找回密码接口只接受带了被调方自己那把凭据的调用；每个服务没配自己的凭据就不启动。没有自动轮换（改 `backend/.env` / Secret 里的值，两边一起重启），`email_queue` 这条路只靠 RabbitMQ 账号挡。store、delivery 的部分接口（比如 store 的退款接口）还缺用户权限检查。
 - **单副本**：所有有状态组件都只有一个；store 只能一个副本，因为 `OutboxProcessor` 没有跨实例的锁。
 - **kind 入口偶发 503**（发现 I2）：一次读请求经过 Envoy Gateway 时在到达 store 之前被重置，重试就过了，原因还没查清。
 - **场景脚本 01–03 只能跑 compose**；04–08 两边都能跑。

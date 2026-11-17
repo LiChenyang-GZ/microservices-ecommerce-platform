@@ -14,7 +14,7 @@ The store → bank call is the one call where a mistake costs money. Over HTTP +
 
 ## Consequences
 - Types are checked at compile time and the client is generated. Each call has a deadline; no answer within it is "unknown" (ADR-05).
-- One `.proto` file to maintain; debugging needs a gRPC tool such as grpcurl (bank publishes port 9090 in compose for that).
+- One `.proto` file to maintain; debugging needs a gRPC tool such as grpcurl. Since ADR-23 compose no longer publishes 9090 and every call needs the `x-service-token` metadata; `backend/compose.yml` says how to open it for a debugging session.
 
 ## In the code
 - [bank.proto](../../backend/contracts/src/main/proto/bank/v1/bank.proto)

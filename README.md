@@ -129,7 +129,7 @@ Open http://localhost:3000 and register a user (new users get a bank account wit
 | What | Address |
 |---|---|
 | shop | http://localhost:3000 |
-| store / delivery / email / bank / tracking | `localhost:8082` / `8081` / `8083` / `8084` (gRPC `9090`) / `8085` |
+| store / delivery / email / bank / tracking | `localhost:8082` / `8081` / `8083` / `8084` / `8085` (bank's gRPC `9090` is reachable only inside the compose network) |
 | PostgreSQL | `localhost:5433` (user `postgres`, databases `store_db`, `bank_db`, ...) |
 | RabbitMQ management | http://localhost:15672 |
 | Kafka (from the host) | `localhost:9094` |
@@ -219,7 +219,7 @@ docs/
 
 ## Known limitations and next steps
 
-- **No service-to-service authentication.** delivery's `/internal/...` endpoint and bank's gRPC service accept any caller inside the network, and bank's balance endpoint answers without a token; the entry's allowlist is the only thing keeping them private. Some store and delivery endpoints (for example store's refund endpoint) still need proper authorization checks.
+- **Service-to-service calls use shared secrets, not mTLS** (ADR-23). bank, delivery's `/internal/...` and email's password-reset endpoints accept only callers that send the callee's own token; each service refuses to start without its token. There is no automatic rotation (change the value in `backend/.env` / the Secret and restart both sides), and the `email_queue` path is protected only by the RabbitMQ account. Some store and delivery endpoints (for example store's refund endpoint) still need user authorization checks.
 - **Single replicas.** Every stateful component runs once, and store runs one replica because `OutboxProcessor` has no lock across instances.
 - **Occasional 503 at the kind entry** (finding I2): a read through Envoy Gateway was once reset before reaching store; a retry passed. Not yet explained.
 - **Scenario scripts 01–03 run on compose only**; 04–08 also run on kind.
