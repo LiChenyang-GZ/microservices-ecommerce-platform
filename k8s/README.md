@@ -95,5 +95,5 @@ kind delete cluster --name shop
 
 - Every stateful part has one replica; no high availability (ADR-13's cost).
 - `kind delete cluster` deletes all data in the cluster.
-- `GET /api/bank/account/{n}/balance` works without a token: bank itself has no authentication (an older issue).
+- bank's gRPC port 9090 is limited to store pods by a NetworkPolicy (end of `apps/bank.yaml`). kind's default network plugin enforces it; on a cluster whose plugin does not implement NetworkPolicy, only the service token protects bank.
 - With relative paths in the frontend, local `npm start` needs a proxy (`src/setupProxy.js`); not done yet.

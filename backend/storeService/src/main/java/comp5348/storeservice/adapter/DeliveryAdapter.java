@@ -1,5 +1,6 @@
 package comp5348.storeservice.adapter;
 
+import comp5348.storeservice.config.ServiceTokens;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,7 +27,10 @@ public class DeliveryAdapter {
     @Value("${delivery.service.url:http://localhost:8081}")
     private String deliveryServiceUrl;
 
-    public DeliveryAdapter(RestTemplateBuilder builder) {
+    public DeliveryAdapter(RestTemplateBuilder builder,
+                           @Value("${delivery.service-token:}") String serviceToken) {
+        ServiceTokens.require("delivery.service-token", "DELIVERY_SERVICE_TOKEN", "delivery", serviceToken);
+        // defaultHeader: delivery's own token on every call. This RestTemplate only talks to delivery.
         this.restTemplate = builder
                 .requestFactory(() -> {
                     SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -34,6 +38,7 @@ public class DeliveryAdapter {
                     factory.setReadTimeout((int) Duration.ofSeconds(5).toMillis());
                     return factory;
                 })
+                .defaultHeader(ServiceTokens.HEADER, serviceToken)
                 .build();
     }
 
@@ -57,6 +62,13 @@ public class DeliveryAdapter {
         } catch (HttpClientErrorException.Conflict e) {
             logger.info("Delivery says too late to cancel order {}: {}", orderId, e.getResponseBodyAsString());
             return CancelAnswer.TOO_LATE;
+        } catch (HttpClientErrorException.Unauthorized e) {
+            // delivery refused store's token (wrong or missing in store's config). Same answer as "no answer":
+            // the cancel is refused, try again later (not TOO_LATE: nothing was picked up). But a timeout fixes
+            // itself and a wrong token does not, so a person has to be told.
+            logger.error("ALERT delivery_auth_failed orderId={} (delivery refused store's service token; "
+                    + "check delivery.service-token)", orderId);
+            return CancelAnswer.UNAVAILABLE;
         } catch (Exception e) {
             logger.warn("Cancel delivery by orderId {} failed: {}", orderId, e.getMessage());
             return CancelAnswer.UNAVAILABLE;

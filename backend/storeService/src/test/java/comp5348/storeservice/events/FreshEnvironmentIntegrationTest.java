@@ -42,7 +42,12 @@ import static org.assertj.core.api.Assertions.assertThat;
         "RABBITMQ_USERNAME=guest",
         "RABBITMQ_PASSWORD=guest",
         "spring.rabbitmq.port=1",
-        "outbox.processor.enabled=true"
+        "outbox.processor.enabled=true",
+        // store refuses to start without its three service tokens (auth PR 1, E2); this class does not extend
+        // StoreIntegrationTest, so it sets them itself
+        "bank.service-token=test-bank-service-token",
+        "delivery.service-token=test-delivery-service-token",
+        "email.service-token=test-email-service-token"
 })
 @Import(TestInfraConfig.class)
 class FreshEnvironmentIntegrationTest {

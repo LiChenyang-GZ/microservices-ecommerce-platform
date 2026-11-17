@@ -134,6 +134,10 @@ services:
       # Wave 2 (docs/wave2-config-contract.md). Unused until the code reads them.
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
       BANK_GRPC_ADDRESS: bank:9090
+      # Service credentials (ADR-23). store is the caller of all three, so it holds all three.
+      BANK_SERVICE_TOKEN: ${BANK_SERVICE_TOKEN:?set BANK_SERVICE_TOKEN in backend/.env}
+      DELIVERY_SERVICE_TOKEN: ${DELIVERY_SERVICE_TOKEN:?set DELIVERY_SERVICE_TOKEN in backend/.env}
+      EMAIL_SERVICE_TOKEN: ${EMAIL_SERVICE_TOKEN:?set EMAIL_SERVICE_TOKEN in backend/.env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -154,13 +158,16 @@ services:
     image: shop-bank
     ports:
       - '127.0.0.1:8084:8084'
-      - '127.0.0.1:9090:9090' # gRPC, for store; published so grpcurl can reach it
+      # gRPC 9090 is not published: only store calls it, over the compose network (ADR-23).
+      # To debug with grpcurl, add '127.0.0.1:9090:9090' here for the session and send the token:
+      #   grpcurl -plaintext -H "x-service-token: <BANK_SERVICE_TOKEN>" ... localhost:9090 ...
     environment:
       DB_HOST: postgres
       DB_PORT: '5432'
       BANK_DB_PASSWORD: ${BANK_DB_PASSWORD}
-      STORE_SERVICE_URL: http://store:8082
       BANK_GRPC_PORT: '9090'
+      # Callers of gRPC and REST must send this (ADR-23). bank refuses to start without it.
+      BANK_SERVICE_TOKEN: ${BANK_SERVICE_TOKEN:?set BANK_SERVICE_TOKEN in backend/.env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -188,6 +195,8 @@ services:
       STORE_AUTH_URL: http://store:8082/api/user/login
       EMAIL_SERVICE_URL: http://email:8083
       SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      # Callers of /internal/* must send this (ADR-23). delivery refuses to start without it.
+      DELIVERY_SERVICE_TOKEN: ${DELIVERY_SERVICE_TOKEN:?set DELIVERY_SERVICE_TOKEN in backend/.env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -217,7 +226,8 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       MAIL_USERNAME: ${MAIL_USERNAME:-}
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
-      STORE_SERVICE_URL: http://store:8082
+      # Callers of the password-reset endpoints must send this (ADR-23). email refuses to start without it.
+      EMAIL_SERVICE_TOKEN: ${EMAIL_SERVICE_TOKEN:?set EMAIL_SERVICE_TOKEN in backend/.env}
     depends_on:
       postgres:
         condition: service_healthy

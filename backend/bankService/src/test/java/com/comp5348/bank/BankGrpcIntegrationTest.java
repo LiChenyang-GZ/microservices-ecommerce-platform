@@ -11,9 +11,11 @@ import com.comp5348.contracts.bank.v1.RefundResponse;
 import com.comp5348.contracts.bank.v1.TransferRequest;
 import com.comp5348.contracts.bank.v1.TransferResponse;
 import io.grpc.ManagedChannel;
+import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
+import io.grpc.stub.MetadataUtils;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -57,8 +59,22 @@ class BankGrpcIntegrationTest {
     /** bank 的 gRPC 端口：测试挑一个空闲端口告诉 bank（真部署是 BANK_GRPC_PORT=9090） */
     static final int GRPC_PORT = freePort();
 
-    /** 测试这边的 gRPC 客户端连接。usePlaintext：不用 TLS，和 compose 里 store → bank 一样 */
-    static final ManagedChannel CHANNEL = NettyChannelBuilder.forAddress("localhost", GRPC_PORT).usePlaintext().build();
+    /** bank 认的服务凭据（只在测试里用的假值）。没凭据的调用另有 BankGrpcAuthIntegrationTest 测 */
+    static final String SERVICE_TOKEN = "test-bank-service-token";
+
+    /**
+     * 测试这边的 gRPC 客户端连接。usePlaintext：不用 TLS，和 compose 里 store → bank 一样。
+     * 每个调用都在 metadata 里带上服务凭据（store 的 BankAdapter 也是这样），否则 bank 回 UNAUTHENTICATED。
+     */
+    static final ManagedChannel CHANNEL = NettyChannelBuilder.forAddress("localhost", GRPC_PORT).usePlaintext()
+            .intercept(MetadataUtils.newAttachHeadersInterceptor(tokenHeaders()))
+            .build();
+
+    private static Metadata tokenHeaders() {
+        Metadata headers = new Metadata();
+        headers.put(Metadata.Key.of("x-service-token", Metadata.ASCII_STRING_MARSHALLER), SERVICE_TOKEN);
+        return headers;
+    }
 
     static {
         POSTGRES.start();
@@ -67,6 +83,7 @@ class BankGrpcIntegrationTest {
     @DynamicPropertySource
     static void grpcPort(DynamicPropertyRegistry registry) {
         registry.add("bank.grpc.port", () -> GRPC_PORT);
+        registry.add("bank.service-token", () -> SERVICE_TOKEN);
     }
 
     @AfterAll

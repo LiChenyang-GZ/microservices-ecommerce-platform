@@ -6,18 +6,22 @@ import com.comp5348.contracts.bank.v1.RefundRequest;
 import com.comp5348.contracts.bank.v1.RefundResponse;
 import com.comp5348.contracts.bank.v1.TransferRequest;
 import com.comp5348.contracts.bank.v1.TransferResponse;
+import comp5348.storeservice.config.ServiceTokens;
 import comp5348.storeservice.dto.BankRefundRequest;
 import comp5348.storeservice.dto.BankTransferRequest;
 import io.grpc.ManagedChannel;
+import io.grpc.Metadata;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
 import io.grpc.netty.shaded.io.grpc.netty.NettyChannelBuilder;
+import io.grpc.stub.MetadataUtils;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -43,11 +47,19 @@ public class BankAdapter {
     @Value("${bank.service.url:http://localhost:8084}")
     private String bankServiceUrl;
 
+    /** bank's own service token goes in the X-Service-Token header (REST) and this metadata key (gRPC) */
+    private static final Metadata.Key<String> SERVICE_TOKEN_KEY =
+            Metadata.Key.of("x-service-token", Metadata.ASCII_STRING_MARSHALLER);
+
     public BankAdapter(RestTemplateBuilder builder,
                        @Value("${bank.client.connect-timeout-ms:5000}") int connectTimeoutMs,
                        @Value("${bank.client.read-timeout-ms:5000}") int readTimeoutMs,
                        @Value("${bank.grpc.address:localhost:9090}") String grpcAddress,
-                       @Value("${bank.grpc.deadline-ms:5000}") long deadlineMs) {
+                       @Value("${bank.grpc.deadline-ms:5000}") long deadlineMs,
+                       @Value("${bank.service-token:}") String serviceToken) {
+        ServiceTokens.require("bank.service-token", "BANK_SERVICE_TOKEN", "bank", serviceToken);
+        // defaultHeader: every REST call from this RestTemplate carries bank's token. This RestTemplate only
+        // ever talks to bank, so bank's token never reaches another service (each callee has its own token).
         this.restTemplate = builder
                 .requestFactory(() -> {
                     SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
@@ -55,12 +67,18 @@ public class BankAdapter {
                     factory.setReadTimeout(readTimeoutMs);
                     return factory;
                 })
+                .defaultHeader(ServiceTokens.HEADER, serviceToken)
                 .build();
+        Metadata token = new Metadata();
+        token.put(SERVICE_TOKEN_KEY, serviceToken);
         // One long-lived HTTP/2 connection to bank, shared by every call.
         // usePlaintext: no TLS inside the compose / k8s network (same as the REST calls).
         // disableRetry: OutboxProcessor is the only place that retries (5 fast, then every 10 minutes);
         //   a second retry layer here would multiply the calls and the time per task.
-        this.channel = NettyChannelBuilder.forTarget(grpcAddress).usePlaintext().disableRetry().build();
+        // intercept: adds x-service-token to the metadata of every call on this channel (transfer and refund).
+        this.channel = NettyChannelBuilder.forTarget(grpcAddress).usePlaintext().disableRetry()
+                .intercept(MetadataUtils.newAttachHeadersInterceptor(token))
+                .build();
         this.bank = BankServiceGrpc.newBlockingStub(channel);
         this.deadlineMs = deadlineMs;
     }
@@ -97,6 +115,7 @@ public class BankAdapter {
                     .build());
             result = fromOutcome(response.getOutcome(), response.getTransactionId(), response.getReason());
         } catch (StatusRuntimeException e) {
+            alertIfAuthFailed(e, request.getIdempotencyKey());
             result = unknown(e);
         }
         logger.info("Bank transfer result: key={}, outcome={}, txnId={}, message={}",
@@ -119,6 +138,7 @@ public class BankAdapter {
                     .build());
             result = fromOutcome(response.getOutcome(), response.getRefundTransactionId(), response.getReason());
         } catch (StatusRuntimeException e) {
+            alertIfAuthFailed(e, request.getIdempotencyKey());
             result = unknown(e);
         }
         logger.info("Bank refund result: key={}, outcome={}, refundTxnId={}, message={}",
@@ -149,6 +169,29 @@ public class BankAdapter {
         return BankCallResult.unknown("gRPC " + status.getCode() + ": " + status.getDescription());
     }
 
+    /**
+     * UNAUTHENTICATED = bank refused store's service token (wrong or missing in store's config). The result stays
+     * UNKNOWN like every other error (it is our fault, not the buyer's: no FAILED, no new key), but unlike a timeout
+     * it will not fix itself, so it gets its own ALERT. Only this code: a bank restart (UNAVAILABLE) must not alert.
+     */
+    private static void alertIfAuthFailed(StatusRuntimeException e, String idempotencyKey) {
+        if (e.getStatus().getCode() == Status.Code.UNAUTHENTICATED) {
+            logger.error("ALERT bank_auth_failed key={} (bank refused store's service token; check bank.service-token)",
+                    idempotencyKey);
+        }
+    }
+
+    /**
+     * The REST half of the same alert (scenario C3b): bank answered 401 to open-account or account-by-owner.
+     * The caller still gets null, as before. Without this line the only trace is a WARN "create bank account
+     * failed", and the user later sees "no linked bank account" at Pay Now. Names the operation, never the email:
+     * alert lines are forwarded to other systems, the email is personal data.
+     */
+    private static void alertRestAuthFailed(String operation) {
+        logger.error("ALERT bank_auth_failed op={} (bank refused store's service token; check bank.service-token)",
+                operation);
+    }
+
     /** Decimal string for bank.proto: toPlainString gives "100", never "1E+2"; the scale stays ("129.90"). */
     private static String decimal(BigDecimal amount) {
         return amount == null ? "" : amount.toPlainString();
@@ -177,6 +220,8 @@ public class BankAdapter {
                 Object acct = resp.getBody().get("accountNumber");
                 if (acct != null) return String.valueOf(acct);
             }
+        } catch (HttpClientErrorException.Unauthorized e) {
+            alertRestAuthFailed("create-account");
         } catch (Exception e) {
             logger.warn("Create bank account failed for {}: {}", ownerEmail, e.getMessage());
         }
@@ -198,6 +243,8 @@ public class BankAdapter {
                     return String.valueOf(acct);
                 }
             }
+        } catch (HttpClientErrorException.Unauthorized e) {
+            alertRestAuthFailed("account-by-owner");
         } catch (Exception e) {
             logger.warn("Get bank account by email failed for {}: {}", ownerEmail, e.getMessage());
         }

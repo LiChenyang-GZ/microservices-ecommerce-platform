@@ -5,13 +5,19 @@ import com.comp5348.contracts.bank.v1.RefundRequest;
 import com.comp5348.contracts.bank.v1.RefundResponse;
 import com.comp5348.contracts.bank.v1.TransferRequest;
 import com.comp5348.contracts.bank.v1.TransferResponse;
+import io.grpc.Metadata;
 import io.grpc.Server;
+import io.grpc.ServerCall;
+import io.grpc.ServerCallHandler;
+import io.grpc.ServerInterceptor;
+import io.grpc.ServerInterceptors;
 import io.grpc.Status;
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 import io.grpc.stub.StreamObserver;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
@@ -53,6 +59,24 @@ public class FakeBankGrpc extends BankServiceGrpc.BankServiceImplBase {
     private final List<TransferRequest> transfers = new CopyOnWriteArrayList<>();
     private final List<RefundRequest> refunds = new CopyOnWriteArrayList<>();
 
+    /**
+     * 每个请求的 metadata 里 x-service-token 的值（没带就是 null），按收到的先后，扣款和退款混在一起。
+     * 假 bank 只记下来、不检查：检查是真 bank 的事（BankGrpcAuthIntegrationTest），这里只看 store 带没带。
+     */
+    private static final Metadata.Key<String> TOKEN_KEY =
+            Metadata.Key.of("x-service-token", Metadata.ASCII_STRING_MARSHALLER);
+    private final List<String> serviceTokens = new CopyOnWriteArrayList<>();
+
+    /** gRPC 的拦截器：每个请求到达业务方法之前先经过这里，能看到 metadata（相当于 HTTP 的请求头） */
+    private final ServerInterceptor recordToken = new ServerInterceptor() {
+        @Override
+        public <ReqT, RespT> ServerCall.Listener<ReqT> interceptCall(
+                ServerCall<ReqT, RespT> call, Metadata headers, ServerCallHandler<ReqT, RespT> next) {
+            serviceTokens.add(headers.get(TOKEN_KEY));
+            return next.startCall(call, headers);
+        }
+    };
+
     public FakeBankGrpc(int port) {
         this.port = port;
     }
@@ -63,7 +87,8 @@ public class FakeBankGrpc extends BankServiceGrpc.BankServiceImplBase {
 
     public void start() {
         try {
-            server = NettyServerBuilder.forPort(port).addService(this).build().start();
+            server = NettyServerBuilder.forPort(port)
+                    .addService(ServerInterceptors.intercept(this, recordToken)).build().start();
         } catch (IOException e) {
             throw new IllegalStateException("fake bank could not listen on " + port, e);
         }
@@ -91,6 +116,7 @@ public class FakeBankGrpc extends BankServiceGrpc.BankServiceImplBase {
     public void forgetRequests() {
         transfers.clear();
         refunds.clear();
+        serviceTokens.clear();
     }
 
     public void onTransfer(Reply... replies) {
@@ -107,6 +133,11 @@ public class FakeBankGrpc extends BankServiceGrpc.BankServiceImplBase {
 
     public List<RefundRequest> refunds() {
         return List.copyOf(refunds);
+    }
+
+    /** 每个请求带来的服务凭据，没带的是 null（所以用 ArrayList：List.copyOf 不接受 null） */
+    public List<String> serviceTokens() {
+        return new ArrayList<>(serviceTokens);
     }
 
     // ---------- gRPC 调进来的两个方法 ----------

@@ -41,12 +41,21 @@ $secrets = [ordered]@{
         RABBITMQ_USERNAME = Need 'RABBITMQ_USERNAME'
         RABBITMQ_PASSWORD = Need 'RABBITMQ_PASSWORD'
         JWT_SECRET        = Need 'JWT_SECRET'
+        # Service credentials (ADR-23): store calls all three, so it holds all three.
+        BANK_SERVICE_TOKEN     = Need 'BANK_SERVICE_TOKEN'
+        DELIVERY_SERVICE_TOKEN = Need 'DELIVERY_SERVICE_TOKEN'
+        EMAIL_SERVICE_TOKEN    = Need 'EMAIL_SERVICE_TOKEN'
     }
-    'bank'      = @{ BANK_DB_PASSWORD = Need 'BANK_DB_PASSWORD' }
+    # A called service holds only its own token.
+    'bank'      = @{
+        BANK_DB_PASSWORD   = Need 'BANK_DB_PASSWORD'
+        BANK_SERVICE_TOKEN = Need 'BANK_SERVICE_TOKEN'
+    }
     'delivery'  = @{
-        DELIVERY_DB_PASSWORD = Need 'DELIVERY_DB_PASSWORD'
-        RABBITMQ_USERNAME    = Need 'RABBITMQ_USERNAME'
-        RABBITMQ_PASSWORD    = Need 'RABBITMQ_PASSWORD'
+        DELIVERY_DB_PASSWORD   = Need 'DELIVERY_DB_PASSWORD'
+        RABBITMQ_USERNAME      = Need 'RABBITMQ_USERNAME'
+        RABBITMQ_PASSWORD      = Need 'RABBITMQ_PASSWORD'
+        DELIVERY_SERVICE_TOKEN = Need 'DELIVERY_SERVICE_TOKEN'
     }
     'email'     = @{
         EMAIL_DB_PASSWORD = Need 'EMAIL_DB_PASSWORD'
@@ -55,6 +64,7 @@ $secrets = [ordered]@{
         # Optional, as in compose: empty means email cannot send, but still starts.
         MAIL_USERNAME     = "$($vars['MAIL_USERNAME'])"
         MAIL_PASSWORD     = "$($vars['MAIL_PASSWORD'])"
+        EMAIL_SERVICE_TOKEN = Need 'EMAIL_SERVICE_TOKEN'
     }
     # The whole URL is secret, because the password is inside it.
     'tracking'  = @{

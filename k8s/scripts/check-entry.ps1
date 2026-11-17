@@ -69,13 +69,9 @@ closed POST   /api/store/delivery-webhook                               callback
 # ---- closed: a frontend path with the wrong method ----
 closed POST   /api/store/products/available                             only GET is used
 closed DELETE /api/delivery/deliveries/999999999                        only GET is used
-# ---- closed: email sends that other services make ----
-closed POST   /api/email/send-order-cancelled                           store -> email
+# ---- closed: email password reset, store -> email only (needs email's service token) ----
 closed POST   /api/email/send-password-reset                            store -> email
-# ---- closed: bank (review #3: the top-up page is gone, so the frontend calls no bank path) ----
-closed POST   /api/bank/transfer                                        money from SYSTEM to anyone
-closed POST   /api/bank/refund                                          store -> bank
-closed GET    /api/bank/account/me                                      only the removed top-up page used it
+# ---- closed: bank (review #3: the frontend calls no bank path; transfer, refund and account/me were removed in auth PR 1) ----
 closed GET    /api/bank/account/CUSTOMER_ACCOUNT_001/balance            only the removed top-up page used it
 # ---- closed: tracking (no page calls it yet) ----
 closed GET    /api/tracking/orders/999999999/timeline                   no frontend caller

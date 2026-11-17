@@ -60,13 +60,24 @@ import static org.assertj.core.api.Assertions.assertThat;
         "spring.rabbitmq.port=1",
         "outbox.processor.enabled=true",
         // 4b：store 的事件投递程序每 200 毫秒跑一轮（生产默认 1 秒），测试等事件不用等太久。红灯时没人读这个键
-        "event-outbox.publisher.interval-ms=200"
+        "event-outbox.publisher.interval-ms=200",
+        // 鉴权 PR ① 的绿灯配置键（红灯时没人读）：store 调 bank、delivery 时要带的服务凭据，每个被调方一把。
+        // 键名和被调方那边一样（bank 自己也读 bank.service-token），部署时两边来自同一个环境变量
+        "bank.service-token=" + StoreIntegrationTest.BANK_SERVICE_TOKEN,
+        "delivery.service-token=" + StoreIntegrationTest.DELIVERY_SERVICE_TOKEN,
+        "email.service-token=" + StoreIntegrationTest.EMAIL_SERVICE_TOKEN
 })
 @Import(TestInfraConfig.class)
 public abstract class StoreIntegrationTest {
 
     /** store 调 bank 的超时（gRPC deadline）是 5 秒：bank.grpc.deadline-ms 的默认值。比它慢就是"超时"。 */
     protected static final int SLOWER_THAN_STORE_TIMEOUT_MS = 6_000;
+
+    /** 服务凭据（只在测试里用的假值）。HTTP 放在 X-Service-Token 头，gRPC 放在 metadata 的 x-service-token */
+    protected static final String BANK_SERVICE_TOKEN = "test-bank-service-token";
+    protected static final String DELIVERY_SERVICE_TOKEN = "test-delivery-service-token";
+    protected static final String EMAIL_SERVICE_TOKEN = "test-email-service-token";
+    protected static final String SERVICE_TOKEN_HEADER = "X-Service-Token";
 
     // ---------- 两个外部替身：只启动一次，所有测试类共用 ----------
 
@@ -111,6 +122,9 @@ public abstract class StoreIntegrationTest {
         registry.add("bank.service.url", FAKE_BANK::baseUrl);
         registry.add("bank.grpc.address", () -> "localhost:" + FAKE_BANK_GRPC.port());
         registry.add("delivery.service.url", FAKE_BANK::baseUrl);
+        // 同一个 WireMock 也冒充 email 的 HTTP 接口（找回密码那两个；通知邮件走队列，由 EmailAdapter 的假对象挡住）。
+        // 以前没设这个键，找回密码的代码在测试里会去连本机的 8083
+        registry.add("email.service.url", FAKE_BANK::baseUrl);
         // 契约：compose 里的 SPRING_KAFKA_BOOTSTRAP_SERVERS 自动绑定到这个键
         registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
     }
@@ -263,6 +277,11 @@ public abstract class StoreIntegrationTest {
     /** 假 bank 收到的所有退款请求 */
     protected List<RefundRequest> refundRequests() {
         return FAKE_BANK_GRPC.refunds();
+    }
+
+    /** 假 bank 收到的每个 gRPC 请求带的服务凭据（没带的是 null），扣款和退款按先后混在一起 */
+    protected List<String> bankServiceTokens() {
+        return FAKE_BANK_GRPC.serviceTokens();
     }
 
     /** 清掉假 bank 的请求记录（剧本不动），后面只数从现在起的请求 */

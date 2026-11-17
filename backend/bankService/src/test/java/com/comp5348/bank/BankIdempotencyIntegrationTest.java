@@ -34,7 +34,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest(properties = {
         // gRPC server on a random free port: never clashes with a bank already running on 9090
-        "bank.grpc.port=0"
+        "bank.grpc.port=0",
+        // bank refuses to start without a service token (ServiceToken); any value works, this test does not call over the network
+        "bank.service-token=test-bank-service-token"
 })
 class BankIdempotencyIntegrationTest {
 

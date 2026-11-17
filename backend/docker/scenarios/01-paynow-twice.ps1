@@ -5,13 +5,12 @@
 #
 # 剧情：
 #   1. 新用户余额 10000，一次买 2 台 iPhone 13（13998）→ bank 拒绝（余额不足）→ 付款 FAILED
-#   2. 用户去 Add Money 充 5000
+#   2. 给这个账户加 5000（Add Money 页面已删，脚本直接在 bank_db 里加钱）
 #   3. 两个标签页几乎同时点 Pay Now
 #   4. 看结果：钱应该只扣一次
 $ErrorActionPreference = 'Stop'
 $compose = 'backend/compose.yml'
 $store = 'http://localhost:8082/api'
-$bank = 'http://localhost:8084/api'
 
 function Sql($db, $query) {
     docker compose -f $compose exec -T postgres psql -U postgres -d $db -tAc $query
@@ -47,9 +46,10 @@ do { Start-Sleep -Seconds 3; $s = Status $order.id } until ($s -match 'payment F
 "   -> $s"
 if ($s -notmatch 'payment FAILED') { throw "前提不成立：付款没有变成 FAILED" }
 
-# --- 2. 充值 5000（和 Add Money 页面发的请求一样）---
-Invoke-RestMethod -Method Post "$bank/bank/transfer" -ContentType 'application/json' `
-    -Body (@{ fromAccount = 'SYSTEM'; toAccount = $account; amount = 5000; transactionRef = "DEPOSIT-$(Get-Random)" } | ConvertTo-Json) | Out-Null
+# --- 2. 加 5000 ---
+# 以前和 Add Money 页面一样调 POST /api/bank/transfer（从 SYSTEM 转进来）。那个页面和接口都删了
+# （谁都能从 SYSTEM 给任何账户转钱；现在 bank 只认带服务凭据的 store）。这里只是给场景准备余额，直接改库。
+Sql 'bank_db' "update bank_accounts set balance = balance + 5000 where account_number = '$account'" | Out-Null
 $before = Balance $account
 "2. 充值 5000，余额 $before"
 

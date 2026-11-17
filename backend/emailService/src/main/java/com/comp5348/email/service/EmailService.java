@@ -110,14 +110,6 @@ public class EmailService {
     }
 
     /**
-     * Check if email is verified
-     */
-    public boolean isEmailVerified(String email) {
-        EmailOutbox emailOutbox = emailOutboxRepository.findByEmailAndStatus(email, "VERIFIED");
-        return emailOutbox != null && !emailOutbox.isExpired();
-    }
-
-    /**
      * Send password reset verification code
      */
     public String sendPasswordResetCode(String email) {

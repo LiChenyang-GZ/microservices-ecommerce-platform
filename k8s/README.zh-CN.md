@@ -94,5 +94,5 @@ kind delete cluster --name shop
 
 - 所有有状态组件都是单副本，没有高可用（ADR-13 的代价）。
 - `kind delete cluster` 会删掉集群里的所有数据。
-- `GET /api/bank/account/{n}/balance` 不带 token 也能查余额：bank 本身没鉴权（老问题）。
+- bank 的 gRPC 端口 9090 由 NetworkPolicy 限定只有 store 的 pod 能连（`apps/bank.yaml` 最后）。kind 默认的网络插件会执行它；换到不支持 NetworkPolicy 的网络插件，就只剩服务凭据在保护 bank。
 - 前端用相对路径以后，本地 `npm start` 需要另配代理（`src/setupProxy.js`），还没做。

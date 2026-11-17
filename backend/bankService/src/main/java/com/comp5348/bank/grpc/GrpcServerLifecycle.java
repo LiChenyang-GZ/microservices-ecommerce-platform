@@ -1,6 +1,8 @@
 package com.comp5348.bank.grpc;
 
+import com.comp5348.bank.config.ServiceToken;
 import io.grpc.Server;
+import io.grpc.ServerInterceptors;
 import io.grpc.netty.shaded.io.grpc.netty.NettyServerBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -25,18 +27,24 @@ public class GrpcServerLifecycle implements SmartLifecycle {
     private static final Logger logger = LoggerFactory.getLogger(GrpcServerLifecycle.class);
 
     private final BankGrpcService bankGrpcService;
+    private final ServiceToken serviceToken;
     private final int port;
     private volatile Server server;
 
-    public GrpcServerLifecycle(BankGrpcService bankGrpcService, @Value("${bank.grpc.port:9090}") int port) {
+    public GrpcServerLifecycle(BankGrpcService bankGrpcService, ServiceToken serviceToken,
+                               @Value("${bank.grpc.port:9090}") int port) {
         this.bankGrpcService = bankGrpcService;
+        this.serviceToken = serviceToken;
         this.port = port;
     }
 
     @Override
     public void start() {
         try {
-            server = NettyServerBuilder.forPort(port).addService(bankGrpcService).build().start();
+            // The interceptor wraps every method of the service: a call without the right token never reaches it
+            server = NettyServerBuilder.forPort(port)
+                    .addService(ServerInterceptors.intercept(bankGrpcService, new ServiceTokenServerInterceptor(serviceToken)))
+                    .build().start();
         } catch (IOException e) {
             throw new UncheckedIOException("bank gRPC server could not listen on port " + port, e);
         }

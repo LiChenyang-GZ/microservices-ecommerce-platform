@@ -1,5 +1,6 @@
-# bank: accounts and money. REST 8084 for the frontend (only two GETs are routed
-# from outside, routes.yaml), gRPC 9090 for store (wave 2 B).
+# bank: accounts and money. Only store calls it: REST 8084 (open account, account by
+# email) and gRPC 9090 (transfer / refund, wave 2 B). Both need BANK_SERVICE_TOKEN (ADR-23);
+# the entry routes no bank path (routes.yaml). The NetworkPolicy at the end limits 9090 to store.
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -8,7 +9,6 @@ metadata:
 data:
   DB_HOST: postgres
   DB_PORT: '5432'
-  STORE_SERVICE_URL: http://store:8082
   BANK_GRPC_PORT: '9090'
   MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: 'true'
   MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db
@@ -78,3 +78,25 @@ spec:
           resources:
             requests: { cpu: 100m, memory: 384Mi }
             limits: { memory: 768Mi }
+---
+# Second fence for the money calls (ADR-23): only store pods may open bank's gRPC port.
+# The service token is the first fence; this one also stops a pod that somehow has the token.
+# 8084 stays open to every pod: kubelet's probes use it, and every /api/bank/* call needs the token anyway.
+# Enforced only if the cluster's network plugin implements NetworkPolicy: kind's default kindnet does
+# since kind v0.24; a plugin without it silently ignores this object.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: bank
+  namespace: shop
+spec:
+  podSelector:
+    matchLabels: { app: bank }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: { matchLabels: { app: store } }
+      ports:
+        - { protocol: TCP, port: 9090 }
+    - ports:
+        - { protocol: TCP, port: 8084 }

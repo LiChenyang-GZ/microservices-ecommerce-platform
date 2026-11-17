@@ -36,6 +36,10 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-amqp'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    // Integration tests: a throwaway Postgres in Docker, never the local email_db
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
 }
 
 tasks.named('test') {

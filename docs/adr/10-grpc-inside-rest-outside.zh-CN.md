@@ -14,7 +14,7 @@ store → bank 这一次调用出错就是钱的问题。走 HTTP + JSON 时，�
 
 ## 代价与影响
 - 类型在编译时检查，客户端代码自动生成。每次调用有截止时间（deadline），超时就是"未知"（ADR-05）。
-- 多一个 `.proto` 文件要维护；调试要用 grpcurl 这类工具（compose 里 bank 把 9090 发布出来就是为了这个）。
+- 多一个 `.proto` 文件要维护；调试要用 grpcurl 这类工具。ADR-23 之后 compose 不再发布 9090，而且每次调用都要带 `x-service-token` metadata；要调试时怎么临时打开，写在 `backend/compose.yml` 的注释里。
 
 ## 代码在哪
 - [bank.proto](../../backend/contracts/src/main/proto/bank/v1/bank.proto)

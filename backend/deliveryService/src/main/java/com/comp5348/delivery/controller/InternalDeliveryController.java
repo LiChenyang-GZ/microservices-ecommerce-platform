@@ -13,9 +13,10 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 
 /**
- * Service-to-service calls (store → delivery). Not under /api/*, so the user-token filter does not apply.
- * No authentication either, same as the endpoint it replaces (Christy's choice on question 2: K8s does not route
- * /internal from outside; service-to-service auth stays on the security to-do list).
+ * Service-to-service calls (store → delivery). Not under /api/*, so the user-token filter does not apply;
+ * instead ServiceTokenFilter requires X-Service-Token (delivery.service-token) on /internal/*: without it → 401
+ * and this controller never runs. K8s also does not route /internal from outside, but that alone is not enough:
+ * anything inside the cluster could call it (ADR-23).
  */
 @RestController
 @RequestMapping("/internal/deliveries")
