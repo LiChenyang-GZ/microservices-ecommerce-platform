@@ -13,10 +13,10 @@
 **When services pass messages through Kafka, a malformed message gets quietly accepted and only fails several steps later, or only fails on the other language's side (Go).**
 
 Tests that reproduce it (14 red at `test(red)`):
-- a missing field is accepted as null: [EventEnvelopeContractTest.java:46](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L46), [:61](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L61)
-- `orderId: 42` (a number) is silently turned into `"42"`: [:71](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L71)
-- a payload sent as a string is accepted: [:84](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java#L84)
-- delivery status `CREATED` has no matching event `DeliveryCreated`: [DeliveryEventContractTest.java:22](../../backend/deliveryService/src/test/java/com/comp5348/delivery/contracts/DeliveryEventContractTest.java#L22)
+- a missing field is accepted as null: [EventEnvelopeContractTest#eventEnvelope_missingRequiredField_failsValidation](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java), [EventEnvelopeContractTest#eventEnvelope_nullRequiredField_failsValidation](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java)
+- `orderId: 42` (a number) is silently turned into `"42"`: [EventEnvelopeContractTest#orderId_sentAsJsonNumber_isRejected](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java)
+- a payload sent as a string is accepted: [EventEnvelopeContractTest#payload_notAnObject_isRejected](../../backend/contracts/src/test/java/com/comp5348/contracts/events/EventEnvelopeContractTest.java)
+- delivery status `CREATED` has no matching event `DeliveryCreated`: [DeliveryEventContractTest#everyDeliveryStatus_hasMatchingEventType](../../backend/deliveryService/src/test/java/com/comp5348/delivery/contracts/DeliveryEventContractTest.java)
 
 ---
 
@@ -30,19 +30,19 @@ They live in a separate Gradle module, `contracts`, and every service references
 ### 2.2 Java records and the compact constructor
 - A `record` (standard since Java 16) is a class that only holds data: you list the fields, and the compiler generates the constructor, accessors (`eventId()`), `equals`, `hashCode` and `toString`. Fields are `final`, so the object can't change once built.
 - **Compact constructor**: inside the record you write `public EventEnvelope { ... }` with no parameter list. It runs **before** the fields are assigned, which makes it the place for checks. If a check fails it throws, and the object is never created.
-- Code: [EventEnvelope.java:28](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventEnvelope.java#L28)
+- Code: [EventEnvelope#EventEnvelope](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventEnvelope.java)
 
 ### 2.3 How Jackson turns JSON into a record
 - Jackson is Spring Boot's default JSON library. `ObjectMapper.readValue(json, EventEnvelope.class)` reads the JSON, finds the record's constructor, and passes in the values by field name.
 - **When a field is missing from the JSON, Jackson does not fail; it passes null.** That is the cause of the first group of red tests.
-- Because Jackson always goes through the constructor, a check in the compact constructor **runs automatically on every parse**. Jackson wraps the constructor's exception in a `JsonProcessingException`, and `EventCodec` turns that into an `InvalidEventException`: [EventCodec.java:37](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java#L37)
-- Gotcha: for `"payload": null`, a `JsonNode` field receives a `NullNode` object, not Java `null`. So the check is `payload == null || !payload.isObject()`: [EventEnvelope.java:34](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventEnvelope.java#L34)
+- Because Jackson always goes through the constructor, a check in the compact constructor **runs automatically on every parse**. Jackson wraps the constructor's exception in a `JsonProcessingException`, and `EventCodec` turns that into an `InvalidEventException`: [EventCodec#parse](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java)
+- Gotcha: for `"payload": null`, a `JsonNode` field receives a `NullNode` object, not Java `null`. So the check is `payload == null || !payload.isObject()`: [EventEnvelope#EventEnvelope](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventEnvelope.java)
 - **Added later (PR #9)**: by default Jackson **also rejects extra fields** (`FAIL_ON_UNKNOWN_PROPERTIES`). That contradicts the contract rule "only add fields; older consumers keep working". The first version missed it; the agent writing the Go tracking service caught it by checking its parser against the README. Fix: turn that switch off. It is separate from "required fields must be present": missing fields are caught by the constructor, extra fields are ignored. Test: `newFieldAddedByProducer_isIgnoredByOlderConsumer`.
 
 ### 2.4 Jackson coercion
 - Coercion = "the type is wrong, so convert it for you". By default Jackson turns the number `42` into the string `"42"` for a `String` field.
 - Since Jackson 2.12 there is `CoercionConfig`, which decides what to do per target type and input shape. `CoercionAction` has four values: `Fail`, `TryConvert`, `AsNull`, `AsEmpty`.
-- Our setting: `String`-like fields (`LogicalType.Textual`) receiving an integer, float or boolean → `Fail`: [EventCodec.java:27](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java#L27)
+- Our setting: `String`-like fields (`LogicalType.Textual`) receiving an integer, float or boolean → `Fail`: [EventCodec#newMapper](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java)
 - Why turn it off: Go's `encoding/json` returns an `UnmarshalTypeError` for a number in a string field. If Java accepts what Go rejects, the problem hides until integration.
 
 ### 2.5 Checked exception `InvalidEventException`
@@ -51,7 +51,7 @@ They live in a separate Gradle module, `contracts`, and every service references
 
 ### 2.6 Explicit mapping inside an enum
 - `DeliveryEventType.valueOf("CREATED")` looks up a **constant name**, but the constant is `DELIVERY_CREATED`, so it fails.
-- Fix: each constant carries a field naming its status, and `fromStatus` compares them one by one: [DeliveryEventType.java:10](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java#L10), [:35](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java#L35)
+- Fix: each constant carries a field naming its status, and `fromStatus` compares them one by one: [DeliveryEventType.DELIVERY_CREATED](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java), [DeliveryEventType#fromStatus](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java)
 
 ### 2.7 Kafka keys and partitions
 - Every Kafka message has a key. **Messages with the same key go to the same partition, and order within a partition is guaranteed.**
@@ -108,8 +108,8 @@ Fundamentals are memorised as questions, but interviews ask them as scenarios. T
 
 | Question | Where in the code | The judgement |
 |---|---|---|
-| 📒 **A2 HashMap / B2 ConcurrentHashMap** | `DeliveryEventType.fromStatus()` loops over 6 values ([DeliveryEventType.java:35](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java#L35)) | **Now**: 6 values; a loop is simplest. **When to switch**: at very high call rates, build a `static final Map<String, DeliveryEventType>` index at class-load time so a lookup is one hash instead of a scan. **No ConcurrentHashMap needed**: the map is read-only once built, and concurrent reads are safe. You only need it when several threads **write** to the same map (e.g. a cache that keeps growing) |
-| 📒 **B1 / D2 thread safety** + ➕ **ObjectMapper thread safety** | `EventCodec` has a single `static final ObjectMapper` shared by all threads ([EventCodec.java:15](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java#L15)) | ObjectMapper is expensive to build (it scans classes and builds caches), so there's only one. **Once configured**, many threads can read and write JSON with it safely. Gotcha: never change its configuration while in use (e.g. calling `MAPPER.configure(...)` inside a request); that affects every thread. Same reasoning as D2 "is a singleton bean thread-safe": only if it has no mutable state |
+| 📒 **A2 HashMap / B2 ConcurrentHashMap** | `DeliveryEventType.fromStatus()` loops over 6 values ([DeliveryEventType#fromStatus](../../backend/contracts/src/main/java/com/comp5348/contracts/events/DeliveryEventType.java)) | **Now**: 6 values; a loop is simplest. **When to switch**: at very high call rates, build a `static final Map<String, DeliveryEventType>` index at class-load time so a lookup is one hash instead of a scan. **No ConcurrentHashMap needed**: the map is read-only once built, and concurrent reads are safe. You only need it when several threads **write** to the same map (e.g. a cache that keeps growing) |
+| 📒 **B1 / D2 thread safety** + ➕ **ObjectMapper thread safety** | `EventCodec` has a single `static final ObjectMapper` shared by all threads ([EventCodec.MAPPER](../../backend/contracts/src/main/java/com/comp5348/contracts/events/EventCodec.java)) | ObjectMapper is expensive to build (it scans classes and builds caches), so there's only one. **Once configured**, many threads can read and write JSON with it safely. Gotcha: never change its configuration while in use (e.g. calling `MAPPER.configure(...)` inside a request); that affects every thread. Same reasoning as D2 "is a singleton bean thread-safe": only if it has no mutable state |
 | 📒 **A1 equals / hashCode** | records generate `equals` and `hashCode` from all fields | So a payload can be a HashMap key or go into a HashSet for de-duplication. A hand-written class that overrides `equals` but not `hashCode` breaks HashSet de-duplication, the classic A1 trap. Records can't make that mistake |
 | 📒 **A4 checked vs unchecked** | `InvalidEventException extends Exception` (checked) | Checked on purpose: the compiler forces consumers to handle "broken message" (send to DLT) separately from "transient failure" (retry). With an unchecked exception, forgetting the catch still compiles and a broken message would be retried like any other error |
 | 📒 **A6 Modern Java** | `record` + compact constructor | When asked "which newer features do you use", point to real code: records define immutable message formats, validated in the compact constructor |

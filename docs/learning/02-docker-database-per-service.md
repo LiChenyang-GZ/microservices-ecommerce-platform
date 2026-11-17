@@ -14,10 +14,10 @@
 
 While splitting, a third problem showed up: **two URLs were hard-coded to `localhost`**. That works on a laptop and breaks inside a container.
 
-- [OutboxProcessor.java:291](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java#L291): store tells delivery "call me back at `http://localhost:8082/...`". Inside the delivery container, `localhost` is delivery itself.
-- [AccountService.java:26](../../backend/storeService/src/main/java/comp5348/storeservice/service/AccountService.java#L26): password reset calls the email service, also hard-coded to `localhost:8083`.
+- [OutboxProcessor#processPaymentSuccess (as of `413c6f2`)](https://github.com/LiChenyang-GZ/microservices-ecommerce-platform/blob/413c6f2/backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java#L291): store tells delivery "call me back at `http://localhost:8082/...`". Inside the delivery container, `localhost` is delivery itself.
+- [AccountService.emailServiceUrl](../../backend/storeService/src/main/java/comp5348/storeservice/service/AccountService.java): password reset calls the email service, also hard-coded to `localhost:8083`.
 
-**Control experiment (this step's "red")**: put the hard-coded URL back on line 291, rebuild store, run [smoke-order.ps1](../../backend/docker/smoke-order.ps1):
+**Control experiment (this step's "red")**: put the hard-coded URL back into `OutboxProcessor#processPaymentSuccess`, rebuild store, run [smoke-order.ps1](../../backend/docker/smoke-order.ps1):
 
 ```
 statuses seen: PENDING_PAYMENT -> PAID
@@ -42,42 +42,42 @@ PASS: order paid and delivery updates reached store
 An image is the package: the app and everything it needs (JRE, jar). A container is a running copy of an image. The same image behaves the same on a laptop, in CI and on a server.
 
 ### 2.2 Multi-stage build
-- [Dockerfile:8](../../backend/Dockerfile#L8): stage one uses `eclipse-temurin:17-jdk`, a full JDK, to run Gradle and build the jar.
-- [Dockerfile:23](../../backend/Dockerfile#L23): stage two switches to `eclipse-temurin:17-jre`, and [line 26](../../backend/Dockerfile#L26) copies only the jar (`COPY --from=build`).
+- [Dockerfile `FROM eclipse-temurin:17-jdk AS build`](../../backend/Dockerfile): stage one uses `eclipse-temurin:17-jdk`, a full JDK, to run Gradle and build the jar.
+- [Dockerfile `FROM eclipse-temurin:17-jre`](../../backend/Dockerfile): stage two switches to `eclipse-temurin:17-jre`, and [`COPY --from=build`](../../backend/Dockerfile) copies only the jar (`COPY --from=build`).
 - The final image has **no** JDK, Gradle or source code (checklist #2: `no-jdk`, no `/src`). Smaller image, less to attack.
 - All four Java services share this one Dockerfile; `ARG SERVICE` picks the subproject. 🤖
 - Same idea for the frontend: [frontend/Dockerfile](../../frontend/Dockerfile) builds the React app with node, then nginx serves the static files. No Node.js at run time. Image size 82.5MB.
 
 ### 2.3 Build context and `.dockerignore`
 - `docker build` first sends a directory (the build context) to Docker; `COPY . .` copies from it. The context here is `backend/`, because delivery depends on `:contracts` and the four services are one Gradle multi-project build.
-- [.dockerignore:2](../../backend/.dockerignore#L2) excludes `.env`. Without it, `COPY . .` would copy the passwords into a build layer. Checklist #11 looked inside the build stage: the host has `backend/.env`, the build stage does not.
+- [.dockerignore `**/.env`](../../backend/.dockerignore) excludes `.env`. Without it, `COPY . .` would copy the passwords into a build layer. Checklist #11 looked inside the build stage: the host has `backend/.env`, the build stage does not.
 
 ### 2.4 BuildKit cache mount
-- [Dockerfile:18](../../backend/Dockerfile#L18) `RUN --mount=type=cache,target=/root/.gradle`: Gradle's downloaded dependencies stay in a cache for the next build, but **never go into an image layer**.
+- [Dockerfile `RUN --mount=type=cache`](../../backend/Dockerfile) `RUN --mount=type=cache,target=/root/.gradle`: Gradle's downloaded dependencies stay in a cache for the next build, but **never go into an image layer**.
 - A trap we hit: compose builds the four services **at the same time**, so four Gradle runs share one cache. Gradle's own file locking talks over localhost ports, which do not cross containers, and the first build failed with `Timeout waiting to connect to the Gradle daemon`. `sharing=locked` makes BuildKit hand the cache to one build at a time.
 
 ### 2.5 Compose: the service name is the host name
-- Containers in one compose project share a network (`shop_default` here) and reach each other by **service name**: store calls bank at `http://bank:8084` ([compose.yml:68](../../backend/compose.yml#L68)).
+- Containers in one compose project share a network (`shop_default` here) and reach each other by **service name**: store calls bank at `http://bank:8084` ([compose.yml `store.environment.BANK_SERVICE_URL`](../../backend/compose.yml)).
 - `localhost` inside a container always means that container. That is the root cause of both bugs in section 1.
-- Port mapping `'5433:5432'` ([compose.yml:26](../../backend/compose.yml#L26)): host port 5433 forwards to the container's 5432. A local PostgreSQL already holds 5432.
+- Port mapping `'5433:5432'` ([compose.yml `postgres.ports`](../../backend/compose.yml)): host port 5433 forwards to the container's 5432. A local PostgreSQL already holds 5432.
 
 ### 2.6 Health checks and start order
-- `healthcheck`: Docker runs a command inside the container on a schedule; success means healthy. The Java services run `curl -fsS http://localhost:8082/actuator/health` ([compose.yml:79](../../backend/compose.yml#L79)).
-- `depends_on: condition: service_healthy` ([compose.yml:74](../../backend/compose.yml#L74)): start the service only after Postgres and RabbitMQ are **actually usable**, not just "the container started".
+- `healthcheck`: Docker runs a command inside the container on a schedule; success means healthy. The Java services run `curl -fsS http://localhost:8082/actuator/health` ([compose.yml `store.healthcheck`](../../backend/compose.yml)).
+- `depends_on: condition: service_healthy` ([compose.yml `store.depends_on`](../../backend/compose.yml)): start the service only after Postgres and RabbitMQ are **actually usable**, not just "the container started".
 - `start_period: 120s`: Spring Boot needs tens of seconds to start; failures in that window don't count.
-- Trap (found in the independent review): the Postgres check was first `pg_isready -U postgres`. Without `-h` it uses the Unix socket. On the first start with an empty volume, the temporary server that runs the init script listens **on the socket only, not on TCP**, so the container was reported healthy before the databases existed. `pg_isready -h 127.0.0.1` ([compose.yml:35](../../backend/compose.yml#L35)) checks the path the other containers actually use. Measured with the init stretched to 20 seconds: before the fix, healthy at 5.3 s while TCP was refused; after, healthy at 25.6 s with bank_db reachable. **A health check should take the same path as the real clients.**
+- Trap (found in the independent review): the Postgres check was first `pg_isready -U postgres`. Without `-h` it uses the Unix socket. On the first start with an empty volume, the temporary server that runs the init script listens **on the socket only, not on TCP**, so the container was reported healthy before the databases existed. `pg_isready -h 127.0.0.1` ([compose.yml `postgres.healthcheck`](../../backend/compose.yml)) checks the path the other containers actually use. Measured with the init stretched to 20 seconds: before the fix, healthy at 5.3 s while TCP was refused; after, healthy at 25.6 s with bank_db reachable. **A health check should take the same path as the real clients.**
 - `docker compose up --wait`: returns only when every container is healthy, and fails if one isn't.
 - Note: compose does **not** restart a container because it is unhealthy. That comes with Kubernetes liveness probes in step 8.
 
 ### 2.7 Spring Boot Actuator health
-- With `spring-boot-starter-actuator` ([bankService/build.gradle:24](../../backend/bankService/build.gradle#L24)) you get `/actuator/health`.
+- With `spring-boot-starter-actuator` ([bankService/build.gradle `spring-boot-starter-actuator`](../../backend/bankService/build.gradle)) you get `/actuator/health`.
 - It does more than return 200: it checks the data source (`db`), RabbitMQ (`rabbit`) and the mail server (`mail`). If one is DOWN, the whole status is DOWN and the HTTP status is 503.
 - Checklist #4: with Postgres stopped, all four services went unhealthy within 73 seconds and `/actuator/health` returned 503. With Postgres back, all recovered within 21 seconds without a restart; the Hikari pool reconnected on its own.
-- The email service turns the `mail` check off ([emailService application.properties:35](../../backend/emailService/src/main/resources/application.properties#L35)). 🤖 Gmail being unreachable is not this container's fault, and restarting it would not help. Counted in health, every Gmail hiccup would get the container killed by Kubernetes.
+- The email service turns the `mail` check off ([emailService `management.health.mail.enabled`](../../backend/emailService/src/main/resources/application.properties)). 🤖 Gmail being unreachable is not this container's fault, and restarting it would not help. Counted in health, every Gmail hiccup would get the container killed by Kubernetes.
 - By default only `health` is exposed over HTTP; endpoints that leak configuration, like `env` and `beans`, are not.
 
 ### 2.8 Database per service
-- One Postgres instance, five databases, each owned by its own login: [01-create-databases.sh:18-22](../../backend/docker/postgres/init/01-create-databases.sh#L18).
+- One Postgres instance, five databases, each owned by its own login: [01-create-databases.sh `CREATE ROLE` / `CREATE DATABASE`](../../backend/docker/postgres/init/01-create-databases.sh).
 - **The key line is 22, `REVOKE CONNECT, TEMPORARY ... FROM PUBLIC`.** Postgres grants `PUBLIC` (every login) CONNECT on every database by default. Without revoking it, bank_user can still open store_db, and the split is only a rename.
 - Checklist #8, using bank's login:
   - bank_db → connects
@@ -87,14 +87,14 @@ An image is the package: the app and everything it needs (JRE, jar). A container
 - Trap: the init script in `/docker-entrypoint-initdb.d/` runs **only when the data volume is empty**. Changing a password or adding a database later needs `docker compose down -v`. That is why tracking_db was created now.
 
 ### 2.9 Environment variables and relaxed binding
-- `application.properties` says `${BANK_DB_PASSWORD}` ([bankService application.properties:8](../../backend/bankService/src/main/resources/application.properties#L8)); the value comes from the environment.
+- `application.properties` says `${BANK_DB_PASSWORD}` ([bankService `spring.datasource.password`](../../backend/bankService/src/main/resources/application.properties)); the value comes from the environment.
 - `${DB_HOST:localhost}`: after the colon is the default. In a container compose sets `DB_HOST=postgres`; run directly on the machine, the default `localhost:5433` applies.
 - **Relaxed binding**: Spring Boot maps the environment variable `BANK_SERVICE_URL` to the property `bank.service.url` (upper case, dots to underscores). So service URLs needed **no config file change**; compose overrides them with environment variables.
-- Each container gets only the variables it needs ([compose.yml:92](../../backend/compose.yml#L92): bank has only its own database password). No `env_file: .env`. 🤖 With `env_file`, every container would see every secret. Checklist #10: the bank container has only `BANK_DB_PASSWORD`.
+- Each container gets only the variables it needs ([compose.yml `bank.environment`](../../backend/compose.yml): bank has only its own database password). No `env_file: .env`. 🤖 With `env_file`, every container would see every secret. Checklist #10: the bank container has only `BANK_DB_PASSWORD`.
 
 ### 2.10 Line endings (CRLF / LF)
 - On Windows with `core.autocrlf=true`, `gradlew` is checked out with CRLF (`\r\n`). Run inside a Linux container it fails with `/bin/sh^M: not found`.
-- Two safeguards: the root [.gitattributes](../../.gitattributes) keeps `gradlew`, `*.sh` and `Dockerfile` LF on future checkouts; [Dockerfile:13](../../backend/Dockerfile#L13) also strips `\r` with `sed`, because files already checked out are not rewritten.
+- Two safeguards: the root [.gitattributes](../../.gitattributes) keeps `gradlew`, `*.sh` and `Dockerfile` LF on future checkouts; [Dockerfile `RUN sed ... gradlew`](../../backend/Dockerfile) also strips `\r` with `sed`, because files already checked out are not rewritten.
 
 ---
 
@@ -132,12 +132,12 @@ An image is the package: the app and everything it needs (JRE, jar). A container
 |---|---|---|
 | 📒 G2 Docker: image vs container | [Dockerfile](../../backend/Dockerfile) | Multi-stage + JRE at run time + `.dockerignore` are exactly the notes' three answers to "how to make images smaller". **Not needed**: distroless or jlink. The Java images are about 540MB, mostly the JRE, and that doesn't matter locally; the Go service (step 7) is where a tiny image is worth showing |
 | 📒 H1 secrets | [compose.yml](../../backend/compose.yml), [.dockerignore](../../backend/.dockerignore) | Passwords live only in `.env` (git-ignored) and in run-time environment variables; none in images, build layers or the repo (checklist #11, #20). Each container gets only its own. **Not good enough yet**: `docker inspect` shows environment variables; production should use Kubernetes Secrets or Key Vault (step 8) |
-| 📒 D7 Actuator / health | [compose.yml:79](../../backend/compose.yml#L79) | Health checks the database and RabbitMQ, which is more honest than a hand-written endpoint that returns 200. **Not needed**: metrics or Prometheus endpoints; nobody reads them yet |
+| 📒 D7 Actuator / health | [compose.yml `store.healthcheck`](../../backend/compose.yml) | Health checks the database and RabbitMQ, which is more honest than a hand-written endpoint that returns 200. **Not needed**: metrics or Prometheus endpoints; nobody reads them yet |
 | 📒 E6 schema changes | `ddl-auto=update` (unchanged) | Still Hibernate auto-DDL, no Flyway. After the split every database starts empty and `update` creates all tables (checklist #7). **When to switch**: real data, rollbacks, several people changing the schema |
-| 📒 F1 monolith vs microservices | [01-create-databases.sh:22](../../backend/docker/postgres/init/01-create-databases.sh#L22) | "Each service owns its data" becomes real here: the connection rights enforce it |
+| 📒 F1 monolith vs microservices | [01-create-databases.sh `REVOKE CONNECT`](../../backend/docker/postgres/init/01-create-databases.sh) | "Each service owns its data" becomes real here: the connection rights enforce it |
 | ➕ Database privileges: `REVOKE CONNECT FROM PUBLIC` | same | By default any login can connect to any database. Split without revoking = not split |
 | ➕ Init scripts run once | same | Only on an empty volume; changes need `down -v` |
-| ➕ Container networking: `localhost` is the container | [OutboxProcessor.java:291](../../backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java#L291) | Services talk by service name. A hard-coded `localhost` URL will break in a container |
+| ➕ Container networking: `localhost` is the container | [OutboxProcessor#processPaymentSuccess (as of `413c6f2`)](https://github.com/LiChenyang-GZ/microservices-ecommerce-platform/blob/413c6f2/backend/storeService/src/main/java/comp5348/storeservice/scheduler/OutboxProcessor.java#L291) | Services talk by service name. A hard-coded `localhost` URL will break in a container |
 | ➕ Spring relaxed binding | `BANK_SERVICE_URL` in compose | Environment variables map onto properties, so deploys need no config file edits |
 | ➕ Hikari connection pool | checklist #9: 10 connections per database | Default pool size is 10, and it reconnects after the database comes back (checklist #4). **Not needed**: a bigger pool; concurrency here is low |
 

@@ -12,7 +12,7 @@
 - `service/events/EventOutboxPublisher` 每秒把没发的行按 id 顺序发出去，key = orderId。
   每一轮先拿 `pg_try_advisory_xact_lock(5348)`，同一时间只有一个实例在发。
 - 至少一次：发出去了但没来得及标记（崩溃）的行，会用同一个 `eventId` 再发一次。消费者自己去重。
-- 设计和理由：[docs/learning/06-kafka-delivery-events.zh-CN.md](../../docs/learning/06-kafka-delivery-events.zh-CN.md)。
+- 设计和理由：[docs/learning/06-kafka-delivery-events.zh-CN.md](../../docs/learning/06-kafka-delivery-events.zh-CN.md)；消费 `order-events` 和取消标记：[docs/learning/07-kafka-order-events.zh-CN.md](../../docs/learning/07-kafka-order-events.zh-CN.md)。
 
 ## 配置
 
