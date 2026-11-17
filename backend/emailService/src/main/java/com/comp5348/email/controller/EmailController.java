@@ -5,6 +5,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * email's HTTP side. Public: send-verification and verify-code (the registration page). Service token
+ * (ServiceTokenFilter): send-password-reset and verify-password-reset, called only by store's AccountService.
+ * Notification emails do not come through here: they go over RabbitMQ (email_queue → EmailQueueConsumer).
+ * The old send-delivery-update / send-order-cancelled / send-order-failed / send-refund-success and
+ * check-verified had no callers and were removed (Christy's decision 3, 2026-11-17).
+ */
 @RestController
 @RequestMapping("/api/email")
 @CrossOrigin(origins = "http://localhost:3000")
@@ -27,63 +34,6 @@ public class EmailController {
     }
 
     /**
-     * Send delivery status update notification
-     */
-    @PostMapping("/send-delivery-update")
-    public ResponseEntity<?> sendDeliveryUpdate(@RequestBody DeliveryUpdateRequest request) {
-        try {
-            emailService.sendDeliveryStatusEmail(
-                    request.email,
-                    request.orderId,
-                    request.deliveryId,
-                    request.status
-            );
-            return ResponseEntity.ok(new SimpleResponse(true, "Notification email has been sent"));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new SimpleResponse(false, "Sending failed: " + e.getMessage()));
-        }
-    }
-
-    /**
-     * Send order cancellation notification
-     */
-    @PostMapping("/send-order-cancelled")
-    public ResponseEntity<?> sendOrderCancelled(@RequestBody OrderNotifyRequest request) {
-        try {
-            emailService.sendOrderCancelledEmail(request.email, request.orderId, request.reason);
-            return ResponseEntity.ok(new SimpleResponse(true, "Cancellation email has been sent"));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new SimpleResponse(false, "Sending failed: " + e.getMessage()));
-        }
-    }
-
-    /**
-     * Send order processing failure notification
-     */
-    @PostMapping("/send-order-failed")
-    public ResponseEntity<?> sendOrderFailed(@RequestBody OrderNotifyRequest request) {
-        try {
-            emailService.sendOrderFailedEmail(request.email, request.orderId, request.reason);
-            return ResponseEntity.ok(new SimpleResponse(true, "Failure notification email has been sent"));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new SimpleResponse(false, "Sending failed: " + e.getMessage()));
-        }
-    }
-
-    /**
-     * Send refund success notification
-     */
-    @PostMapping("/send-refund-success")
-    public ResponseEntity<?> sendRefundSuccess(@RequestBody RefundNotifyRequest request) {
-        try {
-            emailService.sendRefundSuccessEmail(request.email, request.orderId, request.refundTxnId);
-            return ResponseEntity.ok(new SimpleResponse(true, "Refund success email has been sent"));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new SimpleResponse(false, "Sending failed: " + e.getMessage()));
-        }
-    }
-
-    /**
      * Verify verification code
      */
     @PostMapping("/verify-code")
@@ -97,19 +47,6 @@ public class EmailController {
             }
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(new VerifyCodeResponse(false, "Verification failed: " + e.getMessage()));
-        }
-    }
-
-    /**
-     * Check if email is verified
-     */
-    @GetMapping("/check-verified/{email}")
-    public ResponseEntity<?> checkEmailVerified(@PathVariable String email) {
-        try {
-            boolean isVerified = emailService.isEmailVerified(email);
-            return ResponseEntity.ok(new EmailVerifiedResponse(isVerified));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new EmailVerifiedResponse(false));
         }
     }
 
@@ -173,14 +110,6 @@ public class EmailController {
         }
     }
 
-    public static class EmailVerifiedResponse {
-        public boolean verified;
-
-        public EmailVerifiedResponse(boolean verified) {
-            this.verified = verified;
-        }
-    }
-
     public static class SendPasswordResetRequest {
         public String email;
     }
@@ -208,35 +137,5 @@ public class EmailController {
             this.success = success;
             this.message = message;
         }
-    }
-
-    // =============== Delivery Update DTOs ===============
-    public static class DeliveryUpdateRequest {
-        public String email;
-        public String orderId;
-        public Long deliveryId;
-        public String status;
-    }
-
-    public static class SimpleResponse {
-        public boolean success;
-        public String message;
-
-        public SimpleResponse(boolean success, String message) {
-            this.success = success;
-            this.message = message;
-        }
-    }
-
-    public static class OrderNotifyRequest {
-        public String email;
-        public String orderId;
-        public String reason;
-    }
-
-    public static class RefundNotifyRequest {
-        public String email;
-        public String orderId;
-        public String refundTxnId;
     }
 }
