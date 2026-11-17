@@ -2,7 +2,7 @@
 
 **English** | [中文](15-gateway-api-allowlist-entry.zh-CN.md)
 
-**Status:** Accepted (replaces "Ingress" in the first version of ADR-13)
+**Status:** Accepted (replaces "Ingress" in the first version of ADR-13), amended by 23
 
 ## Context
 The first plan used an Ingress. By the time the Kubernetes step was built, ingress-nginx had had no releases or security fixes since March 2026, and kind's documentation pointed to Gateway API instead. Separately, the first version of the routes forwarded whole prefixes (`/api/store/*`, `/api/delivery/*`) and added a 404 rule for each internal path someone remembered. A review found two it missed: delivery's token-free `cancel-by-order` (anyone could cancel a delivery and so trigger a refund) and store's `payment-success` (an order marked PAID without bank).
@@ -19,6 +19,7 @@ The first plan used an Ingress. By the time the Kubernetes step was built, ingre
 - Two lists must be kept in step (checked by the script).
 - Envoy Gateway is one more controller to install (`up.ps1` does it).
 - An occasional 503 through the entry (finding I2) is not yet explained.
+- The entry only keeps outsiders out. Anything already inside the network bypasses it, so since ADR-23 the services also check who is calling.
 
 ## In the code
 - [gateway.yaml](../../k8s/gateway/gateway.yaml), [routes.yaml](../../k8s/gateway/routes.yaml), [nginx.conf](../../frontend/nginx.conf), [check-entry.ps1](../../k8s/scripts/check-entry.ps1)

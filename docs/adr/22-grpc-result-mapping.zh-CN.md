@@ -2,7 +2,7 @@
 
 [English](22-grpc-result-mapping.md) | **中文**
 
-**状态：** 已采纳
+**状态：** 已采纳，由 23 补充
 
 ## 背景
 ADR-05 要求每次调 bank 只能落到三种结果之一：SUCCEEDED、REJECTED（bank 明确说不行）、UNKNOWN（钱可能动了也可能没动）。改成 gRPC（ADR-10）以后，出现了设计没覆盖的情况：状态 OK 但没设 outcome；金额字符串不合法；bank 重启时，gRPC 的重连退避可能让 5 次快速重试一下子全部失败。
@@ -17,6 +17,7 @@ ADR-05 要求每次调 bank 只能落到三种结果之一：SUCCEEDED、REJECTE
 ## 代价与影响
 - 只有 bank 明确说"不行"才会是 REJECTED；所有拿不准的都落到 UNKNOWN。对钱是安全的，代价是走更慢、带告警的那条路（ADR-05）。
 - bank 要是忘了设 outcome，会表现为告警，而不是一堆错标成 FAILED 的付款。
+- ADR-23 补了一种情况：`UNAUTHENTICATED`（bank 不认 store 的服务密钥）和别的错误一样仍是 UNKNOWN，另外打一行 `ALERT bank_auth_failed`，因为密钥错了不会自己好。
 
 ## 代码在哪
 - store [BankAdapter.java](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java)、[BankCallResult.java](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankCallResult.java)；bank [BankGrpcService.java](../../backend/bankService/src/main/java/com/comp5348/bank/grpc/BankGrpcService.java)
