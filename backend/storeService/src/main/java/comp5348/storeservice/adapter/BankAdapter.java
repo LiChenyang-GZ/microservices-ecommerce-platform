@@ -21,6 +21,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.stereotype.Component;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -180,6 +181,17 @@ public class BankAdapter {
         }
     }
 
+    /**
+     * The REST half of the same alert (scenario C3b): bank answered 401 to open-account or account-by-owner.
+     * The caller still gets null, as before. Without this line the only trace is a WARN "create bank account
+     * failed", and the user later sees "no linked bank account" at Pay Now. Names the operation, never the email:
+     * alert lines are forwarded to other systems, the email is personal data.
+     */
+    private static void alertRestAuthFailed(String operation) {
+        logger.error("ALERT bank_auth_failed op={} (bank refused store's service token; check bank.service-token)",
+                operation);
+    }
+
     /** Decimal string for bank.proto: toPlainString gives "100", never "1E+2"; the scale stays ("129.90"). */
     private static String decimal(BigDecimal amount) {
         return amount == null ? "" : amount.toPlainString();
@@ -208,6 +220,8 @@ public class BankAdapter {
                 Object acct = resp.getBody().get("accountNumber");
                 if (acct != null) return String.valueOf(acct);
             }
+        } catch (HttpClientErrorException.Unauthorized e) {
+            alertRestAuthFailed("create-account");
         } catch (Exception e) {
             logger.warn("Create bank account failed for {}: {}", ownerEmail, e.getMessage());
         }
@@ -229,6 +243,8 @@ public class BankAdapter {
                     return String.valueOf(acct);
                 }
             }
+        } catch (HttpClientErrorException.Unauthorized e) {
+            alertRestAuthFailed("account-by-owner");
         } catch (Exception e) {
             logger.warn("Get bank account by email failed for {}: {}", ownerEmail, e.getMessage());
         }

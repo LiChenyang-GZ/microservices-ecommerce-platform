@@ -165,7 +165,6 @@ services:
       DB_HOST: postgres
       DB_PORT: '5432'
       BANK_DB_PASSWORD: ${BANK_DB_PASSWORD}
-      STORE_SERVICE_URL: http://store:8082
       BANK_GRPC_PORT: '9090'
       # Callers of gRPC and REST must send this (ADR-23). bank refuses to start without it.
       BANK_SERVICE_TOKEN: ${BANK_SERVICE_TOKEN:?set BANK_SERVICE_TOKEN in backend/.env}
@@ -227,7 +226,6 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
       MAIL_USERNAME: ${MAIL_USERNAME:-}
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
-      STORE_SERVICE_URL: http://store:8082
       # Callers of the password-reset endpoints must send this (ADR-23). email refuses to start without it.
       EMAIL_SERVICE_TOKEN: ${EMAIL_SERVICE_TOKEN:?set EMAIL_SERVICE_TOKEN in backend/.env}
     depends_on:

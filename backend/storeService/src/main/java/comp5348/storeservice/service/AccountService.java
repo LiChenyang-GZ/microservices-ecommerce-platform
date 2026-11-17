@@ -26,6 +26,7 @@ import java.util.Optional;
 public class AccountService {
 
     private static final Logger logger = LoggerFactory.getLogger(AccountService.class);
+    private static final int EMAIL_TIMEOUT_MS = 5_000;
 
     private final AccountRepository accountRepository;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
@@ -42,8 +43,15 @@ public class AccountService {
         ServiceTokens.require("email.service-token", "EMAIL_SERVICE_TOKEN", "email", emailServiceToken);
         // SimpleClientHttpRequestFactory: plain HTTP/1.1, same as the old `new RestTemplate()` and the adapters.
         // The builder's default (JDK HttpClient) first tries an HTTP/2 upgrade, which some servers reset.
+        // 5-second connect / read timeouts, as in the adapters (scenario E1b): without them a hanging email holds
+        // one Tomcat thread per password-reset request until email answers.
         this.emailRestTemplate = restTemplateBuilder
-                .requestFactory(SimpleClientHttpRequestFactory.class)
+                .requestFactory(() -> {
+                    SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+                    factory.setConnectTimeout(EMAIL_TIMEOUT_MS);
+                    factory.setReadTimeout(EMAIL_TIMEOUT_MS);
+                    return factory;
+                })
                 .defaultHeader(ServiceTokens.HEADER, emailServiceToken)
                 .build();
     }
