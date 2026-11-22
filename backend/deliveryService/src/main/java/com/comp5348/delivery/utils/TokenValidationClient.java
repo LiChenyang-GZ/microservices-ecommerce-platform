@@ -88,6 +88,8 @@ public class TokenValidationClient {
         private Long userId;
         private String email;
         private String message;
+        /** USER or ADMIN from store (auth PR 3). A reply without it (older store) counts as USER */
+        private String role;
         
         public TokenValidationResult() {
         }
@@ -132,6 +134,19 @@ public class TokenValidationClient {
             this.email = email;
         }
         
+        public String getRole() {
+            return role;
+        }
+
+        public void setRole(String role) {
+            this.role = role;
+        }
+
+        /** Only an explicit ADMIN is an admin */
+        public boolean isAdmin() {
+            return "ADMIN".equals(role);
+        }
+
         public String getMessage() {
             return message;
         }

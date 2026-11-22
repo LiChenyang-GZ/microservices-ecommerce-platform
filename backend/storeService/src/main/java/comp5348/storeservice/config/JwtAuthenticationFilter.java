@@ -1,6 +1,9 @@
 package comp5348.storeservice.config;
 
+import comp5348.storeservice.model.Role;
 import comp5348.storeservice.utils.JwtUtil;
+import io.jsonwebtoken.Claims;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -13,7 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
-import java.util.ArrayList;
+import java.util.List;
 
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -31,18 +34,23 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 && SecurityContextHolder.getContext().getAuthentication() == null) {
             String jwt = authHeader.substring(7);
             String email = null;
+            Role role = Role.USER;
             try {
                 // Parsing checks the signature and the expiry, once (review 44 🟡8: a second parse outside this
                 // try could throw for a token that expired in between, and the request got 500 instead of 401)
-                email = jwtUtil.extractEmail(jwt);
+                Claims claims = jwtUtil.parseClaims(jwt);
+                email = claims.getSubject();
+                // No role claim (signed before auth PR 3) -> USER, never ADMIN
+                role = Role.of(claims.get("role"));
             } catch (Exception e) {
                 // Expired or forged: stay anonymous. SecurityConfig answers 401 on protected paths; public ones
                 // still work. DEBUG, not ERROR: a browser holding an old token is normal.
                 logger.debug("Ignoring an invalid JWT: " + e.getMessage());
             }
             if (email != null) {
+                // ROLE_ADMIN / ROLE_USER: SecurityConfig's hasRole("ADMIN") reads this
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                        email, null, new ArrayList<>());
+                        email, null, List.of(new SimpleGrantedAuthority("ROLE_" + role.name())));
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authToken);
 

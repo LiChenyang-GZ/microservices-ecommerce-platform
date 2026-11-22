@@ -21,7 +21,8 @@ public class SecurityConfig {
 
     /**
      * Everything needs a valid user JWT except the list below (auth PR 2). No token, or a bad or expired one,
-     * on any other path → 401. Which order a logged-in user may touch is checked in the services, not here.
+     * on any other path → 401. Admin paths need the ADMIN role from the token (auth PR 3), otherwise 403.
+     * Which order a logged-in user may touch is checked in the services, not here.
      *
      * A bad token does not fail the request by itself (JwtAuthenticationFilter just leaves it anonymous):
      * a public page still works when the browser holds an expired token, and a protected one still gets 401.
@@ -33,6 +34,15 @@ public class SecurityConfig {
             .cors(cors -> cors.disable())  // Disable Spring Security CORS, use WebConfig configuration
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(authz -> authz
+                // admin only (auth PR 3). First, so no broader rule below can open them.
+                // Refunds: decision 4, only an admin refunds; a user gets money back by cancelling before pickup
+                .requestMatchers(HttpMethod.POST, "/api/payments/*/refund").hasRole("ADMIN")
+                // the admin dashboard and everything that reads stock records or changes stock, warehouses, products, prices
+                .requestMatchers(HttpMethod.GET, "/api/orders").hasRole("ADMIN")
+                .requestMatchers("/api/warehouses", "/api/warehouses/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.GET, "/api/products/*/inventory-records").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.POST, "/api/products", "/api/products/**").hasRole("ADMIN")
+                .requestMatchers(HttpMethod.PUT, "/api/products/**").hasRole("ADMIN")
                 // sign-up, log-in, email verification, password reset
                 .requestMatchers(HttpMethod.POST, "/api/user", "/api/user/login", "/api/user/activate",
                     "/api/user/forgot-password", "/api/user/reset-password").permitAll()

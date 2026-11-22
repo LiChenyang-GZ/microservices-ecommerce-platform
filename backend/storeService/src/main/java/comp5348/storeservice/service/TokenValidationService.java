@@ -35,7 +35,7 @@ public class TokenValidationService {
             String email = jwtUtil.extractEmail(token);
             Long userId = jwtUtil.extractUserId(token);
 
-            return TokenValidationResponse.success(userId, email);
+            return TokenValidationResponse.success(userId, email, jwtUtil.extractRole(token).name());
         } catch (Exception e) {
             return TokenValidationResponse.failure("Token validation failed: " + e.getMessage());
         }

@@ -58,7 +58,7 @@ public abstract class StoreHttpTest extends StoreIntegrationTest {
 
     /** "Bearer <token>"：和登录接口签的一样（JwtUtil#generateToken），有效期 24 小时 */
     protected String bearer(Account account) {
-        return "Bearer " + jwtUtil.generateToken(account.getId(), account.getEmail());
+        return "Bearer " + jwtUtil.generateToken(account.getId(), account.getEmail(), account.getRole());
     }
 
     /** 同一个用户、同一把密钥签的，但一小时前就过期了 */
