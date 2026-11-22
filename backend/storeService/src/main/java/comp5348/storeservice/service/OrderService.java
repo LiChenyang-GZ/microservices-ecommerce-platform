@@ -18,6 +18,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import jakarta.persistence.EntityManager;
+import jakarta.persistence.PersistenceContext;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.math.BigDecimal;
@@ -27,6 +29,9 @@ import java.util.stream.Collectors;
 @Service
 @Transactional
 public class OrderService {
+
+    @PersistenceContext
+    private EntityManager entityManager;
 
     private static final Logger logger = LoggerFactory.getLogger(OrderService.class);
 
@@ -219,6 +224,10 @@ public class OrderService {
         // The lock is held while we ask delivery (at most its 5 s timeout); accepted, see C8.
         Order order = orderRepository.findByIdForUpdate(orderId)
                 .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
+        // The lock query hands back the instance already in this transaction if something read the order
+        // earlier (OrderProductService#cancelOwnOrder checks the owner first), without its current values.
+        // Re-read it now that we hold the lock, so the checks below see what is committed (review 44 🟠1).
+        entityManager.refresh(order);
 
         if (!CANCELLABLE.contains(order.getStatus())) {
             throw new RuntimeException("Cannot cancel order with status: " + order.getStatus());

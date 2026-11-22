@@ -219,11 +219,21 @@ public class OrderProductService {
     /**
      * The user cancels one of their own orders (POST /api/store/orders/{id}/cancel). Checked before anything
      * else, so a stranger's request never locks the order, asks delivery, or writes a refund.
-     * (The owner never changes, so checking before OrderService#cancelOrder takes the row lock is safe.)
+     * The owner never changes, so checking before the row lock is safe; the status does change, which is why
+     * OrderService#cancelOrder re-reads the order once it holds the lock (review 44 🟠1).
      */
     public OrderDTO cancelOwnOrder(Long orderId, String userEmail) {
         ownOrder(orderId, userEmail);
         return orderService.cancelOrder(orderId);
+    }
+
+    /**
+     * The user asks for a refund of their own order (POST /api/payments/{orderId}/refund). Someone else's order
+     * answers 404 like every other order endpoint (review 44 🟠2, scenario A2). PR 3 makes refunds admin-only.
+     */
+    public Payment requestRefundForOwnOrder(Long orderId, String userEmail, String reason) {
+        ownOrder(orderId, userEmail);
+        return paymentService.requestRefund(orderId, reason);
     }
 
     /**

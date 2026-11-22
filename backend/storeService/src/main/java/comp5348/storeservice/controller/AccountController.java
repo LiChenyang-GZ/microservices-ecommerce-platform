@@ -83,24 +83,6 @@ public class AccountController {
     }
 
     /**
-     * Check if email exists
-     */
-    @PostMapping("/check-email")
-    public ResponseEntity<EmailCheckResponse> checkEmailExists(@RequestBody EmailCheckRequest request) {
-        boolean exists = accountService.emailExists(request.email);
-        return ResponseEntity.ok(new EmailCheckResponse(exists));
-    }
-
-    /**
-     * Check if email is verified
-     */
-    @GetMapping("/check-verified/{email}")
-    public ResponseEntity<?> checkEmailVerified(@PathVariable String email) {
-        boolean verified = accountService.isEmailVerified(email);
-        return ResponseEntity.ok(new EmailVerifiedResponse(verified));
-    }
-
-    /**
      * Send forgot password email
      */
     @PostMapping("/forgot-password")
@@ -198,26 +180,6 @@ public class AccountController {
             this.token = token;
             this.userId = userId;
             this.email = email;
-        }
-    }
-
-    public static class EmailCheckRequest {
-        public String email;
-    }
-
-    public static class EmailCheckResponse {
-        public boolean exists;
-        
-        public EmailCheckResponse(boolean exists) {
-            this.exists = exists;
-        }
-    }
-
-    public static class EmailVerifiedResponse {
-        public boolean verified;
-
-        public EmailVerifiedResponse(boolean verified) {
-            this.verified = verified;
         }
     }
 

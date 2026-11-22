@@ -35,12 +35,12 @@ public class SecurityConfig {
             .authorizeHttpRequests(authz -> authz
                 // sign-up, log-in, email verification, password reset
                 .requestMatchers(HttpMethod.POST, "/api/user", "/api/user/login", "/api/user/activate",
-                    "/api/user/forgot-password", "/api/user/reset-password", "/api/user/check-email").permitAll()
-                .requestMatchers(HttpMethod.GET, "/api/user/check-verified/**").permitAll()
+                    "/api/user/forgot-password", "/api/user/reset-password").permitAll()
                 // delivery (TokenValidationClient) and tracking (auth.go) check user tokens here without logging in
                 .requestMatchers(HttpMethod.POST, "/api/user/validate-token").permitAll()
-                // the catalogue
-                .requestMatchers(HttpMethod.GET, "/api/products/**").permitAll()
+                // the catalogue: list, available, one product, search by name or price. Not /api/products/**:
+                // that also opened /api/products/{id}/inventory-records, which shows orders' stock movements
+                .requestMatchers(HttpMethod.GET, "/api/products", "/api/products/*", "/api/products/search/price").permitAll()
                 // probes
                 .requestMatchers("/actuator/health/**", "/actuator/health").permitAll()
                 // Spring's error page, so a 400/404 from a public endpoint is not turned into 401

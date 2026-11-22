@@ -121,16 +121,6 @@ public class WarehouseController {
     }
 
     
-    /**
-     * Get inventory audit logs for an order
-     */
-    @GetMapping("/audit-logs/order/{orderId}")
-    public ResponseEntity<WarehouseResponse> getAuditLogsByOrder(@PathVariable Long orderId) {
-        logger.info("Received request to get audit logs for order: {}", orderId);
-        List<InventoryAuditLogDTO> auditLogs = warehouseService.getAuditLogsByOrderId(orderId);
-        WarehouseResponse response = WarehouseResponse.withData(auditLogs, "Audit logs retrieved successfully", ResponseCode.W7.getResponseCode());
-        return ResponseEntity.ok(response);
-    }
     
     /**
      * Get inventory audit logs for a product
@@ -179,17 +169,6 @@ public class WarehouseController {
         return ResponseEntity.ok(response);
     }
     
-    /**
-     * Admin: Get OUT transaction logs for a specific order
-     * Shows which products left the warehouse for a specific order
-     */
-    @GetMapping("/admin/out-transactions/order/{orderId}")
-    public ResponseEntity<WarehouseResponse> getOutTransactionsByOrder(@PathVariable Long orderId) {
-        logger.info("Received admin request to get OUT transaction logs for order: {}", orderId);
-        List<InventoryAuditLogDTO> outLogs = warehouseService.getOutTransactionLogsByOrderId(orderId);
-        WarehouseResponse response = WarehouseResponse.withData(outLogs, "OUT transaction logs retrieved successfully", ResponseCode.W7.getResponseCode());
-        return ResponseEntity.ok(response);
-    }
     
     /**
      * Admin: Get OUT transaction logs for a specific product
