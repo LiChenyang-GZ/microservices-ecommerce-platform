@@ -3,11 +3,22 @@ import axios from 'axios';
 // Relative: goes through the gateway (K8s) or nginx (compose) to store's /api.
 const API_BASE_URL = '/api/store';
 
+// Since auth PR 2 these store endpoints need the login token (the admin role check comes in PR 3).
+// Its own axios instance with the same header the rest of the app sends (services/api.js).
+const adminApi = axios.create();
+adminApi.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 const adminService = {
   // Order Module - Get all orders
   getAllOrders: async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/orders`);
+      const response = await adminApi.get(`${API_BASE_URL}/orders`);
       return response.data;
     } catch (error) {
       throw error;
@@ -17,7 +28,7 @@ const adminService = {
   // Product Module - Get all products
   getAllProducts: async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/products`);
+      const response = await adminApi.get(`${API_BASE_URL}/products`);
       return response.data;
     } catch (error) {
       throw error;
@@ -27,7 +38,7 @@ const adminService = {
   // Warehouse Module - Get all warehouses
   getAllWarehouses: async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/warehouses`);
+      const response = await adminApi.get(`${API_BASE_URL}/warehouses`);
       return response.data;
     } catch (error) {
       throw error;
@@ -37,7 +48,7 @@ const adminService = {
   // Inventory Audit Report - Get all OUT transactions
   getAllOutTransactions: async () => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/warehouses/audit-logs/out-transactions`);
+      const response = await adminApi.get(`${API_BASE_URL}/warehouses/audit-logs/out-transactions`);
       return response.data;
     } catch (error) {
       throw error;

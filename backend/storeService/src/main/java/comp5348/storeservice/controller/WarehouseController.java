@@ -120,56 +120,7 @@ public class WarehouseController {
         }
     }
 
-    @GetMapping("/available/{productId}/{quantity}")
-    public ResponseEntity<WarehouseResponse> getAvailableWarehouse(@PathVariable long productId,
-                                                                   @PathVariable int quantity) {
-        // 1. Call Service method
-        WarehouseDTO serviceResponse = warehouseService.getAndUpdateAvailableWarehouse(productId, quantity, null);
-
-        // 2. Handle insufficient stock situation (service returns null)
-        if (serviceResponse == null) {
-            // Create a failure response indicating "insufficient stock"
-            WarehouseResponse failureResponse = new WarehouseResponse(
-                    ResponseCode.W8.getMessage(), ResponseCode.W8.getResponseCode());
-            return ResponseEntity.ok(failureResponse);
-        }
-
-        // 3. [Core modification] Unpack data returned by Service and build final success response
-
-        // Create an empty, successful WarehouseResponse object
-        WarehouseResponse successResponse = new WarehouseResponse(
-                ResponseCode.W7.getMessage(), ResponseCode.W7.getResponseCode());
-
-        // Extract data from serviceResponse and populate into final successResponse
-        successResponse.setWarehouses(serviceResponse.getWarehouses()); // Set warehouse list
-        successResponse.setInventoryTransactionIds(serviceResponse.getInventoryTransactionIds()); // Set [key] transaction ID list
-
-        // 4. Return success response with populated data
-        return ResponseEntity.ok(successResponse);
-    }
-
-    @PutMapping("/unhold")
-    public ResponseEntity<WarehouseResponse> unholdProduct(@RequestBody UnholdProductRequest request) {
-        boolean result = warehouseService.unholdProduct(request);
-        if (result) {
-            return ResponseEntity.ok(new WarehouseResponse(
-                    ResponseCode.W9.getMessage(), ResponseCode.W9.getResponseCode()));
-        }
-        WarehouseResponse response = new WarehouseResponse(
-                ResponseCode.W10.getMessage(), ResponseCode.W10.getResponseCode());
-        return ResponseEntity.ok(response);
-    }
     
-    /**
-     * Get inventory audit logs for an order
-     */
-    @GetMapping("/audit-logs/order/{orderId}")
-    public ResponseEntity<WarehouseResponse> getAuditLogsByOrder(@PathVariable Long orderId) {
-        logger.info("Received request to get audit logs for order: {}", orderId);
-        List<InventoryAuditLogDTO> auditLogs = warehouseService.getAuditLogsByOrderId(orderId);
-        WarehouseResponse response = WarehouseResponse.withData(auditLogs, "Audit logs retrieved successfully", ResponseCode.W7.getResponseCode());
-        return ResponseEntity.ok(response);
-    }
     
     /**
      * Get inventory audit logs for a product
@@ -218,17 +169,6 @@ public class WarehouseController {
         return ResponseEntity.ok(response);
     }
     
-    /**
-     * Admin: Get OUT transaction logs for a specific order
-     * Shows which products left the warehouse for a specific order
-     */
-    @GetMapping("/admin/out-transactions/order/{orderId}")
-    public ResponseEntity<WarehouseResponse> getOutTransactionsByOrder(@PathVariable Long orderId) {
-        logger.info("Received admin request to get OUT transaction logs for order: {}", orderId);
-        List<InventoryAuditLogDTO> outLogs = warehouseService.getOutTransactionLogsByOrderId(orderId);
-        WarehouseResponse response = WarehouseResponse.withData(outLogs, "OUT transaction logs retrieved successfully", ResponseCode.W7.getResponseCode());
-        return ResponseEntity.ok(response);
-    }
     
     /**
      * Admin: Get OUT transaction logs for a specific product

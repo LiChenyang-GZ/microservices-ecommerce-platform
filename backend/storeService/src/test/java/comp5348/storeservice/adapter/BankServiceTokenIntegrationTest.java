@@ -75,7 +75,8 @@ class BankServiceTokenIntegrationTest extends StoreIntegrationTest {
     /** REST 按邮箱查账号：带 X-Service-Token 头。现在：没带。 */
     @Test
     void getAccountByOwnerEmail_carriesTheServiceToken() {
-        String path = "/api/bank/account/by-owner/owner@test.local";
+        // 鉴权 PR ② 审查 🟡3 之后邮箱整段严格编码，@ 在线上是 %40（bank 的 Spring 解码回 @）
+        String path = "/api/bank/account/by-owner/owner%40test.local";
         FAKE_BANK.stubFor(get(urlEqualTo(path))
                 .willReturn(okJson("{\"success\":true,\"accountNumber\":\"ACC-OWNER\"}")));
 

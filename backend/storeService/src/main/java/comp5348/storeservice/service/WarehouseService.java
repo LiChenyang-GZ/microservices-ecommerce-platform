@@ -486,14 +486,6 @@ public class WarehouseService {
         }
     }
     
-    /**
-     * Query audit logs by order ID
-     */
-    @Transactional(readOnly = true)
-    public List<InventoryAuditLogDTO> getAuditLogsByOrderId(Long orderId) {
-        List<InventoryAuditLog> logs = auditLogRepository.findByOrderId(orderId);
-        return logs.stream().map(InventoryAuditLogDTO::new).collect(Collectors.toList());
-    }
     
     /**
      * Query audit logs by product ID
@@ -532,14 +524,6 @@ public class WarehouseService {
         return logs.stream().map(InventoryAuditLogDTO::new).collect(Collectors.toList());
     }
     
-    /**
-     * Query OUT operation audit logs by order ID (for admin dashboard)
-     */
-    @Transactional(readOnly = true)
-    public List<InventoryAuditLogDTO> getOutTransactionLogsByOrderId(Long orderId) {
-        List<InventoryAuditLog> logs = auditLogRepository.findByOrderIdAndOperationType(orderId, "OUT");
-        return logs.stream().map(InventoryAuditLogDTO::new).collect(Collectors.toList());
-    }
     
     /**
      * Query OUT operation audit logs by product ID (for admin dashboard)

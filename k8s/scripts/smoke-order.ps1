@@ -21,6 +21,8 @@ Invoke-RestMethod -Method Post "$store/user/activate" -ContentType 'application/
     -Body (@{ email = $email } | ConvertTo-Json) | Out-Null
 $login = Invoke-RestMethod -Method Post "$store/user/login" -ContentType 'application/json' `
     -Body (@{ email = $email; password = $password } | ConvertTo-Json)
+# Since auth PR 2 every order call needs the login token; the order belongs to whoever the token says
+$auth = @{ Authorization = "Bearer $($login.token)" }
 $bankAccount = Sql 'store_db' "select bank_account_number from account where email = '$email'"
 "1. user $($login.userId) logged in, bank account $bankAccount"
 
@@ -29,7 +31,7 @@ $bankAccount = Sql 'store_db' "select bank_account_number from account where ema
 $name = Sql 'store_db' "select p.name from products p join warehouse_products w on w.product_id = p.id group by p.id having sum(w.quantity) > 0 order by p.price limit 1"
 $product = (Invoke-RestMethod "$store/products").products | Where-Object name -eq $name
 $balanceBefore = [decimal](Sql 'bank_db' "select balance from bank_accounts where account_number = '$bankAccount'")
-$order = (Invoke-RestMethod -Method Post "$store/store/orders/create-with-payment" -ContentType 'application/json' `
+$order = (Invoke-RestMethod -Method Post "$store/store/orders/create-with-payment" -Headers $auth -ContentType 'application/json' `
     -Body (@{ userId = $login.userId; orderItems = @(@{ productId = $product.id; quantity = 1 }) } | ConvertTo-Json -Depth 3)).order
 "2. order $($order.id) placed, status $($order.status), balance before $balanceBefore"
 
@@ -38,7 +40,7 @@ $seen = @()
 $deadline = (Get-Date).AddMinutes(3)
 do {
     Start-Sleep -Seconds 5
-    $status = (Invoke-RestMethod "$store/store/orders/$($order.id)/with-payment").order.status
+    $status = (Invoke-RestMethod "$store/store/orders/$($order.id)/with-payment" -Headers $auth).order.status
     if ($seen[-1] -ne $status) { $seen += $status; "   status -> $status" }
 } until ($status -in 'IN_TRANSIT', 'DELIVERED', 'CANCELLED', 'CANCELLED_SYSTEM' -or (Get-Date) -gt $deadline)
 

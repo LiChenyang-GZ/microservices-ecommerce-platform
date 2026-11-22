@@ -233,7 +233,16 @@ public class BankAdapter {
      * Returns account number if found, null otherwise
      */
     public String getAccountByOwnerEmail(String ownerEmail) {
-        String url = bankServiceUrl + "/api/bank/account/by-owner/" + ownerEmail;
+        // The email is one path segment, strictly encoded. Pasted in raw, "x/../victim@…" became
+        // /by-owner/x/../victim@…, which bank's Tomcat normalises to the victim's lookup (scenario A9), and
+        // "victim@…;x" loses ";x" as a path parameter. A URI variable expanded after encode() is encoded
+        // strictly ("/" → %2F, ";" → %3B, "+" → %2B, "{" → %7B); a literal pathSegment(...) is not (review 44 🟡3).
+        // A URI, not a String: RestTemplate would encode a String again (%2F → %252F).
+        java.net.URI url = org.springframework.web.util.UriComponentsBuilder.fromUriString(bankServiceUrl)
+                .path("/api/bank/account/by-owner/{email}")
+                .encode()
+                .buildAndExpand(ownerEmail)
+                .toUri();
         try {
             ResponseEntity<java.util.Map> resp = restTemplate.getForEntity(url, java.util.Map.class);
             if (resp.getStatusCode().is2xxSuccessful() && resp.getBody() != null) {

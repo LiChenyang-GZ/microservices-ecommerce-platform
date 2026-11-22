@@ -59,11 +59,20 @@ public class AccountService {
     @Autowired
     private comp5348.storeservice.adapter.BankAdapter bankAdapter;
 
+    /** letters, digits and . _ % + - before the @; letters, digits, . and - after it; a TLD of 2+ letters */
+    private static final java.util.regex.Pattern EMAIL_FORMAT =
+            java.util.regex.Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
+
     /**
      * Create account (requires email verification)
      */
     @Transactional
     public AccountDTO createAccount(String username, String email, String password) {
+        // Stricter than RFC 5321 on purpose: no "/", spaces or quotes, so the email is safe wherever it ends up
+        // (a URL path to bank, a log line). Scenario A9.
+        if (email == null || !EMAIL_FORMAT.matcher(email).matches()) {
+            throw new IllegalArgumentException("Please enter a valid email address");
+        }
         if (accountRepository.findByEmail(email).isPresent()) {
             throw new IllegalArgumentException("Email already exists!");
         }

@@ -15,7 +15,8 @@ import java.util.List;
 @AllArgsConstructor
 public class CreateOrderRequest {
     
-    @NotNull
+    // Not read from the HTTP body any more: create-with-payment sets it from the login token (auth PR 2, A5).
+    // The frontend and scripts still send it; it is ignored.
     private Long userId;
     
     @NotEmpty(message = "Order items cannot be empty")

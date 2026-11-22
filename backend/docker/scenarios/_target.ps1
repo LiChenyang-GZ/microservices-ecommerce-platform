@@ -119,6 +119,9 @@ function New-Shopper($prefix) {
     $login = Invoke-RestMethod -Method Post "$store/user/login" -ContentType 'application/json' `
         -Body (@{ email = $email; password = $password } | ConvertTo-Json)
     $login | Add-Member -Force email $email
+    # 鉴权 PR ② 之后下单、查单、取消都要登录 token。记在 shopper 上，也记成"当前用户"给 Order 用（每个场景只有一个用户）
+    $login | Add-Member -Force headers @{ Authorization = "Bearer $($login.token)" }
+    $script:shopperHeaders = $login.headers
     $login | Add-Member -Force account (Sql 'store_db' "select bank_account_number from account where email = '$email'")
     $login
 }
@@ -131,8 +134,8 @@ function Cheapest-InStock {
 
 function Balance($account) { Sql 'bank_db' "select balance from bank_accounts where account_number = '$account'" }
 function Stock($productId) { Sql 'store_db' "select sum(quantity) from warehouse_products where product_id = $productId" }
-function Order($orderId) { Invoke-RestMethod "$store/store/orders/$orderId/with-payment" }
+function Order($orderId) { Invoke-RestMethod "$store/store/orders/$orderId/with-payment" -Headers $script:shopperHeaders }
 function Place-Order($shopper, $product) {
-    (Invoke-RestMethod -Method Post "$store/store/orders/create-with-payment" -ContentType 'application/json' `
+    (Invoke-RestMethod -Method Post "$store/store/orders/create-with-payment" -Headers $shopper.headers -ContentType 'application/json' `
         -Body (@{ userId = $shopper.userId; orderItems = @(@{ productId = $product.id; quantity = 1 }) } | ConvertTo-Json -Depth 3)).order
 }

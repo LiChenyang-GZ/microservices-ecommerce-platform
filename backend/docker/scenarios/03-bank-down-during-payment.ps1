@@ -17,7 +17,7 @@ function Sql($db, $query) {
     docker compose -f $compose exec -T postgres psql -U postgres -d $db -tAc $query
 }
 function Order($orderId) {
-    Invoke-RestMethod "$store/store/orders/$orderId/with-payment"
+    Invoke-RestMethod "$store/store/orders/$orderId/with-payment" -Headers $auth
 }
 function Show($o) {
     "order $($o.order.status), payment $($o.payment.status) (attempt $($o.payment.attempt))"
@@ -42,7 +42,7 @@ try {
     # --- 1. 停 bank，下单 ---
     docker compose -f $compose stop bank 2>$null | Out-Null
     "1. bank 已停止"
-    $order = (Invoke-RestMethod -Method Post "$store/store/orders/create-with-payment" -ContentType 'application/json' `
+    $order = (Invoke-RestMethod -Method Post "$store/store/orders/create-with-payment" -Headers $auth -ContentType 'application/json' `
         -Body (@{ userId = $login.userId; orderItems = @(@{ productId = $product.id; quantity = 1 }) } | ConvertTo-Json -Depth 3)).order
     "   下单 $($order.id)，$($order.totalAmount)"
 

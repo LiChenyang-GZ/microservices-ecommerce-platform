@@ -26,23 +26,21 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         
         final String authHeader = request.getHeader("Authorization");
-        String email = null;
-        String jwt = null;
 
-        // Extract token from Authorization header
-        if (authHeader != null && authHeader.startsWith("Bearer ")) {
-            jwt = authHeader.substring(7);
+        if (authHeader != null && authHeader.startsWith("Bearer ")
+                && SecurityContextHolder.getContext().getAuthentication() == null) {
+            String jwt = authHeader.substring(7);
+            String email = null;
             try {
+                // Parsing checks the signature and the expiry, once (review 44 🟡8: a second parse outside this
+                // try could throw for a token that expired in between, and the request got 500 instead of 401)
                 email = jwtUtil.extractEmail(jwt);
             } catch (Exception e) {
-                // Token invalid, continue execution but don't set authentication info
-                logger.error("JWT token parsing failed: " + e.getMessage());
+                // Expired or forged: stay anonymous. SecurityConfig answers 401 on protected paths; public ones
+                // still work. DEBUG, not ERROR: a browser holding an old token is normal.
+                logger.debug("Ignoring an invalid JWT: " + e.getMessage());
             }
-        }
-
-        // If email is not null and currently no authentication info, set authentication context
-        if (email != null && SecurityContextHolder.getContext().getAuthentication() == null) {
-            if (jwtUtil.validateToken(jwt)) {
+            if (email != null) {
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                         email, null, new ArrayList<>());
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
