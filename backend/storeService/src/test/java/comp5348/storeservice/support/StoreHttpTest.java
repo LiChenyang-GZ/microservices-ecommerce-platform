@@ -74,6 +74,36 @@ public abstract class StoreHttpTest extends StoreIntegrationTest {
         return "Bearer " + token;
     }
 
+    /**
+     * 鉴权 PR ③：管理员的 token。和登录接口签的一样（同一把密钥、同样的 userId / subject），多一个 role = ADMIN。
+     * 角色只看 token 里的这个 claim（无状态），所以这里不用改数据库。
+     */
+    protected String adminBearer(Account account) {
+        return "Bearer " + signed(account, "ADMIN", jwtSecret);
+    }
+
+    /** 角色上线之前签发的 token：没有 role 这个 claim（A13） */
+    protected String legacyBearer(Account account) {
+        return "Bearer " + signed(account, null, jwtSecret);
+    }
+
+    /** 普通用户自己给 token 加上 role = ADMIN，但没有 store 的密钥，只能用别的密钥签（A14） */
+    protected String forgedAdminBearer(Account account) {
+        return "Bearer " + signed(account, "ADMIN", "not-the-store-secret-not-the-store-secret-0123");
+    }
+
+    private static String signed(Account account, String role, String secret) {
+        var builder = Jwts.builder()
+                .claim("userId", account.getId())
+                .subject(account.getEmail())
+                .issuedAt(new Date())
+                .expiration(new Date(System.currentTimeMillis() + 3_600_000));
+        if (role != null) {
+            builder.claim("role", role);
+        }
+        return builder.signWith(Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8))).compact();
+    }
+
     /** 内容是这个用户、没过期，但用别的密钥签的：攻击者自己造的 token */
     protected String forgedBearer(Account account) {
         String token = Jwts.builder()
