@@ -73,19 +73,11 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
             return;
         }
         
-        // Admin endpoints (the DLQ, auth PR 3): a valid token is not enough, store must say ADMIN.
-        // A reply without a role (older store, or a token signed before roles existed) is an ordinary user.
-        if (path.startsWith("/api/admin/") && !result.isAdmin()) {
-            logger.warn("Non-admin user {} denied: {}", result.getUserId(), path);
-            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
-            response.setContentType("application/json");
-            response.getWriter().write("{\"error\":\"Forbidden\",\"message\":\"Admins only\"}");
-            return;
-        }
-
         // Add user information to request attributes for Controller use
         request.setAttribute("userId", result.getUserId());
         request.setAttribute("userEmail", result.getEmail());
+        // USER / ADMIN from store; AdminOnlyInterceptor checks it on @AdminOnly controllers, after routing
+        request.setAttribute(AdminOnlyInterceptor.ROLE_ATTRIBUTE, result.getRole());
         
         filterChain.doFilter(request, response);
     }

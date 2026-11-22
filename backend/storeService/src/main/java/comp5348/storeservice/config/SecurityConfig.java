@@ -38,9 +38,10 @@ public class SecurityConfig {
                 // Refunds: decision 4, only an admin refunds; a user gets money back by cancelling before pickup
                 .requestMatchers(HttpMethod.POST, "/api/payments/*/refund").hasRole("ADMIN")
                 // the admin dashboard and everything that reads stock records or changes stock, warehouses, products, prices
-                .requestMatchers(HttpMethod.GET, "/api/orders").hasRole("ADMIN")
+                // any method: HEAD runs the GET handler too (review 47 🟡3)
+                .requestMatchers("/api/orders").hasRole("ADMIN")
                 .requestMatchers("/api/warehouses", "/api/warehouses/**").hasRole("ADMIN")
-                .requestMatchers(HttpMethod.GET, "/api/products/*/inventory-records").hasRole("ADMIN")
+                .requestMatchers("/api/products/*/inventory-records").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.POST, "/api/products", "/api/products/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/products/**").hasRole("ADMIN")
                 // sign-up, log-in, email verification, password reset

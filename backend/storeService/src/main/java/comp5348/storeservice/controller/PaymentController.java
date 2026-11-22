@@ -34,6 +34,12 @@ public class PaymentController {
             // Writes a REFUND task; the refund itself happens in the background (status REFUND_PENDING → REFUNDED)
             // Admin only (SecurityConfig), any order: the admin decides, whatever the order's status
             Payment payment = paymentService.requestRefund(orderId, refundReason);
+            // requestRefund only acts on a SUCCESS payment and returns anything else unchanged. Say so instead of
+            // "Refund requested": a charge still in progress would otherwise be taken later with no refund (review 47 🟡8)
+            if (payment.getStatus() != comp5348.storeservice.model.PaymentStatus.REFUND_PENDING) {
+                return ResponseEntity.status(409).body(new PaymentResponse(false, payment,
+                        "Nothing to refund: the payment is " + payment.getStatus()));
+            }
 
             return ResponseEntity.ok(new PaymentResponse(true, payment, "Refund requested"));
             

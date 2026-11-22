@@ -23,6 +23,8 @@ import java.util.Optional;
  *   the admin role. Pick another ADMIN_EMAIL, or promote by hand in the database after checking who owns it.
  * - The password is stored as BCrypt, like every account. Changing ADMIN_PASSWORD later does not change an existing
  *   admin's password: the variable only seeds the first one.
+ * - Promoting or demoting someone by hand in the database takes effect at their next log-in: the role travels in
+ *   the JWT, which stays valid for up to 24 hours (see Role).
  */
 @Component
 public class AdminBootstrap implements CommandLineRunner {
@@ -39,6 +41,23 @@ public class AdminBootstrap implements CommandLineRunner {
         this.accounts = accounts;
         this.email = email == null ? "" : email.trim();
         this.password = password == null ? "" : password;
+    }
+
+    /**
+     * The email as username if nobody has it, otherwise admin-xxxxxxxx. Anyone can register any username, including
+     * this email, and a clash on the unique column would stop store from starting (review 47 🟠2).
+     * Admins log in with the email anyway: login looks the identifier up by email first.
+     */
+    private String freeUsername() {
+        if (accounts.findByUsername(email).isEmpty()) {
+            return email;
+        }
+        String candidate;
+        do {
+            candidate = "admin-" + java.util.UUID.randomUUID().toString().substring(0, 8);
+        } while (accounts.findByUsername(candidate).isPresent());
+        logger.warn("An ordinary account already uses ADMIN_EMAIL as its username; the admin gets username {}", candidate);
+        return candidate;
     }
 
     @Override
@@ -60,7 +79,7 @@ public class AdminBootstrap implements CommandLineRunner {
         }
         Account admin = new Account();
         admin.setEmail(email);
-        admin.setUsername(email); // usernames are unique; the email is the one value guaranteed free here
+        admin.setUsername(freeUsername());
         admin.setPassword(new BCryptPasswordEncoder().encode(password));
         admin.setEmailVerified(true);
         admin.setActive(true);

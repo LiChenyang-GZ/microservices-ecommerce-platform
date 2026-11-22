@@ -266,6 +266,7 @@ deliveryApi.interceptors.response.use(
         localStorage.removeItem('token');
         localStorage.removeItem('userEmail');
         localStorage.removeItem('userId');
+        localStorage.removeItem('role');
         localStorage.removeItem('isLoggedIn');
         if (window.location.pathname !== '/login') {
           window.location.href = '/login';

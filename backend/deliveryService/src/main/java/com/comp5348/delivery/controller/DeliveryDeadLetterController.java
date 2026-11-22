@@ -12,6 +12,7 @@ import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.http.ResponseEntity;
+import com.comp5348.delivery.config.AdminOnly;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -24,6 +25,7 @@ import org.slf4j.LoggerFactory;
 
 @RestController
 @RequestMapping("/api/admin/dlq")
+@AdminOnly // auth PR 3: list, resolve and requeue are for admins only
 @RequiredArgsConstructor
 public class DeliveryDeadLetterController {
 

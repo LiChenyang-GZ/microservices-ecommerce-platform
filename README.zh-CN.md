@@ -118,7 +118,7 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
 ## 已知限制和下一步
 
 - **服务间鉴权用共享密钥，不是 mTLS**（ADR-23）：bank、delivery 的 `/internal/...`、email 的找回密码接口只接受带了被调方自己那把凭据的调用；每个服务没配自己的凭据就不启动。没有自动轮换（改 `backend/.env` / Secret 里的值，两边一起重启），`email_queue` 这条路只靠 RabbitMQ 账号挡。
-- **用户和管理员**（鉴权 PR ②、③）：store 除了注册、登录、找回密码和商品目录，都要登录；用户只能查、取消、支付自己的订单。管理接口（全站订单、仓库和库存、商品和价格、退款、delivery 的 DLQ）要 JWT 里带 ADMIN 角色。第一个管理员来自 `ADMIN_EMAIL` / `ADMIN_PASSWORD`。激活账号还不检查邮箱验证码，所以注册了就能激活。
+- **用户和管理员**（鉴权 PR ②、③）：store 除了注册、登录、找回密码和商品目录，都要登录；用户只能查、取消、支付自己的订单。管理接口（全站订单、仓库和库存、商品和价格、退款、delivery 的 DLQ）要 JWT 里带 ADMIN 角色。第一个管理员来自 `ADMIN_EMAIL` / `ADMIN_PASSWORD`。角色写在 JWT 里，在库里改了角色要等用户重新登录才生效（token 有效 24 小时）。激活账号还不检查邮箱验证码，所以注册了就能激活。
 - **单副本**：所有有状态组件都只有一个；store 只能一个副本，因为 `OutboxProcessor` 没有跨实例的锁。
 - **kind 入口偶发 503**（发现 I2）：一次读请求经过 Envoy Gateway 时在到达 store 之前被重置，重试就过了，原因还没查清。
 - **场景脚本 01–03 只能跑 compose**；04–08 两边都能跑。
