@@ -22,14 +22,15 @@ ADR-01 to ADR-14 were written before the redesign was built. Code comments refer
 | [12](12-database-per-service.md) | Each service owns its own database | Accepted |
 | [13](13-kubernetes-single-entry.md) | Run on Kubernetes behind a single entry | Accepted, entry decided by 15 |
 | [14](14-out-of-scope.md) | What this design leaves as it was | Accepted |
-| [15](15-gateway-api-allowlist-entry.md) | The single entry is Gateway API (Envoy Gateway) with an allowlist | Accepted |
+| [15](15-gateway-api-allowlist-entry.md) | The single entry is Gateway API (Envoy Gateway) with an allowlist | Accepted, amended by 23 |
 | [16](16-unguessable-idempotency-keys.md) | Idempotency keys carry a random part, and bank compares content | Accepted |
 | [17](17-probes-and-replicas.md) | Probes check the service itself; store runs one replica | Accepted |
 | [18](18-stuck-delivery-sweeper.md) | A sweeper re-sends delivery jobs that stopped moving | Accepted |
 | [19](19-shared-event-contract.md) | One event contract, shared by Java and Go | Accepted |
 | [20](20-stock-pessimistic-lock.md) | Stock is reserved with pessimistic row locks | Accepted |
 | [21](21-schema-changes-at-startup.md) | Schema changes run as idempotent SQL at startup, not Flyway | Accepted |
-| [22](22-grpc-result-mapping.md) | How a gRPC reply from bank maps to succeeded, rejected or unknown | Accepted |
+| [22](22-grpc-result-mapping.md) | How a gRPC reply from bank maps to succeeded, rejected or unknown | Accepted, amended by 23 |
+| [23](23-service-credentials.md) | Calls between services carry a shared secret, one per called service | Accepted |
 
 ## Reliability rules
 

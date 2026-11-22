@@ -2,7 +2,7 @@
 
 [English](15-gateway-api-allowlist-entry.md) | **中文**
 
-**状态：** 已采纳（取代 ADR-13 最初版本里的 "Ingress"）
+**状态：** 已采纳（取代 ADR-13 最初版本里的 "Ingress"），由 23 补充
 
 ## 背景
 最初的设计用 Ingress。到做 Kubernetes 这一步时，ingress-nginx 从 2026 年 3 月起已经没有新版本和安全修复，kind 的文档也改推 Gateway API。另外，路由的第一版是按整个前缀转发（`/api/store/*`、`/api/delivery/*`），再给记得起来的内部路径一个个加 404。审查发现漏了两个：delivery 不要 token 的 `cancel-by-order`（谁都能取消配送单，进而触发退款），以及 store 的 `payment-success`（不经过 bank 就把订单标成 PAID）。
@@ -19,6 +19,7 @@
 - 两份清单要保持一致（脚本会检查）。
 - 多装一个控制器 Envoy Gateway（`up.ps1` 会装）。
 - 经过入口偶发 503（发现 I2），原因还没查清。
+- 入口只挡外面。已经在网络里的东西会绕过它，所以 ADR-23 起，服务自己也检查是谁在调。
 
 ## 代码在哪
 - [gateway.yaml](../../k8s/gateway/gateway.yaml)、[routes.yaml](../../k8s/gateway/routes.yaml)、[nginx.conf](../../frontend/nginx.conf)、[check-entry.ps1](../../k8s/scripts/check-entry.ps1)

@@ -2,7 +2,7 @@
 
 **English** | [中文](22-grpc-result-mapping.zh-CN.md)
 
-**Status:** Accepted
+**Status:** Accepted, amended by 23
 
 ## Context
 ADR-05 needs every call to bank to end in exactly one of three results: SUCCEEDED, REJECTED (bank definitely said no) or UNKNOWN (money may or may not have moved). Moving the call to gRPC (ADR-10) raised cases the plan did not cover: a reply with status OK but no outcome set; a bad amount string; and bank restarting, where gRPC's reconnect back-off could make all 5 fast retries fail at once.
@@ -17,6 +17,7 @@ ADR-05 needs every call to bank to end in exactly one of three results: SUCCEEDE
 ## Consequences
 - The only way to REJECTED is bank explicitly saying so; every doubt leans to UNKNOWN, which is safe for money and costs a slower, alerted path (ADR-05).
 - A bank that forgets to set the outcome shows up as alerts, not as wrong FAILED payments.
+- ADR-23 adds one case: `UNAUTHENTICATED` (bank refused store's service token) is still UNKNOWN like every other error, and also logs `ALERT bank_auth_failed`, because a wrong secret does not fix itself.
 
 ## In the code
 - store [BankAdapter.java](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java), [BankCallResult.java](../../backend/storeService/src/main/java/comp5348/storeservice/adapter/BankCallResult.java); bank [BankGrpcService.java](../../backend/bankService/src/main/java/com/comp5348/bank/grpc/BankGrpcService.java)

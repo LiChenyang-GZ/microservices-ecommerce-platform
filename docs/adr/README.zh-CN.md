@@ -22,14 +22,15 @@ ADR-01 到 ADR-14 是动手之前写的，代码注释按编号引用（"ADR-06"
 | [12](12-database-per-service.zh-CN.md) | 每个服务独占自己的库 | 已采纳 |
 | [13](13-kubernetes-single-entry.zh-CN.md) | 部署在 Kubernetes 上，只有一个统一入口 | 已采纳，入口由 15 决定 |
 | [14](14-out-of-scope.zh-CN.md) | 这次设计不动的东西 | 已采纳 |
-| [15](15-gateway-api-allowlist-entry.zh-CN.md) | 统一入口用 Gateway API（Envoy Gateway），按白名单转发 | 已采纳 |
+| [15](15-gateway-api-allowlist-entry.zh-CN.md) | 统一入口用 Gateway API（Envoy Gateway），按白名单转发 | 已采纳，由 23 补充 |
 | [16](16-unguessable-idempotency-keys.zh-CN.md) | 幂等键带随机部分，bank 比对请求内容 | 已采纳 |
 | [17](17-probes-and-replicas.zh-CN.md) | 探针只检查服务自己；store 只跑一个副本 | 已采纳 |
 | [18](18-stuck-delivery-sweeper.zh-CN.md) | 扫表补发：重发卡住不动的配送任务 | 已采纳 |
 | [19](19-shared-event-contract.zh-CN.md) | Java 和 Go 共用一份事件契约 | 已采纳 |
 | [20](20-stock-pessimistic-lock.zh-CN.md) | 扣库存用悲观行锁 | 已采纳 |
 | [21](21-schema-changes-at-startup.zh-CN.md) | 表结构改动在启动时跑幂等 SQL，不用 Flyway | 已采纳 |
-| [22](22-grpc-result-mapping.zh-CN.md) | bank 的 gRPC 回复怎么对应到 成功 / 拒绝 / 未知 | 已采纳 |
+| [22](22-grpc-result-mapping.zh-CN.md) | bank 的 gRPC 回复怎么对应到 成功 / 拒绝 / 未知 | 已采纳，由 23 补充 |
+| [23](23-service-credentials.zh-CN.md) | 服务之间的调用带共享密钥，每个被调方一把 | 已采纳 |
 
 ## 可靠性规则
 
