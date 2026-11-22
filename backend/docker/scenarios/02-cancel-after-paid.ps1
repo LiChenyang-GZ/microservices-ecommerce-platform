@@ -19,7 +19,7 @@ function Sql($db, $query) {
     docker compose -f $compose exec -T postgres psql -U postgres -d $db -tAc $query
 }
 function Order($orderId) {
-    Invoke-RestMethod "$store/store/orders/$orderId/with-payment"
+    Invoke-RestMethod "$store/store/orders/$orderId/with-payment" -Headers $auth
 }
 function Balance($account) {
     Sql 'bank_db' "select balance from bank_accounts where account_number = '$account'"
@@ -37,6 +37,7 @@ Invoke-RestMethod -Method Post "$store/user/activate" -ContentType 'application/
     -Body (@{ email = $email } | ConvertTo-Json) | Out-Null
 $login = Invoke-RestMethod -Method Post "$store/user/login" -ContentType 'application/json' `
     -Body (@{ email = $email; password = $password } | ConvertTo-Json)
+$auth = @{ Authorization = "Bearer $($login.token)" }
 $account = Sql 'store_db' "select bank_account_number from account where email = '$email'"
 # 挑最便宜、还有库存的那台（iPhone 13 库存少，别的脚本跑几次就没了）
 $name = Sql 'store_db' "select p.name from products p join warehouse_products w on w.product_id = p.id group by p.id having sum(w.quantity) > 0 order by p.price limit 1"
@@ -46,7 +47,7 @@ $stockStart = Stock $product.id
 "0. 新用户 $email，余额 $balanceStart；$($product.name) 库存 $stockStart"
 
 # --- 1. 下单 ---
-$order = (Invoke-RestMethod -Method Post "$store/store/orders/create-with-payment" -ContentType 'application/json' `
+$order = (Invoke-RestMethod -Method Post "$store/store/orders/create-with-payment" -Headers $auth -ContentType 'application/json' `
     -Body (@{ userId = $login.userId; orderItems = @(@{ productId = $product.id; quantity = 1 }) } | ConvertTo-Json -Depth 3)).order
 "1. 下单 $($order.id)，$($order.totalAmount)；库存 $(Stock $product.id)"
 
@@ -64,7 +65,7 @@ if ($AfterDelivery) {
 
 # --- 3. 取消 ---
 try {
-    $r = Invoke-RestMethod -Method Post "$store/store/orders/$($order.id)/cancel"
+    $r = Invoke-RestMethod -Method Post "$store/store/orders/$($order.id)/cancel" -Headers $auth
     "3. 点取消：$($r.message)"
 } catch {
     "3. 点取消被拒绝：$($_.ErrorDetails.Message)"

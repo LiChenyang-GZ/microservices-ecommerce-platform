@@ -32,7 +32,7 @@ try {
     "1. Kafka 已关；下单 $($order.id) 已 PAID，余额 $(Balance $shopper.account)；配送单 $rows 张（应该 0）"
 
     # --- 2. 取消 ---
-    $r = Invoke-RestMethod -Method Post "$store/store/orders/$($order.id)/cancel"
+    $r = Invoke-RestMethod -Method Post "$store/store/orders/$($order.id)/cancel" -Headers $shopper.headers
     "2. 点取消：$($r.message)"
     "   delivery_db：$(Sql 'delivery_db' "select delivery_status from delivery where order_id = '$($order.id)'")（取消标记，应该 CANCELLED）"
 }

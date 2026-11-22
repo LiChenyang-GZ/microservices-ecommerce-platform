@@ -16,7 +16,7 @@ function Sql($db, $query) {
     docker compose -f $compose exec -T postgres psql -U postgres -d $db -tAc $query
 }
 function Status($orderId) {
-    $r = Invoke-RestMethod "$store/store/orders/$orderId/with-payment"
+    $r = Invoke-RestMethod "$store/store/orders/$orderId/with-payment" -Headers $auth
     "order $($r.order.status), payment $($r.payment.status) (attempt $($r.payment.attempt))"
 }
 function Balance($account) {
@@ -38,7 +38,7 @@ $account = Sql 'store_db' "select bank_account_number from account where email =
 
 # --- 1. 买 2 台，钱不够 ---
 $product = (Invoke-RestMethod "$store/products").products | Where-Object name -eq 'iPhone 13'
-$order = (Invoke-RestMethod -Method Post "$store/store/orders/create-with-payment" -ContentType 'application/json' `
+$order = (Invoke-RestMethod -Method Post "$store/store/orders/create-with-payment" -Headers $auth -ContentType 'application/json' `
     -Body (@{ userId = $login.userId; orderItems = @(@{ productId = $product.id; quantity = 2 }) } | ConvertTo-Json -Depth 3)).order
 "1. 下单 $($order.id)：2 台 iPhone 13，共 $($order.totalAmount)。等 bank 回答（OutboxProcessor 每 5 秒一轮）..."
 $deadline = (Get-Date).AddSeconds(60)
