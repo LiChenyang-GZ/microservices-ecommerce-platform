@@ -218,6 +218,45 @@ class AdminRoleIntegrationTest extends StoreHttpTest {
         mvc.perform(validate("Bearer " + token)).andExpect(jsonPath("$.role").value("USER"));
     }
 
+    /** 47 号 🟡6：库里是 ADMIN → 登录 → 回复和 token 都是 ADMIN → 能用管理接口。本来就绿，防有人把登录写死成 USER */
+    @Test
+    void adminLogin_returnsAdmin_andTheTokenOpensAdminEndpoints() throws Exception {
+        String tag = UUID.randomUUID().toString().substring(0, 8);
+        Account admin = new Account();
+        admin.setEmail("real-admin-" + tag + "@test.local");
+        admin.setUsername("real-admin-" + tag);
+        admin.setPassword(passwordEncoder.encode("Passw0rd!"));
+        admin.setEmailVerified(true);
+        admin.setActive(true);
+        admin.setRole(comp5348.storeservice.model.Role.ADMIN);
+        accountRepository.save(admin);
+
+        String body = mvc.perform(post("/api/user/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + admin.getEmail() + "\",\"password\":\"Passw0rd!\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.role").value("ADMIN"))
+                .andReturn().getResponse().getContentAsString();
+        String token = com.jayway.jsonpath.JsonPath.read(body, "$.token");
+
+        mvc.perform(get("/api/orders").header("Authorization", "Bearer " + token)).andExpect(status().isOk());
+    }
+
+    /**
+     * 47 号 🟡8：付款还没成功（这里是 PENDING）时，PaymentService#requestRefund 什么都不做，接口却回 200 "Refund requested"。
+     * 管理员以为退了，之后扣款成功，钱扣了、没有退款任务。红：200。期望 409，说清楚付款现在是什么状态。
+     */
+    @Test
+    void adminRefund_withNothingToRefund_saysSo() throws Exception {
+        PlacedOrder order = placeOrder();
+
+        mvc.perform(post("/api/payments/{orderId}/refund", order.orderId())
+                        .header("Authorization", adminBearer(newUser())))
+                .andExpect(status().isConflict());
+
+        assertThat(openTasksOf(order, "REFUND")).isEmpty();
+    }
+
     // ---------- 帮手 ----------
 
     private MockHttpServletRequestBuilder validate(String bearer) {

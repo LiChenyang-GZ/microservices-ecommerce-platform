@@ -72,12 +72,37 @@ class AdminBootstrapStartupTest {
                 .as("也没被改密码").isEqualTo("his-own");
     }
 
+    /** 47 号 🟡5：原来的断言查的是没人会建的 never-% 邮箱，永远成立。改成启动前后数管理员总数 */
     @Test
     void notConfigured_noAdminIsCreated() {
         startStore(Map.of());
+        Integer before = DB.queryForObject("SELECT count(*) FROM account WHERE role = 'ADMIN'", Integer.class);
 
-        assertThat(DB.queryForObject("SELECT count(*) FROM account WHERE role = 'ADMIN' AND email LIKE 'never-%'",
-                Integer.class)).isZero();
+        startStore(Map.of());
+
+        assertThat(DB.queryForObject("SELECT count(*) FROM account WHERE role = 'ADMIN'", Integer.class))
+                .as("没配就没有新管理员").isEqualTo(before);
+    }
+
+    /**
+     * 47 号 🟠2：有人先注册了 用户名 = ADMIN_EMAIL 的账号（邮箱是他自己的）。AdminBootstrap 只查了邮箱，
+     * 新建管理员时 username 撞唯一约束，CommandLineRunner 抛异常 → store 起不来。
+     * 红：startStore 抛异常（DataIntegrityViolation）。期望：照常启动，管理员建出来（用别的用户名），抢注的账号不动。
+     */
+    @Test
+    void someoneTookTheAdminEmailAsAUsername_storeStillStarts() {
+        String adminEmail = "boss-" + tag() + "@test.local";
+        String squatter = "squatter-" + tag() + "@test.local";
+        startStore(Map.of());
+        DB.update("INSERT INTO account (email, username, password, email_verified, active, role) VALUES (?, ?, 'x', true, true, 'USER')",
+                squatter, adminEmail);
+
+        startStore(Map.of("store.admin.email", adminEmail, "store.admin.password", "Adm1n-Passw0rd"));
+
+        assertThat(DB.queryForObject("SELECT role FROM account WHERE email = ?", String.class, adminEmail))
+                .as("管理员建出来了").isEqualTo("ADMIN");
+        assertThat(DB.queryForObject("SELECT role FROM account WHERE email = ?", String.class, squatter))
+                .as("抢注的账号还是普通用户").isEqualTo("USER");
     }
 
     /** E7：角色上线前就有的账号（role 是 NULL），重启后补成 USER */

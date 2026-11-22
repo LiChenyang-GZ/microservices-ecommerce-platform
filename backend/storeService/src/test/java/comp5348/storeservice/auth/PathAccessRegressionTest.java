@@ -36,6 +36,7 @@ class PathAccessRegressionTest extends StoreHttpTest {
             "GET,  /api/products/search/price?minPrice=1&maxPrice=2, open, open, open",
             "GET,  /actuator/health,                                 open, open, open",
             "GET,  /actuator/health/liveness,                        open, open, open",
+            "GET,  /actuator/health/readiness,                       open, open, open",
             // 登录用户（订单自己的；归属在 service 层查，另有测试）
             "POST, /api/store/orders/create-with-payment,            401,  open, open",
             "GET,  /api/store/orders/999999999/with-payment,         401,  open, open",
@@ -58,11 +59,16 @@ class PathAccessRegressionTest extends StoreHttpTest {
             "GET,  /api/warehouses/audit-logs/product/999999999,     401,  403,  open",
             "GET,  /api/warehouses/audit-logs/warehouse/999999999,   401,  403,  open",
             "GET,  /api/warehouses/admin/out-transactions,           401,  403,  open",
+            "GET,  /api/warehouses/admin/out-transactions/product/999999999,   401, 403, open",
+            "GET,  /api/warehouses/admin/out-transactions/warehouse/999999999, 401, 403, open",
             "GET,  /api/warehouses/999999999/inventory-records,      401,  403,  open",
             "POST, /api/products,                                    401,  403,  open",
             "PUT,  /api/products/999999999,                          401,  403,  open",
             "POST, /api/products/999999999/assign,                   401,  403,  open",
             "GET,  /api/products/999999999/inventory-records,        401,  403,  open",
+            // 47 号 🟡3：HEAD 交给 GET 的处理器（真的查了全表），规则只写了 GET 就漏了它
+            "HEAD, /api/orders,                                      401,  403,  open",
+            "HEAD, /api/products/999999999/inventory-records,        401,  403,  open",
     })
     void securityChainDecision(String method, String path, String none, String user, String admin) throws Exception {
         assertThat(decision(method, path, null)).as("没 token").isEqualTo(none);

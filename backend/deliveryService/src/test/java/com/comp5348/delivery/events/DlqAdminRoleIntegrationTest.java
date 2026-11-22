@@ -7,9 +7,11 @@ import com.comp5348.delivery.support.FakeStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
+import java.net.URI;
 import java.time.Instant;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.not;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -73,6 +75,47 @@ class DlqAdminRoleIntegrationTest extends DeliveryIntegrationTest {
                 .andExpect(status().isOk());
 
         assertThat(alerts.findById(alert.getId()).orElseThrow().isResolved()).isTrue();
+    }
+
+    /**
+     * 47 号审查 🔴1：过滤器用原始 URI 判断前缀 /api/admin/，而 Spring MVC 按解码、去掉 ;参数 以后的路径路由。
+     * /api/admin;x/... 和 /api/%61dmin/... 都会落到 DLQ controller，却骗过前缀判断。
+     * 红：200，普通用户能列出死信。
+     */
+    @Test
+    void normalUser_cannotSneakInWithASemicolon() throws Exception {
+        mvcWithFilters().perform(get(URI.create("/api/admin;x/dlq/delivery"))
+                        .header("Authorization", "Bearer " + FakeStore.USER_TOKEN))
+                .andExpect(status().is(not(200)));
+    }
+
+    @Test
+    void normalUser_cannotSneakInWithAnEncodedLetter() throws Exception {
+        mvcWithFilters().perform(get(URI.create("/api/%61dmin/dlq/delivery"))
+                        .header("Authorization", "Bearer " + FakeStore.USER_TOKEN))
+                .andExpect(status().is(not(200)));
+    }
+
+    /** 红：普通用户用 ; 变体重放死信，告警真的被处理了 */
+    @Test
+    void normalUser_cannotRequeueThroughAVariantPath() throws Exception {
+        DeliveryDeadLetterAlert alert = newAlert();
+
+        mvcWithFilters().perform(post(URI.create("/api/admin;x/dlq/delivery/" + alert.getId() + "/requeue"))
+                        .header("Authorization", "Bearer " + FakeStore.USER_TOKEN))
+                .andExpect(status().is(not(200)));
+
+        assertThat(alerts.findById(alert.getId()).orElseThrow().isResolved()).isFalse();
+    }
+
+    /** 47 号 🟡4：管理员重放成功（原来只测了 resolve）。本来就绿 */
+    @Test
+    void admin_canRequeue() throws Exception {
+        DeliveryDeadLetterAlert alert = newAlert();
+
+        mvcWithFilters().perform(post("/api/admin/dlq/delivery/{id}/requeue", alert.getId())
+                        .header("Authorization", "Bearer " + FakeStore.ADMIN_TOKEN))
+                .andExpect(status().isOk());
     }
 
     /** 本来就绿：没 token 还是 401 */
