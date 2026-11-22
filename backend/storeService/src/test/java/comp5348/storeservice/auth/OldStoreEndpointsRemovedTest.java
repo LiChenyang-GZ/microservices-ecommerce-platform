@@ -137,6 +137,22 @@ class OldStoreEndpointsRemovedTest extends StoreHttpTest {
                 .as("库存没被还回去").isEqualTo(stockBefore);
     }
 
+    /**
+     * 绿灯时才发现（没在红灯提交里跑过红）：这是个 GET，却会真的锁库存（orderId 为空的 HOLD），
+     * 任何登录用户反复调就能把库存锁光。没人调用，照决定 3 删掉。
+     */
+    @Test
+    void stockHoldingGet_isGone() throws Exception {
+        PlacedOrder order = placeOrder();
+        int stockBefore = warehouseProductRepository.findById(order.warehouseProductId()).orElseThrow().getQuantity();
+
+        int code = call(get("/api/warehouses/available/{productId}/{quantity}", productIdOf(order), 5), order);
+
+        assertThat(code).isEqualTo(404);
+        assertThat(warehouseProductRepository.findById(order.warehouseProductId()).orElseThrow().getQuantity())
+                .as("库存没被锁走").isEqualTo(stockBefore);
+    }
+
     /** 红：这些读接口都回 200，能看到任何人的订单、付款、出库记录 */
     @Test
     void readEndpointsThatLeakOtherPeoplesOrders_areGone() throws Exception {

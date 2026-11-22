@@ -1,9 +1,10 @@
 package comp5348.storeservice.controller;
 
 import comp5348.storeservice.dto.*;
+import comp5348.storeservice.exception.NotYourOrdersException;
+import comp5348.storeservice.exception.OrderNotFoundException;
 import comp5348.storeservice.service.OrderProductService;
 import comp5348.storeservice.service.ProductService;
-import comp5348.storeservice.service.OrderService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,20 +28,18 @@ public class StoreController {
     @Autowired
     private ProductService productService;
     
-    @Autowired
-    private OrderService orderService;
-    
     /**
      * Create order and process payment
      * POST /api/store/orders/create-with-payment
      */
     @PostMapping("/orders/create-with-payment")
-    public ResponseEntity<OrderResponse> createOrderWithPayment(@Valid @RequestBody CreateOrderRequest request) {
-        logger.info("POST /api/store/orders/create-with-payment - Creating order with payment for user: {}", 
-                   request.getUserId());
-        
+    public ResponseEntity<OrderResponse> createOrderWithPayment(@Valid @RequestBody CreateOrderRequest request,
+                                                                HttpServletRequest http) {
+        logger.info("POST /api/store/orders/create-with-payment - Creating order with payment");
+
         try {
-            OrderDTO order = orderProductService.createOrderWithPayment(request);
+            // The order is the logged-in user's; a userId in the body is ignored
+            OrderDTO order = orderProductService.createOrderWithPaymentFor(userEmail(http), request);
             return ResponseEntity.ok(OrderResponse.success(order, "Order created with payment successfully"));
         } catch (Exception e) {
             logger.error("Error creating order with payment: {}", e.getMessage(), e);
@@ -54,11 +53,11 @@ public class StoreController {
      * GET /api/store/orders/{id}/with-payment
      */
     @GetMapping("/orders/{id}/with-payment")
-    public ResponseEntity<OrderWithPaymentDTO> getOrderWithPaymentInfo(@PathVariable Long id) {
+    public ResponseEntity<OrderWithPaymentDTO> getOrderWithPaymentInfo(@PathVariable Long id, HttpServletRequest http) {
         logger.info("GET /api/store/orders/{}/with-payment - Getting order with payment info", id);
-        
+
         try {
-            OrderWithPaymentDTO orderWithPayment = orderProductService.getOrderWithPaymentInfo(id);
+            OrderWithPaymentDTO orderWithPayment = orderProductService.getOrderWithPaymentInfo(id, userEmail(http));
             return ResponseEntity.ok(orderWithPayment);
         } catch (Exception e) {
             logger.error("Error getting order with payment info for {}: {}", id, e.getMessage(), e);
@@ -71,12 +70,15 @@ public class StoreController {
      * GET /api/store/orders/user/{userId}/with-payment
      */
     @GetMapping("/orders/user/{userId}/with-payment")
-    public ResponseEntity<List<OrderWithPaymentDTO>> getUserOrdersWithPaymentInfo(@PathVariable Long userId) {
+    public ResponseEntity<List<OrderWithPaymentDTO>> getUserOrdersWithPaymentInfo(@PathVariable Long userId,
+                                                                                   HttpServletRequest http) {
         logger.info("GET /api/store/orders/user/{}/with-payment - Getting user orders with payment info", userId);
-        
+
         try {
-            List<OrderWithPaymentDTO> orders = orderProductService.getUserOrdersWithPaymentInfo(userId);
+            List<OrderWithPaymentDTO> orders = orderProductService.getUserOrdersWithPaymentInfo(userId, userEmail(http));
             return ResponseEntity.ok(orders);
+        } catch (NotYourOrdersException e) {
+            return ResponseEntity.status(403).build();
         } catch (Exception e) {
             logger.error("Error getting user orders with payment info for {}: {}", userId, e.getMessage(), e);
             return ResponseEntity.internalServerError().build();
@@ -103,24 +105,6 @@ public class StoreController {
     
     
     /**
-     * Process payment success
-     * POST /api/store/orders/{id}/payment-success
-     */
-    @PostMapping("/orders/{id}/payment-success")
-    public ResponseEntity<OrderResponse> processPaymentSuccess(@PathVariable Long id) {
-        logger.info("POST /api/store/orders/{}/payment-success - Processing payment success", id);
-        
-        try {
-            OrderDTO order = orderProductService.processPaymentSuccess(id);
-            return ResponseEntity.ok(OrderResponse.success(order, "Payment success processed"));
-        } catch (Exception e) {
-            logger.error("Error processing payment success for {}: {}", id, e.getMessage(), e);
-            return ResponseEntity.badRequest()
-                    .body(OrderResponse.error("Failed to process payment success: " + e.getMessage()));
-        }
-    }
-
-    /**
      * Retry payment for an existing order with PENDING_PAYMENT status
      * POST /api/store/orders/{id}/retry-payment
      */
@@ -128,17 +112,13 @@ public class StoreController {
     public ResponseEntity<OrderResponse> retryPayment(@PathVariable Long id, HttpServletRequest request) {
         logger.info("POST /api/store/orders/{}/retry-payment - Retrying payment for order", id);
 
-        String userEmail = (String) request.getAttribute("userEmail");
-        if (userEmail == null || userEmail.isEmpty()) {
-            return ResponseEntity.status(401)
-                    .body(OrderResponse.error("User not authenticated"));
-        }
-
         try {
             // Pay Now only queues the charge; the page polls the payment status until it settles
-            OrderDTO order = orderProductService.retryOrderPayment(id, userEmail);
+            OrderDTO order = orderProductService.retryOrderPayment(id, userEmail(request));
             String message = "PAID".equals(order.getStatus()) ? "Order already paid" : "Payment processing";
             return ResponseEntity.ok(OrderResponse.success(order, message));
+        } catch (OrderNotFoundException e) {
+            return ResponseEntity.status(404).body(OrderResponse.error(e.getMessage()));
         } catch (Exception e) {
             logger.error("Error retrying payment for order {}: {}", id, e.getMessage(), e);
             return ResponseEntity.badRequest()
@@ -151,11 +131,13 @@ public class StoreController {
      * POST /api/store/orders/{id}/cancel
      */
     @PostMapping("/orders/{id}/cancel")
-    public ResponseEntity<OrderResponse> cancelOrder(@PathVariable Long id) {
+    public ResponseEntity<OrderResponse> cancelOrder(@PathVariable Long id, HttpServletRequest http) {
         logger.info("POST /api/store/orders/{}/cancel - Cancelling order", id);
         try {
-            OrderDTO order = orderService.cancelOrder(id);
+            OrderDTO order = orderProductService.cancelOwnOrder(id, userEmail(http));
             return ResponseEntity.ok(OrderResponse.success(order, "Order cancelled successfully"));
+        } catch (OrderNotFoundException e) {
+            return ResponseEntity.status(404).body(OrderResponse.error(e.getMessage()));
         } catch (Exception e) {
             logger.error("Error cancelling order {}: {}", id, e.getMessage(), e);
             return ResponseEntity.badRequest()
@@ -163,21 +145,8 @@ public class StoreController {
         }
     }
 
-    /**
-     * Process payment failure
-     * POST /api/store/orders/{id}/payment-failure
-     */
-    @PostMapping("/orders/{id}/payment-failure")
-    public ResponseEntity<OrderResponse> processPaymentFailure(@PathVariable Long id) {
-        logger.info("POST /api/store/orders/{}/payment-failure - Processing payment failure", id);
-        
-        try {
-            OrderDTO order = orderProductService.processPaymentFailure(id);
-            return ResponseEntity.ok(OrderResponse.success(order, "Payment failure processed"));
-        } catch (Exception e) {
-            logger.error("Error processing payment failure for {}: {}", id, e.getMessage(), e);
-            return ResponseEntity.badRequest()
-                    .body(OrderResponse.error("Failed to process payment failure: " + e.getMessage()));
-        }
+    /** Set by JwtAuthenticationFilter; SecurityConfig lets no request without a valid token reach these methods */
+    private static String userEmail(HttpServletRequest http) {
+        return (String) http.getAttribute("userEmail");
     }
 }

@@ -1,6 +1,8 @@
 package comp5348.storeservice.service;
 
 import comp5348.storeservice.adapter.BankAdapter;
+import comp5348.storeservice.exception.NotYourOrdersException;
+import comp5348.storeservice.exception.OrderNotFoundException;
 import comp5348.storeservice.dto.*;
 import comp5348.storeservice.model.*;
 import comp5348.storeservice.repository.OrderRepository;
@@ -67,6 +69,15 @@ public class OrderProductService {
     private OrderEventRecorder orderEventRecorder;
 
     /**
+     * Checkout from the HTTP API: the order belongs to the logged-in user, whatever userId the body says
+     * (auth PR 2, scenario A5: the body's userId is ignored, not refused, so the frontend needs no change).
+     */
+    public OrderDTO createOrderWithPaymentFor(String userEmail, CreateOrderRequest request) {
+        request.setUserId(accountOf(userEmail).getId());
+        return createOrderWithPayment(request);
+    }
+
+    /**
      * Create order and process payment
      * This is the core method of integration, handling the entire flow from product selection to payment completion
      */
@@ -112,44 +123,12 @@ public class OrderProductService {
     }
     
     /**
-     * Handle order status update after successful payment
-     */
-    public OrderDTO processPaymentSuccess(Long orderId) {
-        logger.info("Processing payment success for order: {}", orderId);
-        
-        // 1. Update order status to paid
-        OrderDTO order = orderService.updateOrderStatus(orderId, OrderStatus.PAID);
-        
-        // 2. Update order status to processing
-        order = orderService.updateOrderStatus(orderId, OrderStatus.PROCESSING);
-        
-        logger.info("Order {} status updated to PROCESSING after successful payment", orderId);
-        
-        return order;
-    }
-    
-    /**
-     * Handle order status update after payment failure
-     */
-    public OrderDTO processPaymentFailure(Long orderId) {
-        logger.info("Processing payment failure for order: {}", orderId);
-        
-        // Cancel order
-        OrderDTO order = orderService.cancelOrder(orderId);
-        
-        logger.info("Order {} cancelled due to payment failure", orderId);
-        
-        return order;
-    }
-    
-    /**
      * Get complete order information (including payment status)
      */
-    public OrderWithPaymentDTO getOrderWithPaymentInfo(Long orderId) {
+    public OrderWithPaymentDTO getOrderWithPaymentInfo(Long orderId, String userEmail) {
         logger.info("Getting order with payment info for order: {}", orderId);
-        
-        OrderDTO order = orderService.getOrderById(orderId)
-                .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
+
+        OrderDTO order = ownOrder(orderId, userEmail);
         
         // Get payment information
         Optional<Payment> payment = paymentService.getPaymentByOrderId(orderId);
@@ -164,9 +143,12 @@ public class OrderProductService {
     /**
      * Get user's order list (including payment status)
      */
-    public List<OrderWithPaymentDTO> getUserOrdersWithPaymentInfo(Long userId) {
+    public List<OrderWithPaymentDTO> getUserOrdersWithPaymentInfo(Long userId, String userEmail) {
         logger.info("Getting user orders with payment info for user: {}", userId);
-        
+        if (!accountOf(userEmail).getId().equals(userId)) {
+            throw new NotYourOrdersException(userId);
+        }
+
         List<OrderDTO> orders = orderService.getOrdersByUserId(userId);
         
         return orders.stream()
@@ -208,15 +190,9 @@ public class OrderProductService {
     public OrderDTO retryOrderPayment(Long orderId, String userEmail) {
         logger.info("Pay Now for order: {}, user: {}", orderId, userEmail);
 
-        OrderDTO order = orderService.getOrderById(orderId)
-                .orElseThrow(() -> new RuntimeException("Order not found: " + orderId));
-
-        Account userAcc = accountRepository.findByEmail(userEmail)
-                .orElseThrow(() -> new IllegalStateException("User account not found for email: " + userEmail));
         // The charge always comes from the order owner's bank account, so only the owner may trigger it
-        if (!userAcc.getId().equals(order.getUserId())) {
-            throw new IllegalStateException("Order " + orderId + " does not belong to the current user");
-        }
+        OrderDTO order = ownOrder(orderId, userEmail);
+        Account userAcc = accountOf(userEmail);
 
         if (OrderStatus.PAID.name().equals(order.getStatus())) {
             return order;
@@ -240,5 +216,31 @@ public class OrderProductService {
         return orderService.getOrderById(orderId).orElse(order);
     }
 
+    /**
+     * The user cancels one of their own orders (POST /api/store/orders/{id}/cancel). Checked before anything
+     * else, so a stranger's request never locks the order, asks delivery, or writes a refund.
+     * (The owner never changes, so checking before OrderService#cancelOrder takes the row lock is safe.)
+     */
+    public OrderDTO cancelOwnOrder(Long orderId, String userEmail) {
+        ownOrder(orderId, userEmail);
+        return orderService.cancelOrder(orderId);
+    }
 
+    /**
+     * The order, if it belongs to this user. Missing and someone else's look the same (404), see
+     * OrderNotFoundException. Every user-facing read or change of one order goes through here (auth PR 2).
+     */
+    public OrderDTO ownOrder(Long orderId, String userEmail) {
+        OrderDTO order = orderService.getOrderById(orderId).orElseThrow(() -> new OrderNotFoundException(orderId));
+        if (!accountOf(userEmail).getId().equals(order.getUserId())) {
+            throw new OrderNotFoundException(orderId);
+        }
+        return order;
+    }
+
+    /** The logged-in user. The token was valid, so a missing account means it was deleted since; the request fails (400). */
+    private Account accountOf(String userEmail) {
+        return accountRepository.findByEmail(userEmail)
+                .orElseThrow(() -> new IllegalStateException("No account for the logged-in user"));
+    }
 }

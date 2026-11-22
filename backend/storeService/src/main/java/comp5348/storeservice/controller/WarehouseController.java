@@ -120,45 +120,6 @@ public class WarehouseController {
         }
     }
 
-    @GetMapping("/available/{productId}/{quantity}")
-    public ResponseEntity<WarehouseResponse> getAvailableWarehouse(@PathVariable long productId,
-                                                                   @PathVariable int quantity) {
-        // 1. Call Service method
-        WarehouseDTO serviceResponse = warehouseService.getAndUpdateAvailableWarehouse(productId, quantity, null);
-
-        // 2. Handle insufficient stock situation (service returns null)
-        if (serviceResponse == null) {
-            // Create a failure response indicating "insufficient stock"
-            WarehouseResponse failureResponse = new WarehouseResponse(
-                    ResponseCode.W8.getMessage(), ResponseCode.W8.getResponseCode());
-            return ResponseEntity.ok(failureResponse);
-        }
-
-        // 3. [Core modification] Unpack data returned by Service and build final success response
-
-        // Create an empty, successful WarehouseResponse object
-        WarehouseResponse successResponse = new WarehouseResponse(
-                ResponseCode.W7.getMessage(), ResponseCode.W7.getResponseCode());
-
-        // Extract data from serviceResponse and populate into final successResponse
-        successResponse.setWarehouses(serviceResponse.getWarehouses()); // Set warehouse list
-        successResponse.setInventoryTransactionIds(serviceResponse.getInventoryTransactionIds()); // Set [key] transaction ID list
-
-        // 4. Return success response with populated data
-        return ResponseEntity.ok(successResponse);
-    }
-
-    @PutMapping("/unhold")
-    public ResponseEntity<WarehouseResponse> unholdProduct(@RequestBody UnholdProductRequest request) {
-        boolean result = warehouseService.unholdProduct(request);
-        if (result) {
-            return ResponseEntity.ok(new WarehouseResponse(
-                    ResponseCode.W9.getMessage(), ResponseCode.W9.getResponseCode()));
-        }
-        WarehouseResponse response = new WarehouseResponse(
-                ResponseCode.W10.getMessage(), ResponseCode.W10.getResponseCode());
-        return ResponseEntity.ok(response);
-    }
     
     /**
      * Get inventory audit logs for an order

@@ -1,6 +1,5 @@
 package comp5348.storeservice.controller;
 
-import comp5348.storeservice.dto.PaymentRequest;
 import comp5348.storeservice.dto.PaymentResponse;
 import comp5348.storeservice.model.Payment;
 import comp5348.storeservice.service.PaymentService;
@@ -10,7 +9,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Optional;
 
 @RestController
 @RequestMapping("/api/payments")
@@ -23,58 +21,8 @@ public class PaymentController {
     private PaymentService paymentService;
     
     /**
-     * Create payment
-     */
-    @PostMapping
-    public ResponseEntity<PaymentResponse> createPayment(@RequestBody PaymentRequest request) {
-        logger.info("Creating payment: orderId={}, amount={}", request.getOrderId(), request.getAmount());
-        
-        try {
-            Payment payment = paymentService.createPayment(request.getOrderId(), request.getAmount());
-            return ResponseEntity.ok(new PaymentResponse(true, payment, "Payment created successfully"));
-            
-        } catch (Exception e) {
-            logger.error("Failed to create payment: {}", e.getMessage(), e);
-            return ResponseEntity.badRequest().body(
-                new PaymentResponse(false, null, "Failed to create payment: " + e.getMessage())
-            );
-        }
-    }
-    
-    /**
-     * Query payment status (by orderId)
-     */
-    @GetMapping("/order/{orderId}")
-    public ResponseEntity<PaymentResponse> getPaymentByOrderId(@PathVariable Long orderId) {
-        logger.info("Querying payment for orderId={}", orderId);
-        
-        Optional<Payment> payment = paymentService.getPaymentByOrderId(orderId);
-        
-        if (payment.isPresent()) {
-            return ResponseEntity.ok(new PaymentResponse(true, payment.get(), "Payment found"));
-        } else {
-            return ResponseEntity.notFound().build();
-        }
-    }
-    
-    /**
-     * Query payment status (by paymentId)
-     */
-    @GetMapping("/{paymentId}")
-    public ResponseEntity<PaymentResponse> getPaymentById(@PathVariable Long paymentId) {
-        logger.info("Querying payment: paymentId={}", paymentId);
-        
-        Optional<Payment> payment = paymentService.getPaymentById(paymentId);
-        
-        if (payment.isPresent()) {
-            return ResponseEntity.ok(new PaymentResponse(true, payment.get(), "Payment found"));
-        } else {
-            return ResponseEntity.notFound().build();
-        }
-    }
-    
-    /**
-     * Request refund
+     * Request refund. Needs a login since auth PR 2; PR 3 makes it admin-only (decision 4).
+     * Creating a payment with any amount and reading any payment by id had no caller and were removed (decision 3).
      */
     @PostMapping("/{orderId}/refund")
     public ResponseEntity<PaymentResponse> refundPayment(@PathVariable Long orderId, @RequestBody(required = false) String reason) {

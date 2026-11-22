@@ -469,11 +469,4 @@ public class PaymentService {
     public Optional<Payment> getPaymentByOrderId(Long orderId) {
         return paymentRepository.findByOrderId(orderId);
     }
-
-    /**
-     * Query payment by id
-     */
-    public Optional<Payment> getPaymentById(Long id) {
-        return paymentRepository.findById(id);
-    }
 }

@@ -90,16 +90,6 @@ public class OrderService {
     }
 
     /**
-     * Get order list by order status
-     */
-    public List<OrderDTO> getOrdersByStatus(OrderStatus status) {
-        logger.info("Fetching orders by status: {}", status);
-        return orderRepository.findByStatus(status).stream()
-                .map(this::convertToDTO)
-                .collect(Collectors.toList());
-    }
-
-    /**
      * Create new order (adapted for single product model)
      */
     @Transactional // Ensure entire method is within one transaction
