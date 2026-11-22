@@ -228,15 +228,6 @@ public class OrderProductService {
     }
 
     /**
-     * The user asks for a refund of their own order (POST /api/payments/{orderId}/refund). Someone else's order
-     * answers 404 like every other order endpoint (review 44 🟠2, scenario A2). PR 3 makes refunds admin-only.
-     */
-    public Payment requestRefundForOwnOrder(Long orderId, String userEmail, String reason) {
-        ownOrder(orderId, userEmail);
-        return paymentService.requestRefund(orderId, reason);
-    }
-
-    /**
      * The order, if it belongs to this user. Missing and someone else's look the same (404), see
      * OrderNotFoundException. Every user-facing read or change of one order goes through here (auth PR 2).
      */

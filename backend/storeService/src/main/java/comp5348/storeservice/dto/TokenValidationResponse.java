@@ -15,12 +15,14 @@ public class TokenValidationResponse {
     private Long userId;
     private String email;
     private String message;
+    /** USER or ADMIN (auth PR 3). delivery checks it for its DLQ endpoints; a token without a role claim says USER */
+    private String role;
     
-    public static TokenValidationResponse success(Long userId, String email) {
-        return new TokenValidationResponse(true, userId, email, "Token is valid");
+    public static TokenValidationResponse success(Long userId, String email, String role) {
+        return new TokenValidationResponse(true, userId, email, "Token is valid", role);
     }
     
     public static TokenValidationResponse failure(String message) {
-        return new TokenValidationResponse(false, null, null, message);
+        return new TokenValidationResponse(false, null, null, message, null);
     }
 }

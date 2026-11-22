@@ -139,3 +139,15 @@ test('no payment record: hides Pay Now and says to contact support', async () =>
     expect(screen.queryByRole('button', { name: /Pay Now/ })).not.toBeInTheDocument();
     expect(screen.getByText(/payment record for this order was not found/i)).toBeInTheDocument();
 });
+
+// 鉴权 PR ③（决定 4）：退款只给管理员，订单页不再有"申请退款"按钮。取消（发货前）照样会退钱。
+// 红灯：已付款的订单显示 Request Refund。
+test('a paid order has no refund button: refunds are admin-only', async () => {
+    orderAPI.getOrderWithPayment.mockResolvedValue(orderWith('PAID', 'SUCCESS'));
+
+    renderPage();
+    await flush();
+
+    expect(screen.getByText(/PAID/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Request Refund/i)).not.toBeInTheDocument();
+});

@@ -37,7 +37,6 @@ spec:
         - { method: GET, path: { type: RegularExpression, value: '/api/store/store/orders/user/[0-9]+/with-payment' } }
         - { method: GET, path: { type: RegularExpression, value: '/api/store/store/orders/[0-9]+/with-payment' } }
         - { method: POST, path: { type: RegularExpression, value: '/api/store/store/orders/[0-9]+/(cancel|retry-payment)' } }
-        - { method: POST, path: { type: RegularExpression, value: '/api/store/payments/[0-9]+/refund' } }
         # admin dashboard
         - { method: GET, path: { type: Exact, value: /api/store/orders } }
         - { method: GET, path: { type: Exact, value: /api/store/warehouses } }

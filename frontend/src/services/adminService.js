@@ -13,6 +13,19 @@ adminApi.interceptors.request.use((config) => {
   }
   return config;
 });
+// Expired or missing token: same as the rest of the app (services/api.js), log out and go to the log-in page
+adminApi.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response && error.response.status === 401) {
+      ['token', 'userEmail', 'userId', 'role', 'isLoggedIn'].forEach((key) => localStorage.removeItem(key));
+      if (window.location.pathname !== '/login') {
+        window.location.href = '/login';
+      }
+    }
+    return Promise.reject(error);
+  }
+);
 
 const adminService = {
   // Order Module - Get all orders

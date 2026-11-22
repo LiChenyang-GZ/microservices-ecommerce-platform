@@ -15,6 +15,5 @@ public class DeliveryRequest {
     private List<String> fromAddress;
     private String productName;
     private int quantity;
-    private String notificationUrl;
 }
 

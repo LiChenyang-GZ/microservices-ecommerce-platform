@@ -72,33 +72,6 @@ public class DeliveryController {
     // (InternalDeliveryController), which can tell "too late" from "no delivery yet".
 
     /**
-     * Compatible with old API endpoint (deprecated, kept for backward compatibility)
-     * @deprecated Please use GET /api/deliveries/me
-     */
-    @Deprecated
-    @GetMapping("/all/{email}")
-    public ResponseEntity<?> getAllDeliveryOrders(
-            @PathVariable String email,
-            HttpServletRequest request) {
-        // Get user email from request attribute set by filter
-        String userEmail = (String) request.getAttribute("userEmail");
-        
-        if (userEmail == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                    .body("Unauthorized: Please login first");
-        }
-        
-        // Verify: can only query own orders
-        if (!userEmail.equals(email)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body("Forbidden: You can only view your own delivery orders");
-        }
-        
-        List<DeliveryOrderDTO> deliveryOrders = deliveryService.getAllDeliveryOrders(userEmail);
-        return ResponseEntity.ok(deliveryOrders);
-    }
-
-    /**
      * Cancel delivery task (can only cancel own orders)
      */
     @PostMapping("/{deliveryId}/cancel")

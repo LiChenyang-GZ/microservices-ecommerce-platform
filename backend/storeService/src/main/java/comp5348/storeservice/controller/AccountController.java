@@ -69,16 +69,17 @@ public class AccountController {
             Optional<Account> accountOpt = accountService.getAccountByIdentifier(request.email);
             if (accountOpt.isPresent()) {
                 Account account = accountOpt.get();
-                String token = jwtUtil.generateToken(account.getId(), account.getEmail());
-                return ResponseEntity.ok(new LoginResponse(true, "Login successful", token, account.getId(), account.getEmail()));
+                String token = jwtUtil.generateToken(account.getId(), account.getEmail(), account.getRole());
+                return ResponseEntity.ok(new LoginResponse(true, "Login successful", token, account.getId(),
+                        account.getEmail(), account.getRole().name()));
             }
-            return ResponseEntity.ok(new LoginResponse(true, "Login successful", null, null, null));
+            return ResponseEntity.ok(new LoginResponse(true, "Login successful", null, null, null, null));
         } else {
             // Check if it's an unverified email issue
             if (accountService.emailExists(request.email) && !accountService.isEmailVerified(request.email)) {
-                return ResponseEntity.status(401).body(new LoginResponse(false, "Please verify your email first", null, null, null));
+                return ResponseEntity.status(401).body(new LoginResponse(false, "Please verify your email first", null, null, null, null));
             }
-            return ResponseEntity.status(401).body(new LoginResponse(false, "Email or password incorrect", null, null, null));
+            return ResponseEntity.status(401).body(new LoginResponse(false, "Email or password incorrect", null, null, null, null));
         }
     }
 
@@ -173,8 +174,11 @@ public class AccountController {
         public String token;
         public Long userId;
         public String email;
+        /** USER or ADMIN: the frontend shows the admin dashboard only to ADMIN (the backend checks again) */
+        public String role;
 
-        public LoginResponse(boolean success, String message, String token, Long userId, String email) {
+        public LoginResponse(boolean success, String message, String token, Long userId, String email, String role) {
+            this.role = role;
             this.success = success;
             this.message = message;
             this.token = token;

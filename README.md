@@ -70,7 +70,7 @@ flowchart LR
 
 | Service | Language / framework | What it owns | Database | Interfaces |
 |---|---|---|---|---|
-| **store** | Java 17, Spring Boot 3.5 | users and login (JWT), products and warehouse stock, orders, payments; starts every charge and refund | `store_db` | REST `/api/user`, `/api/products`, `/api/orders`, `/api/store/...`, `/api/payments`; produces `order-events`, consumes `delivery-events`; gRPC client of bank; publishes to `email_queue` |
+| **store** | Java 17, Spring Boot 3.5 | users and login (JWT), products and warehouse stock, orders, payments; starts every charge and refund | `store_db` | REST `/api/user`, `/api/products`, `/api/store/...` (a user's own orders), admin-only `/api/orders`, `/api/warehouses`, `/api/payments/{id}/refund`; produces `order-events`, consumes `delivery-events`; gRPC client of bank; publishes to `email_queue` |
 | **bank** | Java 17, Spring Boot 3.5, grpc-java | accounts and money transfers | `bank_db` | gRPC `BankService.Transfer` / `Refund` on :9090 ([bank.proto](backend/contracts/src/main/proto/bank/v1/bank.proto)); REST `/api/bank/...` for accounts and balances |
 | **delivery** | Java 17, Spring Boot 3.5 | deliveries and the simulated courier (CREATED → PICKED_UP → DELIVERING → RECEIVED, or LOST) | `delivery_db` | REST `/api/deliveries/...`, `/api/admin/dlq/...`, `/internal/deliveries/cancel-by-order/{orderId}`; consumes `order-events`, produces `delivery-events`; RabbitMQ job queue |
 | **email** | Java 17, Spring Boot 3.5 | verification codes and notification emails (Gmail SMTP) | `email_db` | REST `/api/email/...`; consumes `email_queue` |
@@ -220,7 +220,8 @@ docs/
 
 ## Known limitations and next steps
 
-- **Service-to-service calls use shared secrets, not mTLS** (ADR-23). bank, delivery's `/internal/...` and email's password-reset endpoints accept only callers that send the callee's own token; each service refuses to start without its token. There is no automatic rotation (change the value in `backend/.env` / the Secret and restart both sides), and the `email_queue` path is protected only by the RabbitMQ account. Some store and delivery endpoints (for example store's refund endpoint) still need user authorization checks.
+- **Service-to-service calls use shared secrets, not mTLS** (ADR-23). bank, delivery's `/internal/...` and email's password-reset endpoints accept only callers that send the callee's own token; each service refuses to start without its token. There is no automatic rotation (change the value in `backend/.env` / the Secret and restart both sides), and the `email_queue` path is protected only by the RabbitMQ account.
+- **Users and admins** (auth PRs 2 and 3). store requires a login everywhere except sign-up, log-in, password reset and the catalogue; a user can read, cancel and pay only their own orders. Admin endpoints (all orders, warehouses and stock, products and prices, refunds, delivery's DLQ) need the ADMIN role carried in the JWT. The first admin comes from `ADMIN_EMAIL` / `ADMIN_PASSWORD`. The role travels in the JWT, so a role changed in the database applies at the user's next log-in (tokens last 24 hours). Account activation still does not check the email verification code, so anyone can activate any account they registered.
 - **Single replicas.** Every stateful component runs once, and store runs one replica because `OutboxProcessor` has no lock across instances.
 - **Occasional 503 at the kind entry** (finding I2): a read through Envoy Gateway was once reset before reaching store; a retry passed. Not yet explained.
 - **Scenario scripts 01–03 run on compose only**; 04–08 also run on kind.

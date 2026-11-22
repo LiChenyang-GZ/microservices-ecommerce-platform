@@ -76,6 +76,8 @@ public class TokenAuthenticationFilter extends OncePerRequestFilter {
         // Add user information to request attributes for Controller use
         request.setAttribute("userId", result.getUserId());
         request.setAttribute("userEmail", result.getEmail());
+        // USER / ADMIN from store; AdminOnlyInterceptor checks it on @AdminOnly controllers, after routing
+        request.setAttribute(AdminOnlyInterceptor.ROLE_ATTRIBUTE, result.getRole());
         
         filterChain.doFilter(request, response);
     }

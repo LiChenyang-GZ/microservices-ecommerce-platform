@@ -101,6 +101,8 @@ public abstract class DeliveryIntegrationTest {
     @DynamicPropertySource
     static void kafkaAddress(DynamicPropertyRegistry registry) {
         registry.add("spring.kafka.bootstrap-servers", KAFKA::getBootstrapServers);
+        // 鉴权 PR ③：用户 token 由假 store 验（FakeStore）。以前没配这个键，测试里验 token 会去连本机的 8082
+        registry.add("store.service.url", FakeStore::start);
     }
 
     /** RabbitMQ 不是这一步要测的：发作业到队列的调用全部变成"什么都不做" */

@@ -27,8 +27,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * 【调用方】删之前 grep 过：frontend/src/services/、backend/docker/、k8s/scripts/、delivery、email、bank、tracking
  *   都不调这些接口（2026-11-22）。入口（routes.yaml、nginx.conf）也没放行，但集群里、本机端口上能直接调。
- * 【为什么每个请求都带订单主人的 token】PR ② 之后没登录的请求在安全链就被 401 挡住了，测不出"接口还在不在"。
- *   带上合法 token，证明的是"就算是订单主人也调不了"：接口没了，不是被挡了。
+ * 【为什么每个请求都带管理员 token】PR ② 之后没登录的请求在安全链就被 401 挡住了；PR ③ 之后 /api/warehouses/** 对普通用户是 403。
+ *   都测不出"接口还在不在"。带上权限最大的 token，证明的是"就算是管理员也调不了"：接口没了，不是被挡了。
+ *   （PR ② 时这里用的是订单主人的 token；PR ③ 加了管理员规则后，仓库那几条会先被 403 挡住，所以换成管理员。）
  * 【红灯为什么红】这些接口都还在，而且**真的生效**：没付钱的订单变成 PROCESSING、库存被还回去、建了一笔任意金额的付款……
  * 【期望的状态码】大多是 404。两个例外是 Spring MVC 的路由规则，不是接口还在：
  *   POST /api/orders → 405（同一路径还有管理页用的 GET /api/orders）；
@@ -187,9 +188,9 @@ class OldStoreEndpointsRemovedTest extends StoreHttpTest {
         assertThat(codes).isEqualTo(allGone);
     }
 
-    /** 带上订单主人的 token 发请求，回状态码 */
+    /** 带上管理员 token（用订单主人的身份签、角色是 ADMIN）发请求，回状态码 */
     private int call(MockHttpServletRequestBuilder request, PlacedOrder order) throws Exception {
-        return mvc.perform(request.header("Authorization", bearer(ownerOf(order))))
+        return mvc.perform(request.header("Authorization", adminBearer(ownerOf(order))))
                 .andReturn().getResponse().getStatus();
     }
 }

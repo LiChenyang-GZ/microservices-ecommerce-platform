@@ -78,12 +78,24 @@ public class JwtUtil {
     }
 
     /**
-     * Generate token
+     * Generate token. The role claim (auth PR 3) is what admin endpoints check; a token signed before roles existed
+     * has none and counts as USER (Role#of).
      */
-    public String generateToken(Long userId, String email) {
+    public String generateToken(Long userId, String email, comp5348.storeservice.model.Role role) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("userId", userId);
+        claims.put("role", role.name());
         return createToken(claims, email);
+    }
+
+    /** Verifies the signature and the expiry, then returns the claims; throws if either check fails */
+    public Claims parseClaims(String token) {
+        return extractAllClaims(token);
+    }
+
+    /** USER unless the token says ADMIN */
+    public comp5348.storeservice.model.Role extractRole(String token) {
+        return comp5348.storeservice.model.Role.of(extractAllClaims(token).get("role"));
     }
 
     /**

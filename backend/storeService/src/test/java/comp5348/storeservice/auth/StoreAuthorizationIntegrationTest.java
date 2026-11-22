@@ -248,31 +248,19 @@ class StoreAuthorizationIntegrationTest extends StoreHttpTest {
         }
 
         /**
-         * A2（44 号审查 🟠2）：原计划留给 PR ③（改成管理员才能调）。注册、激活不要验证码（A11），
-         * "要登录"约等于谁都行，所以这个 PR 先用归属检查堵上，PR ③ 再改成管理员。
+         * A2（44 号审查 🟠2）：PR ② 先用归属检查堵上（回 404），PR ③ 照决定 4 改成只有管理员能退款：
+         * 普通用户不管是不是自己的单都是 403。主人自己退款的那条在 AdminRoleIntegrationTest#owner_cannotRequestARefund。
          */
         @Test
-        void someoneElsesOrder_is404_andNoRefundIsQueued() throws Exception {
+        void someoneElsesOrder_isForbidden_andNoRefundIsQueued() throws Exception {
             PlacedOrder order = placePaidOrder();
 
             mvc.perform(post("/api/payments/{orderId}/refund", order.orderId())
                             .header("Authorization", bearer(newUser())))
-                    .andExpect(status().isNotFound());
+                    .andExpect(status().isForbidden());
 
             assertThat(paymentOf(order).getStatus()).isEqualTo(PaymentStatus.SUCCESS);
             assertThat(openTasksOf(order, "REFUND")).isEmpty();
-        }
-
-        /** 本来就绿：主人自己点退款按钮，PR ③ 之前照旧能用 */
-        @Test
-        void owner_canStillRequestRefund() throws Exception {
-            PlacedOrder order = placePaidOrder();
-
-            mvc.perform(post("/api/payments/{orderId}/refund", order.orderId())
-                            .header("Authorization", bearer(ownerOf(order))))
-                    .andExpect(status().isOk());
-
-            assertThat(paymentOf(order).getStatus()).isEqualTo(PaymentStatus.REFUND_PENDING);
         }
     }
 

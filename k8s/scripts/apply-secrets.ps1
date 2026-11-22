@@ -45,6 +45,9 @@ $secrets = [ordered]@{
         BANK_SERVICE_TOKEN     = Need 'BANK_SERVICE_TOKEN'
         DELIVERY_SERVICE_TOKEN = Need 'DELIVERY_SERVICE_TOKEN'
         EMAIL_SERVICE_TOKEN    = Need 'EMAIL_SERVICE_TOKEN'
+        # The first admin (auth PR 3). Optional, as in compose: empty means no admin.
+        ADMIN_EMAIL            = "$($vars['ADMIN_EMAIL'])"
+        ADMIN_PASSWORD         = "$($vars['ADMIN_PASSWORD'])"
     }
     # A called service holds only its own token.
     'bank'      = @{

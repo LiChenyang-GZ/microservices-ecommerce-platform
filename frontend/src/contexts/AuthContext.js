@@ -9,6 +9,9 @@ export const AuthProvider = ({ children }) => {
   const [userEmail, setUserEmail] = useState('');
   const [userId, setUserId] = useState(null);
   const [token, setToken] = useState(null);
+  // USER or ADMIN from the login reply (auth PR 3). Only decides what the UI shows; the backend checks again.
+  // Nothing saved (logged in before roles existed) counts as an ordinary user.
+  const [role, setRole] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
 
   // Check login status in localStorage on initialization
@@ -17,12 +20,14 @@ export const AuthProvider = ({ children }) => {
       const savedToken = localStorage.getItem('token');
       const savedUserEmail = localStorage.getItem('userEmail');
       const savedUserId = localStorage.getItem('userId');
+      const savedRole = localStorage.getItem('role');
       
       if (savedToken && savedUserEmail) {
         setIsLoggedIn(true);
         setUserEmail(savedUserEmail);
         setToken(savedToken);
         setUserId(savedUserId ? parseInt(savedUserId) : null);
+        setRole(savedRole);
       }
       setIsLoading(false);
     };
@@ -31,7 +36,13 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   // Login function
-  const login = (email, token, userId) => {
+  const login = (email, token, userId, role) => {
+    setRole(role || null);
+    if (role) {
+      localStorage.setItem('role', role);
+    } else {
+      localStorage.removeItem('role');
+    }
     setIsLoggedIn(true);
     setUserEmail(email);
     setToken(token);
@@ -48,6 +59,8 @@ export const AuthProvider = ({ children }) => {
     setUserEmail('');
     setToken(null);
     setUserId(null);
+    setRole(null);
+    localStorage.removeItem('role');
     localStorage.removeItem('token');
     localStorage.removeItem('userEmail');
     localStorage.removeItem('userId');
@@ -59,6 +72,7 @@ export const AuthProvider = ({ children }) => {
     userEmail,
     userId,
     token,
+    role,
     isLoading,
     login,
     logout

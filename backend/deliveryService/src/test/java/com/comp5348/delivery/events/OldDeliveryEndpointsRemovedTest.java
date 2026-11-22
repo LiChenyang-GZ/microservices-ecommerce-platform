@@ -1,9 +1,11 @@
 package com.comp5348.delivery.events;
 
 import com.comp5348.delivery.support.DeliveryIntegrationTest;
+import com.comp5348.delivery.support.FakeStore;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -40,6 +42,17 @@ class OldDeliveryEndpointsRemovedTest extends DeliveryIntegrationTest {
     @Test
     void oldCancelByOrderEndpointIsGone() throws Exception {
         mvc().perform(post("/api/deliveries/cancel-by-order/" + newOrderId()))
+                .andExpect(status().isNotFound());
+    }
+
+    /**
+     * 鉴权 PR ③（36 号 D7）：按邮箱查配送单。它已经只让查自己的邮箱，但前端不调了（PR #24 删了 getAllDeliveriesByEmail），
+     * 照决定 3 删掉。带过滤器、带合法 token 查自己的邮箱：红灯时 200，删了以后 404。
+     */
+    @Test
+    void deliveriesByEmailEndpointIsGone() throws Exception {
+        mvcWithFilters().perform(get("/api/deliveries/all/{email}", FakeStore.USER_EMAIL)
+                        .header("Authorization", "Bearer " + FakeStore.USER_TOKEN))
                 .andExpect(status().isNotFound());
     }
 }

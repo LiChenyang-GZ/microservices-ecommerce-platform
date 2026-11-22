@@ -5,6 +5,8 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Column;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import lombok.Data;
 import lombok.Getter;
 import lombok.Setter;
@@ -42,6 +44,22 @@ public class Account {
   @Setter
   @Column(unique = true)
   private String bankAccountNumber; // Associated bank account (automatically opened when activated)
+
+    /**
+     * USER or ADMIN (auth PR 3). Nullable in the table: ddl-auto=update adds the column to existing databases, where
+     * old rows start as NULL; AccountRoleUpgrade fills them with USER at startup, and getRole() reads NULL as USER.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private Role role = Role.USER;
+
+    public Role getRole() {
+        return role == null ? Role.USER : role;
+    }
+
+    public boolean isAdmin() {
+        return getRole() == Role.ADMIN;
+    }
 }
 
 

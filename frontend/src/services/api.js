@@ -115,6 +115,7 @@ api.interceptors.response.use(
         localStorage.removeItem('token');
         localStorage.removeItem('userEmail');
         localStorage.removeItem('userId');
+        localStorage.removeItem('role');
         localStorage.removeItem('isLoggedIn');
         // Can trigger logout operation here
         if (window.location.pathname !== '/login') {
@@ -265,6 +266,7 @@ deliveryApi.interceptors.response.use(
         localStorage.removeItem('token');
         localStorage.removeItem('userEmail');
         localStorage.removeItem('userId');
+        localStorage.removeItem('role');
         localStorage.removeItem('isLoggedIn');
         if (window.location.pathname !== '/login') {
           window.location.href = '/login';
@@ -424,21 +426,7 @@ export const productAPI = {
 
 };
 
-// Payment related API
-export const paymentAPI = {
-
-  // Apply for refund
-  refundPayment: async (orderId, reason = 'Customer requested refund') => {
-    try {
-      const response = await api.post(`/payments/${orderId}/refund`, { reason });
-      return response.data;
-    } catch (error) {
-      // Error already formatted in interceptor, just throw it
-      console.error('[Refund Failed]', error.errorDetails || error);
-      throw error;
-    }
-  }
-
-};
+// Refunds are admin-only since auth PR 3 (decision 4); users get money back by cancelling before pickup.
+// No page requests a refund any more, so there is no paymentAPI.
 
 export default api;

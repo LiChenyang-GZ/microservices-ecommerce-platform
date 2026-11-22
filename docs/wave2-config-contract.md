@@ -35,6 +35,7 @@ So the shared part is fixed here first and merged before the three branches star
 | `BANK_SERVICE_TOKEN` | bank, store | from `backend/.env` (secret) | added after wave 2 (ADR-23): bank checks it on gRPC and REST, store sends it |
 | `DELIVERY_SERVICE_TOKEN` | delivery, store | from `backend/.env` (secret) | ADR-23: delivery checks it on `/internal/*`, store sends it |
 | `EMAIL_SERVICE_TOKEN` | email, store | from `backend/.env` (secret) | ADR-23: email checks it on the password-reset endpoints, store sends it |
+| `ADMIN_EMAIL`, `ADMIN_PASSWORD` | store | from `backend/.env` (secret), optional | auth PR 3: the first admin, created at startup if both are set and the email is unused; empty means no admin |
 
 Consumer group ids, set in each service's own config: store = `store`, delivery = `delivery`, tracking = `tracking`.
 
