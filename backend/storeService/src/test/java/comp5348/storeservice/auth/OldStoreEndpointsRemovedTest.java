@@ -153,7 +153,7 @@ class OldStoreEndpointsRemovedTest extends StoreHttpTest {
                 .as("库存没被锁走").isEqualTo(stockBefore);
     }
 
-    /** 红：这些读接口都回 200，能看到任何人的订单、付款、出库记录 */
+    /** 红：这些读接口都回 200，能看到任何人的订单、付款、出库记录，能查邮箱有没有注册 */
     @Test
     void readEndpointsThatLeakOtherPeoplesOrders_areGone() throws Exception {
         PlacedOrder order = placeOrder();
@@ -166,6 +166,16 @@ class OldStoreEndpointsRemovedTest extends StoreHttpTest {
         reads.put("GET /api/orders/{id}/inventory-records", get("/api/orders/{id}/inventory-records", order.orderId()));
         reads.put("GET /api/payments/order/{orderId}", get("/api/payments/order/{orderId}", order.orderId()));
         reads.put("GET /api/payments/{paymentId}", get("/api/payments/{paymentId}", order.paymentId()));
+        // 44 号审查 🟡5：和删掉的 /api/orders/{id}/inventory-records 读的是同一批数据，绿灯时漏了
+        reads.put("GET /api/warehouses/audit-logs/order/{orderId}",
+                get("/api/warehouses/audit-logs/order/{orderId}", order.orderId()));
+        reads.put("GET /api/warehouses/admin/out-transactions/order/{orderId}",
+                get("/api/warehouses/admin/out-transactions/order/{orderId}", order.orderId()));
+        // 44 号审查 🟡4：前端、脚本、别的服务都不调，却是公开的，能用来枚举"这个邮箱有没有账户、激活没有"
+        reads.put("GET /api/user/check-verified/{email}",
+                get("/api/user/check-verified/{email}", order.buyerEmail()));
+        reads.put("POST /api/user/check-email", post("/api/user/check-email")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"email\":\"" + order.buyerEmail() + "\"}"));
 
         Map<String, Integer> codes = new LinkedHashMap<>();
         for (Map.Entry<String, MockHttpServletRequestBuilder> read : reads.entrySet()) {
