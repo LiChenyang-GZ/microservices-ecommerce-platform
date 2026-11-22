@@ -35,6 +35,7 @@ A 和 B 本来都要改 `backend/compose.yml` 和 `.env.example`；C 写 ConfigM
 | `BANK_SERVICE_TOKEN` | bank、store | 来自 `backend/.env`（密钥） | 第 2 波之后加的（ADR-23）：bank 在 gRPC 和 REST 上检查，store 发送 |
 | `DELIVERY_SERVICE_TOKEN` | delivery、store | 来自 `backend/.env`（密钥） | ADR-23：delivery 在 `/internal/*` 上检查，store 发送 |
 | `EMAIL_SERVICE_TOKEN` | email、store | 来自 `backend/.env`（密钥） | ADR-23：email 在找回密码的两个接口上检查，store 发送 |
+| `ADMIN_EMAIL`、`ADMIN_PASSWORD` | store | 来自 `backend/.env`（密钥），可选 | 鉴权 PR ③：第一个管理员，两个都配了、邮箱没人用时启动时建；空的就不建 |
 
 消费者组 id，写在各服务自己的配置里：store = `store`，delivery = `delivery`，tracking = `tracking`。
 

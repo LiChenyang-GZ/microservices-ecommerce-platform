@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { useAuth } from '../../contexts/AuthContext';
 import adminService from '../../services/adminService';
 import { deliveryAPI } from '../../services/api';
 import './AdminDashboard.css';
@@ -634,4 +635,14 @@ const DeliveryDLQModuleContent = ({ alerts = [], onResolve, onRequeue, isActionL
   );
 };
 
-export default AdminDashboard;
+// Admins only (auth PR 3). The backend answers 403 to anyone else anyway; this only spares an ordinary user
+// who types /admin a page where every module fails. A wrapper, so AdminDashboard's hooks always run in order.
+const AdminOnlyDashboard = () => {
+  const { role, isLoading } = useAuth();
+  if (isLoading) {
+    return <div className="loading">Loading...</div>;
+  }
+  return role === 'ADMIN' ? <AdminDashboard /> : <Navigate to="/" replace />;
+};
+
+export default AdminOnlyDashboard;

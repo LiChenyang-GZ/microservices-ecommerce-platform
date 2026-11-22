@@ -74,7 +74,7 @@ const LoginPage = () => {
       // Handle successful response
       if (response.success && response.token) {
         // Use auth context to update login status, save token and user info
-        login(response.email, response.token, response.userId);
+        login(response.email, response.token, response.userId, response.role);
         
         alert('Login successful! Welcome back!');
         

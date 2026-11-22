@@ -138,6 +138,9 @@ services:
       BANK_SERVICE_TOKEN: ${BANK_SERVICE_TOKEN:?set BANK_SERVICE_TOKEN in backend/.env}
       DELIVERY_SERVICE_TOKEN: ${DELIVERY_SERVICE_TOKEN:?set DELIVERY_SERVICE_TOKEN in backend/.env}
       EMAIL_SERVICE_TOKEN: ${EMAIL_SERVICE_TOKEN:?set EMAIL_SERVICE_TOKEN in backend/.env}
+      # The first admin (auth PR 3). Optional: empty means no admin, store still starts.
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy

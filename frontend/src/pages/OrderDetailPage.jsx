@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import BackButton from '../components/BackButton';
-import { orderAPI, paymentAPI } from '../services/api';
+import { orderAPI } from '../services/api';
 import { useAuth } from '../contexts/AuthContext';
 import './OrderDetailPage.css';
 
@@ -13,7 +13,6 @@ function OrderDetailPage() {
     const [order, setOrder] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isCancelling, setIsCancelling] = useState(false);
-    const [isRefunding, setIsRefunding] = useState(false);
     const [isPaying, setIsPaying] = useState(false);
     const [error, setError] = useState('');
     const { id } = useParams();
@@ -105,25 +104,6 @@ function OrderDetailPage() {
         }
     };
 
-    const handleRefund = async () => {
-        if (!window.confirm('Are you sure you want to request a refund for this order?')) {
-            return;
-        }
-
-        try {
-            setIsRefunding(true);
-            await paymentAPI.refundPayment(id, 'Customer requested refund');
-            alert('Refund requested. It will be processed shortly.');
-            await fetchOrderDetails(); // Refresh order details
-        } catch (err) {
-            console.error('Refund failed:', err);
-            const errorMessage = err.formattedMessage || 'Refund request failed, please try again later.';
-            alert(errorMessage);
-        } finally {
-            setIsRefunding(false);
-        }
-    };
-
     const handlePayNow = async () => {
         if (!window.confirm('Proceed to pay for this order? Make sure you have sufficient balance in your account.')) {
             return;
@@ -171,16 +151,9 @@ function OrderDetailPage() {
     const canCancel = order && order.orderStatus &&
         !['CANCELLED', 'CANCELED', 'COMPLETED', 'DELIVERED', 'SHIPPED', 'IN_TRANSIT', 'DELIVERING'].includes(order.orderStatus.toUpperCase());
 
-    // Determine if refund is available - hide when in delivery or already cancelled
-    // Note: Cancel button already handles refunds, so refund button is only for special cases
+    // No refund button: refunds are admin-only (auth PR 3, decision 4). Cancelling before pickup refunds.
     const normalizedOrderStatus = order?.orderStatus?.toUpperCase() || '';
     const isCancelledStatus = normalizedOrderStatus.includes('CANCELLED');
-
-    const canRefund = order && order.payment &&
-        order.payment.status &&
-        order.payment.status.toUpperCase() === 'SUCCESS' &&
-        order.orderStatus &&
-        !['CANCELLED', 'CANCELED', 'REFUNDED', 'SHIPPED', 'IN_TRANSIT', 'DELIVERING', 'DELIVERED'].includes(normalizedOrderStatus);
 
     const paymentStatusNormalized = order?.payment?.status?.toUpperCase() || '';
 
@@ -373,15 +346,6 @@ function OrderDetailPage() {
                         disabled={isCancelling}
                     >
                         {isCancelling ? 'Cancelling...' : 'Cancel Order'}
-                    </button>
-                )}
-                {canRefund && (
-                    <button
-                        onClick={handleRefund}
-                        className="btn btn-warning"
-                        disabled={isRefunding}
-                    >
-                        {isRefunding ? 'Processing Refund...' : 'Request Refund'}
                     </button>
                 )}
             </div>

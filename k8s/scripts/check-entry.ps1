@@ -8,6 +8,7 @@
 #   open    the request reaches the service (any answer except the entry's own 404 or a 502/503/504)
 #   closed  the entry's own 404 (body "not found"), the service never sees it
 #   page    the frontend's index.html with 200
+#   auth    the request reaches the service and it answers 401: the path needs a login (auth PR 2, 3)
 # Requests carry no token, an empty JSON body and ids that do not exist,
 # so the open ones are refused by the service and change nothing.
 param([string[]]$Entries = @('http://localhost', 'http://localhost:3000'))
@@ -25,25 +26,24 @@ open   POST   /api/store/user/reset-password                            reset pa
 open   GET    /api/store/products                                       catalogue; admin dashboard
 open   GET    /api/store/products/available                             catalogue
 open   GET    /api/store/products/999999999                             product page, checkout
-open   POST   /api/store/store/orders/create-with-payment               checkout
-open   GET    /api/store/store/orders/user/999999999/with-payment       my orders
-open   GET    /api/store/store/orders/999999999/with-payment            order page
-open   POST   /api/store/store/orders/999999999/cancel                  order page, delivery page
-open   POST   /api/store/store/orders/999999999/retry-payment           order page: Pay Now
-open   POST   /api/store/payments/999999999/refund                      order page: refund button
-open   GET    /api/store/orders                                         admin dashboard
-open   GET    /api/store/warehouses                                     admin dashboard
-open   GET    /api/store/warehouses/audit-logs/out-transactions         admin dashboard
+auth   POST   /api/store/store/orders/create-with-payment               checkout
+auth   GET    /api/store/store/orders/user/999999999/with-payment       my orders
+auth   GET    /api/store/store/orders/999999999/with-payment            order page
+auth   POST   /api/store/store/orders/999999999/cancel                  order page, delivery page
+auth   POST   /api/store/store/orders/999999999/retry-payment           order page: Pay Now
+auth   GET    /api/store/orders                                         admin dashboard
+auth   GET    /api/store/warehouses                                     admin dashboard
+auth   GET    /api/store/warehouses/audit-logs/out-transactions         admin dashboard
 # email, unchanged path
 open   POST   /api/email/send-verification                              register
 open   POST   /api/email/verify-code                                    email verification page
 # delivery, /api/delivery/x -> delivery /api/x
-open   GET    /api/delivery/deliveries/me                               delivery list
-open   GET    /api/delivery/deliveries/999999999                        delivery page
-open   POST   /api/delivery/deliveries/999999999/cancel                 delivery page
-open   GET    /api/delivery/admin/dlq/delivery                          admin dashboard
-open   POST   /api/delivery/admin/dlq/delivery/999999999/resolve        admin dashboard
-open   POST   /api/delivery/admin/dlq/delivery/999999999/requeue        admin dashboard
+auth   GET    /api/delivery/deliveries/me                               delivery list
+auth   GET    /api/delivery/deliveries/999999999                        delivery page
+auth   POST   /api/delivery/deliveries/999999999/cancel                 delivery page
+auth   GET    /api/delivery/admin/dlq/delivery                          admin dashboard
+auth   POST   /api/delivery/admin/dlq/delivery/999999999/resolve        admin dashboard
+auth   POST   /api/delivery/admin/dlq/delivery/999999999/requeue        admin dashboard
 
 # ---- closed: review #1, delivery's token-free calls that only store makes ----
 closed POST   /api/delivery/deliveries/create                           #1 fake delivery for any order
@@ -75,6 +75,8 @@ closed POST   /api/email/send-password-reset                            store ->
 closed GET    /api/bank/account/CUSTOMER_ACCOUNT_001/balance            only the removed top-up page used it
 # ---- closed: tracking (no page calls it yet) ----
 closed GET    /api/tracking/orders/999999999/timeline                   no frontend caller
+# ---- closed: refunds are admin-only since auth PR 3 and no page requests one ----
+closed POST   /api/store/payments/999999999/refund                      no frontend caller
 # ---- closed: not part of the API at all ----
 closed GET    /actuator/health                                          probes stay inside
 closed GET    /internal/deliveries/cancel-by-order/1                    internal prefix
@@ -107,6 +109,7 @@ function Verdict($expect, $r) {
         'closed' { return (IsEntry404 $r) }
         'open'   { return $r.Status -ne 0 -and -not (IsEntry404 $r) -and $r.Status -notin 502, 503, 504 }
         'page'   { return $r.Status -eq 200 -and $r.Body -match '<div id="root">' }
+        'auth'   { return $r.Status -eq 401 }
     }
 }
 
