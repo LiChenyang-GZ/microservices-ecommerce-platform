@@ -12,6 +12,11 @@ import jakarta.servlet.http.HttpServletRequest;
  *
  * Someone who reaches store without the entry can write any X-Forwarded-For. Only this machine (compose publishes
  * on 127.0.0.1) and pods inside the cluster can do that.
+ *
+ * Tomcat must leave the header alone (server.forward-headers-strategy=none): on Kubernetes Spring Boot would turn
+ * on RemoteIpValve, and on kind that let a client-written value count as the client (Obsidian 54, R16).
+ * In a cloud with a load balancer in front of Envoy, the last value would be the load balancer's address for
+ * everyone: then Envoy must be told to trust that one hop, and this rule checked again before going live.
  */
 public final class ClientIp {
 
