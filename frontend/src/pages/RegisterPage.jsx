@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Input from '../components/Input';
 import Button from '../components/Button';
-import { userAPI, emailAPI } from '../services/api';
+import { userAPI } from '../services/api';
 import './RegisterPage.css';
 
 const RegisterPage = () => {
@@ -91,7 +91,7 @@ const RegisterPage = () => {
         // 2. Send verification code
         try {
           console.log('Sending verification code to:', formData.email);
-          const emailResponse = await emailAPI.sendVerificationCode(formData.email);
+          const emailResponse = await userAPI.sendVerificationCode(formData.email);
           
           if (emailResponse.success) {
             console.log('Verification code sent successfully');

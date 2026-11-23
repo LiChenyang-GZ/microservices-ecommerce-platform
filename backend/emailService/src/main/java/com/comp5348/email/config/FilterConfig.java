@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class FilterConfig {
 
-    /** Service token on /api/* except the public registration endpoint (ServiceTokenFilter#PUBLIC_PATHS). */
+    /** Service token on all of /api/* (ServiceTokenFilter#PUBLIC_PATHS is empty since the rate limits, Obsidian 54). */
     @Bean
     public FilterRegistrationBean<ServiceTokenFilter> serviceTokenFilterRegistration(ServiceToken serviceToken) {
         FilterRegistrationBean<ServiceTokenFilter> registration = new FilterRegistrationBean<>();

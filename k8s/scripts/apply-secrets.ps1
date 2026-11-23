@@ -48,7 +48,11 @@ $secrets = [ordered]@{
         # The first admin (auth PR 3). Optional, as in compose: empty means no admin.
         ADMIN_EMAIL            = "$($vars['ADMIN_EMAIL'])"
         ADMIN_PASSWORD         = "$($vars['ADMIN_PASSWORD'])"
+        # Rate-limit counters in Redis (Obsidian 54)
+        REDIS_PASSWORD         = Need 'REDIS_PASSWORD'
     }
+    # Redis checks the password, store sends it: the same value in both (as in compose).
+    'redis'     = @{ REDIS_PASSWORD = Need 'REDIS_PASSWORD' }
     # A called service holds only its own token.
     'bank'      = @{
         BANK_DB_PASSWORD   = Need 'BANK_DB_PASSWORD'

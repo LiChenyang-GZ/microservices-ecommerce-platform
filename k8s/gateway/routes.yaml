@@ -4,9 +4,10 @@
 #
 #   /api/store/x     -> store    /api/x   (store's paths are /api/user, /api/orders, ...)
 #   /api/delivery/x  -> delivery /api/x   (/api/deliveries, /api/admin/dlq)
-#   /api/email/...   -> email    unchanged
 #   /                -> frontend
-# bank and tracking: no path from outside, the frontend calls neither.
+# bank, tracking and email: no path from outside, the frontend calls none of them
+# (a verification code is asked from store since the rate limits, Obsidian 54).
+# Envoy appends the address it saw to X-Forwarded-For; store's rate limits count by that last value.
 #
 # A new frontend call needs a line here and the same line in frontend/nginx.conf;
 # ./k8s/scripts/check-entry.ps1 runs one list of requests against both entries.
@@ -27,6 +28,7 @@ spec:
     - matches:
         - { method: POST, path: { type: Exact, value: /api/store/user } }
         - { method: POST, path: { type: Exact, value: /api/store/user/login } }
+        - { method: POST, path: { type: Exact, value: /api/store/user/send-verification } }
         - { method: POST, path: { type: Exact, value: /api/store/user/activate } }
         - { method: POST, path: { type: Exact, value: /api/store/user/forgot-password } }
         - { method: POST, path: { type: Exact, value: /api/store/user/reset-password } }
@@ -58,10 +60,6 @@ spec:
           extensionRef: { group: gateway.envoyproxy.io, kind: HTTPRouteFilter, name: strip-delivery }
       backendRefs:
         - { name: delivery, port: 8081 }
-    - matches:
-        - { method: POST, path: { type: Exact, value: /api/email/send-verification } }
-      backendRefs:
-        - { name: email, port: 8083 }
     # Everything else under these prefixes: 404 from the entry. Without this
     # rule they would fall through to "/" and the frontend would answer 200
     # with index.html, which hides the mistake. Exact and regex matches above

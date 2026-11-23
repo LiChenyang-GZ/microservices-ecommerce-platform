@@ -12,8 +12,9 @@ import java.io.IOException;
 import java.util.Set;
 
 /**
- * An allow-list, not a block-list: on /api/* only the registration page's send-verification is public;
- * every other path needs X-Service-Token, whether or not an endpoint exists there.
+ * An allow-list, not a block-list: on /api/* nothing is public any more (rate limits, Obsidian 54: the
+ * registration page asks store for a code, and store calls send-verification with its token). Every path needs
+ * X-Service-Token, whether or not an endpoint exists there.
  * So a new endpoint added later is closed by default, and a removed one answers 401 to strangers
  * (they learn nothing) and 404 only to store.
  *
@@ -26,11 +27,12 @@ public class ServiceTokenFilter extends OncePerRequestFilter {
     private static final Logger logger = LoggerFactory.getLogger(ServiceTokenFilter.class);
 
     /**
-     * Called by the browser on the registration page (frontend services/api.js), so no service token.
-     * verify-code used to be here too; since A11 the browser hands the code to store's activate and store asks
-     * email with its service token, so a stranger cannot try codes against email directly.
+     * Empty. verify-code was public until A11 (store's activate checks the code now); send-verification until the
+     * rate limits (Obsidian 54): the browser called it directly, and email, which knows no accounts, would mail any
+     * address any number of times. Now store counts the request, checks the account and calls it with its token.
+     * Kept as a set so the rule stays visible: anything added here is reachable by anyone.
      */
-    static final Set<String> PUBLIC_PATHS = Set.of("/api/email/send-verification");
+    static final Set<String> PUBLIC_PATHS = Set.of();
 
     private final ServiceToken serviceToken;
 

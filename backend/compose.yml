@@ -141,6 +141,10 @@ services:
       # The first admin (auth PR 3). Optional: empty means no admin, store still starts.
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Rate-limit counters (Obsidian 54). Not in depends_on on purpose: with Redis down store still serves,
+      # just without limits (fail-open), and logs ALERT rate_limit_unavailable.
+      SPRING_DATA_REDIS_HOST: redis
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in backend/.env}
     depends_on:
       postgres:
         condition: service_healthy
@@ -253,6 +257,21 @@ services:
     image: axllent/mailpit:v1.21.8
     ports:
       - '127.0.0.1:8025:8025'
+
+  # Counters for store's rate limits on sign-up, log-in and password reset (Obsidian 54).
+  # Not published: only store connects, over the compose network. No volume and no snapshots (--save ''):
+  # losing the counts only starts the limits again.
+  redis:
+    restart: unless-stopped
+    image: redis:7.4-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set REDIS_PASSWORD in backend/.env}
+    command: ['sh', '-c', 'exec redis-server --requirepass "$$REDIS_PASSWORD" --save ""']
+    healthcheck:
+      test: ['CMD-SHELL', 'redis-cli -a "$$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG']
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   # Go read service (ADR-11). Healthcheck is built into the image (Dockerfile).
   tracking:

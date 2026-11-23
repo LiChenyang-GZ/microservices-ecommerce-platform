@@ -8,6 +8,7 @@ import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.test.context.TestPropertySource;
 
 import java.time.Duration;
 import java.util.UUID;
@@ -16,6 +17,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 /**
@@ -30,6 +32,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *   Redis 卡住时 /actuator/health 等不回来（默认超时 60 秒）。
  */
 @ExtendWith(OutputCaptureExtension.class)
+@TestPropertySource(properties = "management.endpoint.health.show-components=always") // R20 reads the component list
 class RateLimitRedisDownIntegrationTest extends StoreHttpTest {
 
     private static final Duration ANSWER_WITHIN = Duration.ofSeconds(5);
@@ -84,13 +87,22 @@ class RateLimitRedisDownIntegrationTest extends StoreHttpTest {
         }
     }
 
-    /** R20：Redis 卡住 → store 的健康检查还是 UP（不然 k8s 会把 store 摘掉）。现在：等不回来（Redis 健康检查卡住）。 */
+    /**
+     * R20：Redis 不算 store 健康的一部分。compose 的 healthcheck 用 /actuator/health（k8s 用 liveness / readiness
+     * 两个组，本来就不含 Redis）：要是含 Redis，Redis 一坏 store 就被标成不健康。
+     * 这个类打开了 show-components（见类上的 @TestPropertySource），健康检查的回答里列出每个组成部分：里面不能有 redis。
+     * 测试环境里 RabbitMQ 故意指向没人听的端口，整体本来就是 DOWN，所以不看 UP，只看 redis 在不在、暂停后几秒内回答。
+     * 红灯时：Spring Boot 自动加了 redis 这一项，暂停后还会等它（默认超时 60 秒）。
+     */
     @Test
-    void redisHangs_storeStaysHealthy() {
+    void redisIsNotPartOfStoreHealth_evenWhenItHangs() throws Exception {
+        mvc.perform(get("/actuator/health")).andExpect(jsonPath("$.components.db").exists())
+                .andExpect(jsonPath("$.components.redis").doesNotExist());
+
         pauseRedis();
         try {
-            assertTimeoutPreemptively(ANSWER_WITHIN,
-                    () -> mvc.perform(get("/actuator/health")).andExpect(status().isOk()));
+            assertTimeoutPreemptively(ANSWER_WITHIN, () -> mvc.perform(get("/actuator/health"))
+                    .andExpect(jsonPath("$.components.redis").doesNotExist()));
         } finally {
             unpauseRedis();
         }
