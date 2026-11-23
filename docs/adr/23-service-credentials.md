@@ -2,7 +2,7 @@
 
 **English** | [中文](23-service-credentials.zh-CN.md)
 
-**Status:** Accepted
+**Status:** Accepted, amended by 25 (`verify-code` is for store only)
 
 ## Context
 Until this decision nothing checked who was calling inside the network. bank's gRPC `Transfer` / `Refund` had no interceptor; bank's REST let a request without a token through, and `POST /api/bank/transfer` could move money from `SYSTEM` to any account; delivery's `/internal/deliveries/cancel-by-order` checked nothing; email's notification endpoints could send mail as the shop to any address. The entry's allowlist (ADR-15) kept all of this away from the outside, but any pod in the cluster, any container in the compose network or any process on the host could call them directly.
@@ -22,7 +22,7 @@ Three ways for a service to prove who it is were considered:
   |---|---|---|
   | bank | gRPC (a `ServerInterceptor` wraps the whole service) and every `/api/bank/*` REST path; `/actuator` stays open for probes | `UNAUTHENTICATED` / 401, nothing runs |
   | delivery | `/internal/*` only; `/api/*` keeps the user-token filter | 401 |
-  | email | every `/api/*` path **except** `send-verification` and `verify-code` (the registration page), matched exactly | 401 |
+  | email | every `/api/*` path **except** `send-verification` and `verify-code` (the registration page), matched exactly. Since ADR-25 only `send-verification` | 401 |
 
 - email's check is an **allowlist**: a path is public only if it is on the list, so an endpoint added later is closed until someone opens it. The old filter matched public paths with `startsWith`, so `/api/email/send-verification-anything` also got through.
 - The secret is compared with `MessageDigest.isEqual` (constant time). A rejected request is logged as "no / wrong service token" with the method and path, never the secret.
