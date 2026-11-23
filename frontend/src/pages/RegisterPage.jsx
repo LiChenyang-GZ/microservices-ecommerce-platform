@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Input from '../components/Input';
 import Button from '../components/Button';
 import { userAPI } from '../services/api';
@@ -144,10 +144,15 @@ const RegisterPage = () => {
         if (data && data.message) {
           errorMessage = data.message;
         }
+        // Registered but never verified, maybe by someone else: a password reset claims it (Obsidian 58)
+        if (data && data.emailNotVerified) {
+          setErrors({ submit: errorMessage, claimByReset: true });
+          return;
+        }
       } else if (error.request) {
         errorMessage = 'Unable to connect to server, please check network connection';
       }
-      
+
       setErrors({ submit: errorMessage });
     } finally {
       setIsLoading(false);
@@ -233,6 +238,12 @@ const RegisterPage = () => {
           {errors.submit && (
             <div className="error-message submit-error">
               {errors.submit}
+              {errors.claimByReset && (
+                <>
+                  {' '}
+                  <Link to="/forgot-password">Reset the password</Link>
+                </>
+              )}
             </div>
           )}
           
