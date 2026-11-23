@@ -18,9 +18,9 @@ import java.util.Optional;
  * ADMIN_EMAIL / ADMIN_PASSWORD (store.admin.email / store.admin.password), if both are set.
  *
  * - Not configured → no admin, a WARN, store still starts (the shop works; the admin dashboard and refunds do not).
- * - An account with that email already exists and is not an admin → it is NOT promoted, WARN. Until activation checks
- *   the verification code (A11), anyone can register that email first and activate it; promoting it would hand them
- *   the admin role. Pick another ADMIN_EMAIL, or promote by hand in the database after checking who owns it.
+ * - An account with that email already exists and is not an admin → it is NOT promoted, WARN. Anyone can register an
+ *   address they do not own (since A11 they cannot activate it without the emailed code, but the account row stays);
+ *   promoting it would hand them the admin role. Pick another ADMIN_EMAIL, or promote by hand in the database after checking who owns it.
  * - The password is stored as BCrypt, like every account. Changing ADMIN_PASSWORD later does not change an existing
  *   admin's password: the variable only seeds the first one.
  * - Promoting or demoting someone by hand in the database takes effect at their next log-in: the role travels in

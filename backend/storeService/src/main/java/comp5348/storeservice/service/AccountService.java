@@ -109,27 +109,67 @@ public class AccountService {
         );
     }
 
+    /** What activateAccount found; AccountController turns it into the HTTP answer */
+    public enum ActivationResult {
+        /** the code was right, the account is active now */
+        ACTIVATED,
+        /** it was active before; nothing changed and email was not asked */
+        ALREADY_ACTIVE,
+        /** no code, a wrong or expired code, or no such account: the user's mistake (400) */
+        INVALID_CODE,
+        /** email refused store's token, is down or did not answer in time: not the user's fault (503) */
+        EMAIL_UNAVAILABLE
+    }
+
     /**
-     * Activate account (called after email verification succeeds)
+     * Activate an account with the code from the registration email (A11). Before A11 the browser checked the code
+     * with email itself and then told store "activate this email"; store could not tell whether that happened, so
+     * anyone could activate any address. Now store asks email, with its service token, the same way resetPassword does.
+     *
+     * Not @Transactional on purpose: no database transaction stays open while store waits up to 5 seconds for email.
+     * Two activations with the same code race safely because email locks the code row and uses it up once.
+     * If saving fails after email said yes, the code is already used up: the user asks for a new one (V9).
      */
-    @Transactional
-    public boolean activateAccount(String email) {
-        Optional<Account> accountOpt = accountRepository.findByEmail(email);
-        if (accountOpt.isPresent()) {
-            Account account = accountOpt.get();
-            account.setEmailVerified(true);
-            account.setActive(true);
-            // Open account for user upon activation (default balance 10000), only if bank account is not yet bound
-            if (account.getBankAccountNumber() == null || account.getBankAccountNumber().isEmpty()) {
-                try {
-                    String acctNo = bankAdapter.createCustomerAccount(account.getEmail(), new java.math.BigDecimal("10000"));
-                    if (acctNo != null) account.setBankAccountNumber(acctNo);
-                } catch (Exception ignore) {}
-            }
-            accountRepository.save(account);
-            return true;
+    public ActivationResult activateAccount(String email, String code) {
+        if (code == null || code.isBlank()) {
+            return ActivationResult.INVALID_CODE;
         }
-        return false;
+        Optional<Account> accountOpt = accountRepository.findByEmail(email);
+        if (accountOpt.isEmpty()) {
+            return ActivationResult.INVALID_CODE; // do not spend someone's code on an account that does not exist
+        }
+        Account account = accountOpt.get();
+        if (Boolean.TRUE.equals(account.getActive()) && Boolean.TRUE.equals(account.getEmailVerified())) {
+            return ActivationResult.ALREADY_ACTIVE; // a second click or a page reload must not use up a code
+        }
+
+        try {
+            CodeCheckResponse response = emailRestTemplate.postForObject(
+                    emailServiceUrl + "/api/email/verify-code", new CodeCheckRequest(email, code), CodeCheckResponse.class);
+            if (response == null || !response.success) {
+                return ActivationResult.INVALID_CODE;
+            }
+        } catch (HttpClientErrorException.Unauthorized e) {
+            alertEmailAuthFailed("verify-code");
+            return ActivationResult.EMAIL_UNAVAILABLE;
+        } catch (HttpClientErrorException e) {
+            return ActivationResult.INVALID_CODE; // email answers 400 for a wrong or expired code
+        } catch (Exception e) {
+            logger.warn("Activation could not reach email: {}", e.getMessage());
+            return ActivationResult.EMAIL_UNAVAILABLE;
+        }
+
+        account.setEmailVerified(true);
+        account.setActive(true);
+        // Open account for user upon activation (default balance 10000), only if bank account is not yet bound
+        if (account.getBankAccountNumber() == null || account.getBankAccountNumber().isEmpty()) {
+            try {
+                String acctNo = bankAdapter.createCustomerAccount(account.getEmail(), new java.math.BigDecimal("10000"));
+                if (acctNo != null) account.setBankAccountNumber(acctNo);
+            } catch (Exception ignore) {}
+        }
+        accountRepository.save(account);
+        return ActivationResult.ACTIVATED;
     }
 
     /**
@@ -227,9 +267,9 @@ public class AccountService {
         try {
             // Verify reset code
             String url = emailServiceUrl + "/api/email/verify-password-reset";
-            PasswordResetVerifyRequest request = new PasswordResetVerifyRequest(email, code);
+            CodeCheckRequest request = new CodeCheckRequest(email, code);
             
-            PasswordResetVerifyResponse response = emailRestTemplate.postForObject(url, request, PasswordResetVerifyResponse.class);
+            CodeCheckResponse response = emailRestTemplate.postForObject(url, request, CodeCheckResponse.class);
             if (response == null || !response.success) {
                 return false;
             }
@@ -256,7 +296,7 @@ public class AccountService {
 
     /**
      * email refused store's service token (wrong or missing in store's config). The user only sees "failed";
-     * without this line nobody would know every password reset is broken until the token is fixed.
+     * without this line nobody would know every password reset and every activation is broken until the token is fixed.
      */
     private static void alertEmailAuthFailed(String endpoint) {
         logger.error("ALERT email_auth_failed endpoint={} (email refused store's service token; "
@@ -277,17 +317,18 @@ public class AccountService {
         public String message;
     }
 
-    private static class PasswordResetVerifyRequest {
+    /** Body of email's verify-code and verify-password-reset */
+    private static class CodeCheckRequest {
         public String email;
         public String code;
         
-        public PasswordResetVerifyRequest(String email, String code) {
+        public CodeCheckRequest(String email, String code) {
             this.email = email;
             this.code = code;
         }
     }
 
-    private static class PasswordResetVerifyResponse {
+    private static class CodeCheckResponse {
         public boolean success;
         public String message;
     }

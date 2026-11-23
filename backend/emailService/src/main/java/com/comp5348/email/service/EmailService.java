@@ -2,11 +2,13 @@ package com.comp5348.email.service;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.mail.SimpleMailMessage;
 import com.comp5348.email.model.EmailOutbox;
 import com.comp5348.email.repository.EmailOutboxRepository;
-import java.util.Random;
+import java.security.SecureRandom;
+import java.util.List;
 import java.time.LocalDateTime;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -21,28 +23,35 @@ public class EmailService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    static final String REGISTRATION = "REGISTRATION";
+    static final String PASSWORD_RESET = "PASSWORD_RESET";
+    /** Wrong guesses a code survives; the next wrong one after this many kills it (A11, V13) */
+    static final int MAX_FAILED_ATTEMPTS = 5;
+
+    /** Codes must not be predictable from earlier ones: java.util.Random is a linear generator, SecureRandom is not */
+    private static final SecureRandom RANDOM = new SecureRandom();
+
     /**
      * Generate 6-digit verification code
      */
     public String generateVerificationCode() {
-        Random random = new Random();
-        return String.format("%06d", random.nextInt(1000000));
+        return String.format("%06d", RANDOM.nextInt(1000000));
+    }
+
+    /** Expire the address's live codes of this kind, then store a new one (A11, V14: one live code at a time) */
+    private String newCode(String email, String verificationType) {
+        emailOutboxRepository.expireLiveCodes(email, verificationType);
+        String code = generateVerificationCode();
+        emailOutboxRepository.save(new EmailOutbox(email, code, verificationType));
+        return code;
     }
 
     /**
      * Send registration verification code
      */
     public String sendRegistrationVerificationCode(String email) {
-        // Generate verification code
-        String code = generateVerificationCode();
-        
-        // Save to database
-        EmailOutbox emailOutbox = new EmailOutbox(email, code, "REGISTRATION");
-        emailOutboxRepository.save(emailOutbox);
-        
-        // Send email
+        String code = newCode(email, REGISTRATION);
         sendVerificationCode(email, code, "Registration Verification Code");
-        
         return code;
     }
 
@@ -86,43 +95,48 @@ public class EmailService {
     }
 
     /**
-     * Verify verification code
+     * Check a registration code. Called only by store's activate (service token, A11), never by the browser.
+     * Only REGISTRATION codes count: a password-reset code does not activate an account (V11).
      */
+    @Transactional
     public boolean verifyCode(String email, String code) {
-        EmailOutbox emailOutbox = emailOutboxRepository.findByEmailAndCodeAndStatus(email, code, "SENT");
-        
-        if (emailOutbox == null) {
-            return false;
+        return checkCode(email, code, REGISTRATION);
+    }
+
+    /**
+     * The one place a code is checked. The caller's transaction holds the row locks until it commits.
+     *   right code, not expired → VERIFIED (used up), true
+     *   right code, expired     → EXPIRED, false (V15)
+     *   wrong code              → every live code of this kind for the address counts one more wrong guess;
+     *                             at MAX_FAILED_ATTEMPTS it is EXPIRED and even the right code fails (V13)
+     */
+    private boolean checkCode(String email, String code, String verificationType) {
+        List<EmailOutbox> live = emailOutboxRepository.lockCodes(email, verificationType, List.of("SENT"));
+        for (EmailOutbox row : live) {
+            if (row.getCode().equals(code)) {
+                if (row.isExpired()) {
+                    row.setStatus("EXPIRED");
+                    return false;
+                }
+                row.setStatus("VERIFIED");
+                return true;
+            }
         }
-        
-        // Check if expired
-        if (emailOutbox.isExpired()) {
-            emailOutbox.setStatus("EXPIRED");
-            emailOutboxRepository.save(emailOutbox);
-            return false;
+        for (EmailOutbox row : live) {
+            row.setFailedAttempts(row.getFailedAttempts() + 1);
+            if (row.getFailedAttempts() >= MAX_FAILED_ATTEMPTS) {
+                row.setStatus("EXPIRED");
+            }
         }
-        
-        // Verification successful, mark as verified
-        emailOutbox.setStatus("VERIFIED");
-        emailOutboxRepository.save(emailOutbox);
-        
-        return true;
+        return false;
     }
 
     /**
      * Send password reset verification code
      */
     public String sendPasswordResetCode(String email) {
-        // Generate verification code
-        String code = generateVerificationCode();
-        
-        // Save to database
-        EmailOutbox emailOutbox = new EmailOutbox(email, code, "PASSWORD_RESET");
-        emailOutboxRepository.save(emailOutbox);
-        
-        // Send email
+        String code = newCode(email, PASSWORD_RESET);
         sendPasswordResetEmail(email, code);
-        
         return code;
     }
 
@@ -166,27 +180,11 @@ public class EmailService {
     }
 
     /**
-     * Verify password reset verification code
+     * Check a password-reset code (store's reset-password, service token). Only PASSWORD_RESET codes count (V12).
      */
+    @Transactional
     public boolean verifyPasswordResetCode(String email, String code) {
-        EmailOutbox emailOutbox = emailOutboxRepository.findByEmailAndCodeAndStatus(email, code, "SENT");
-        
-        if (emailOutbox == null) {
-            return false;
-        }
-        
-        // Check if expired
-        if (emailOutbox.isExpired()) {
-            emailOutbox.setStatus("EXPIRED");
-            emailOutboxRepository.save(emailOutbox);
-            return false;
-        }
-        
-        // Verification successful, mark as verified
-        emailOutbox.setStatus("VERIFIED");
-        emailOutboxRepository.save(emailOutbox);
-        
-        return true;
+        return checkCode(email, code, PASSWORD_RESET);
     }
 
     /**

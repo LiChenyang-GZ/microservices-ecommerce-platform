@@ -12,7 +12,7 @@ import java.io.IOException;
 import java.util.Set;
 
 /**
- * An allow-list, not a block-list: on /api/* only the two registration-page endpoints are public;
+ * An allow-list, not a block-list: on /api/* only the registration page's send-verification is public;
  * every other path needs X-Service-Token, whether or not an endpoint exists there.
  * So a new endpoint added later is closed by default, and a removed one answers 401 to strangers
  * (they learn nothing) and 404 only to store.
@@ -25,10 +25,12 @@ public class ServiceTokenFilter extends OncePerRequestFilter {
 
     private static final Logger logger = LoggerFactory.getLogger(ServiceTokenFilter.class);
 
-    /** Called by the browser on the registration page (frontend services/api.js), so no service token. */
-    static final Set<String> PUBLIC_PATHS = Set.of(
-            "/api/email/send-verification",
-            "/api/email/verify-code");
+    /**
+     * Called by the browser on the registration page (frontend services/api.js), so no service token.
+     * verify-code used to be here too; since A11 the browser hands the code to store's activate and store asks
+     * email with its service token, so a stranger cannot try codes against email directly.
+     */
+    static final Set<String> PUBLIC_PATHS = Set.of("/api/email/send-verification");
 
     private final ServiceToken serviceToken;
 
