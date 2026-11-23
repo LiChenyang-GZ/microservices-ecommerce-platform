@@ -2,7 +2,7 @@
 
 **English** | [中文](24-login-ownership-admin-role.zh-CN.md)
 
-**Status:** Accepted
+**Status:** Accepted, amended by 25 (activation checks the emailed code)
 
 ## Context
 After ADR-23, services could no longer call each other without a secret, but store still ended its security rules with `anyRequest().permitAll()`. Its JWT filter put the email on the request when a token was valid and let the request through when it was not. Only Pay Now checked who owned the order. So, with no token or with a stranger's token, anyone could:
@@ -48,7 +48,7 @@ Removed, not protected (decision 3): `payment-success`, `payment-failure`, `PUT 
 
 ## Consequences
 - **A role change applies at the next log-in.** Promoting, demoting or disabling someone in the database does nothing to a token already issued, which stays valid for up to 24 hours (`jwt.expiration`). The upside: no database lookup per request, and delivery can trust `validate-token` without its own copy of the accounts. Checking the role in the database on every request, or a token denylist, would close the gap.
-- **"Logged in" is still weak.** `POST /api/user/activate` takes only an email and does not check the verification code (scenario A11), so anyone can register and activate an account under any address. Ownership still holds (a user sees only what they created), but an email address proves nothing. This is the next fix, together with the scripts that activate directly.
+- **"Logged in" is still weak.** `POST /api/user/activate` takes only an email and does not check the verification code (scenario A11), so anyone can register and activate an account under any address. Ownership still holds (a user sees only what they created), but an email address proves nothing. This is the next fix, together with the scripts that activate directly. Fixed by ADR-25.
 - **An admin refund does not cancel the order or the delivery.** The order can stay PAID or in transit while the payment is REFUNDED. An after-sales flow (request after delivery, admin approves) is future work. No page calls the refund endpoint today.
 - **The admin dashboard depends on configuration.** Without `ADMIN_EMAIL` / `ADMIN_PASSWORD` there is no admin. Changing `ADMIN_PASSWORD` later does not change an existing admin's password; the variables only seed the first one.
 - The frontend hides the admin dashboard from non-admins; that is convenience only. A user who edits the saved role sees an empty dashboard whose every request gets 403.
