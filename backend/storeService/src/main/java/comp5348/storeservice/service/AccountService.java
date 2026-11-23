@@ -130,6 +130,9 @@ public class AccountService {
     /**
      * Proving the address (the registration code in activateAccount, or the reset code in resetPassword) makes the
      * account usable, and opens its bank account (default balance 10000) if sign-up could not.
+     * In resetPassword this runs inside its transaction, so a slow bank holds a database connection meanwhile (up to
+     * 10 s), and a bank account made just before a failed commit is left behind. Only when sign-up could not reach bank;
+     * rare, recorded (review 59 🟡3).
      */
     private void markEmailProved(Account account) {
         account.setEmailVerified(true);
@@ -170,6 +173,9 @@ public class AccountService {
      * way to this page (a "verify now" button on the log-in page, say): if a squatter registered the address, its owner
      * would activate the squatter's password. Send such users to the password reset instead, which claims the account
      * with a password they choose (Obsidian 58).
+     * The same hole by timing: this method reads the account, waits for email, then saves the whole entity. A reset
+     * that commits in between (the owner claiming it with a new password) would be overwritten with the old password.
+     * Only reachable by using a registration code and a reset code at once, which a squatter cannot arrange (review 59 🟡4).
      */
     public ActivationResult activateAccount(String email, String code) {
         if (code == null || code.isBlank()) {
