@@ -278,6 +278,40 @@ class AuthRateLimitIntegrationTest extends StoreHttpTest {
         assertTooMany(login("10.0.14.1", account.getEmail(), "wrong-last"), 15 * 60);
     }
 
+    /**
+     * 审查 🟠2（Obsidian 56 号）：登录框填邮箱或用户名都能登同一个账号，计数也得是同一个。
+     * 用邮箱错 5 次、用户名错 5 次，第 11 次（用户名 + 对的密码）→ 429。
+     * 红灯：键是"输入的字"的指纹，邮箱和用户名各数各的，15 分钟能猜 20 次；第 11 次是 200。
+     */
+    @Test
+    void login_emailAndUsernameShareOneCount() throws Exception {
+        Account account = newAccount(true);
+        for (int i = 0; i < 5; i++) {
+            login("10.0.14.20", account.getEmail(), "wrong-email-" + i).andExpect(status().isUnauthorized());
+            login("10.0.14.20", account.getUsername(), "wrong-name-" + i).andExpect(status().isUnauthorized());
+        }
+
+        assertTooMany(login("10.0.14.20", account.getUsername(), RIGHT_PASSWORD), 15 * 60);
+    }
+
+    /**
+     * 审查 🟠2：用用户名登录成功，也要把用邮箱错的那些次数清掉（是同一个账号）。错 9 次（邮箱）、用户名登录成功，
+     * 之后用邮箱还能再错 10 次才被挡。红灯：成功只清了用户名那个键，邮箱那个还是 9，再错第 2 次就 429。
+     */
+    @Test
+    void login_successByUsernameClearsTheCountForTheEmail() throws Exception {
+        Account account = newAccount(true);
+        for (int i = 0; i < 9; i++) {
+            login("10.0.14.30", account.getEmail(), "wrong-" + i).andExpect(status().isUnauthorized());
+        }
+        login("10.0.14.30", account.getUsername(), RIGHT_PASSWORD).andExpect(status().isOk());
+
+        for (int i = 0; i < 10; i++) {
+            login("10.0.14.30", account.getEmail(), "wrong-again-" + i).andExpect(status().isUnauthorized());
+        }
+        assertTooMany(login("10.0.14.30", account.getEmail(), "wrong-last"), 15 * 60);
+    }
+
     /** R15：同一 IP 15 分钟第 101 次登录（每次换账号，撞库）→ 429。现在：401。 */
     @Test
     void login_hundredAndFirstFromSameIp_is429() throws Exception {

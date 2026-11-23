@@ -100,3 +100,21 @@ test('a 429 on resend shows store\'s "try again" message', async () => {
 
     expect(screen.getByText('Too many attempts, please try again in 600 seconds')).toBeInTheDocument();
 });
+
+// 审查 🟠1（Obsidian 56 号）：注册页发码失败（429 / 503）也会跳过来，把后端的提示放在 state.error 里。
+// 这里要一进来就显示它，用户才知道码没发出去、要等多久再点"重发"。红灯：页面不看 state.error。
+test('arriving with an error from the register page shows it', () => {
+    render(
+        <MemoryRouter initialEntries={[{
+            pathname: '/verify-email',
+            state: { email: EMAIL, error: 'Too many attempts, please try again in 600 seconds' },
+        }]}>
+            <Routes>
+                <Route path="/verify-email" element={<EmailVerificationPage />} />
+            </Routes>
+        </MemoryRouter>
+    );
+
+    expect(screen.getByText('Too many attempts, please try again in 600 seconds')).toBeInTheDocument();
+    expect(screen.getByText(EMAIL)).toBeInTheDocument();
+});
