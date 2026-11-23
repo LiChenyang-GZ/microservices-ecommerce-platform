@@ -31,6 +31,7 @@ ADR-01 到 ADR-14 是动手之前写的，代码注释按编号引用（"ADR-06"
 | [21](21-schema-changes-at-startup.zh-CN.md) | 表结构改动在启动时跑幂等 SQL，不用 Flyway | 已采纳 |
 | [22](22-grpc-result-mapping.zh-CN.md) | bank 的 gRPC 回复怎么对应到 成功 / 拒绝 / 未知 | 已采纳，由 23 补充 |
 | [23](23-service-credentials.zh-CN.md) | 服务之间的调用带共享密钥，每个被调方一把 | 已采纳 |
+| [24](24-login-ownership-admin-role.zh-CN.md) | store 要登录，用户只能动自己的订单，管理接口要管理员角色 | 已采纳 |
 
 ## 可靠性规则
 
