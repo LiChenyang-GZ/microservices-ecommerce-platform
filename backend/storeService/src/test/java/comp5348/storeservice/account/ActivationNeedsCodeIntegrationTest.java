@@ -175,6 +175,54 @@ class ActivationNeedsCodeIntegrationTest extends StoreHttpTest {
         assertStillInactive(account);
     }
 
+    // ---------- 独立审查（Obsidian 51 号）🟡1、🟡9 ----------
+
+    /**
+     * 🟡1：email 回 400 以外的 4xx（比如 store 的 email.service.url 配错，指到了不认识 verify-code 的地方 → 404）。
+     * 这不是用户输错码，是 email 那边出了问题：503 + 日志，不能告诉用户"码不对"。现在：400 "码不对"。
+     */
+    @Test
+    void emailAnswersOther4xx_is503_notInvalidCode() throws Exception {
+        Account account = newInactiveAccount();
+        FAKE_BANK.stubFor(WireMock.post(urlEqualTo(VERIFY)).willReturn(aResponse().withStatus(404)));
+
+        activate(body(account.getEmail(), "123456")).andExpect(status().isServiceUnavailable());
+
+        assertStillInactive(account);
+    }
+
+    /** 🟡9②：email 回 200 但 success=false → 当成码不对：400，不激活。现在就绿，防改坏。 */
+    @Test
+    void emailSays200ButNotSuccess_is400_andNothingChanges() throws Exception {
+        Account account = newInactiveAccount();
+        FAKE_BANK.stubFor(WireMock.post(urlEqualTo(VERIFY))
+                .willReturn(okJson("{\"success\":false,\"message\":\"no\"}")));
+
+        activate(body(account.getEmail(), "123456")).andExpect(status().isBadRequest());
+
+        assertStillInactive(account);
+    }
+
+    /**
+     * 🟡9①：V3 的"老行为不变"——账号还没有 bank 账号（注册时开户失败过）时，激活成功顺手补开户。
+     * 这段代码这次被挪动过，现在就绿，防改坏。
+     */
+    @Test
+    void rightCode_opensTheBankAccountIfMissing() throws Exception {
+        Account account = newInactiveAccount();
+        account.setBankAccountNumber(null);
+        accountRepository.save(account);
+        emailSaysCodeIsRight();
+        FAKE_BANK.stubFor(WireMock.post(urlEqualTo("/api/bank/account"))
+                .willReturn(okJson("{\"accountNumber\":\"ACC-OPENED-ON-ACTIVATION\"}")));
+
+        activate(body(account.getEmail(), "123456")).andExpect(status().isOk());
+
+        assertThat(reload(account).getBankAccountNumber()).isEqualTo("ACC-OPENED-ON-ACTIVATION");
+        FAKE_BANK.verify(1, postRequestedFor(urlEqualTo("/api/bank/account"))
+                .withRequestBody(matchingJsonPath("$.ownerEmail", equalTo(account.getEmail()))));
+    }
+
     // ---------- V7、V8：没有这个账号 / 已经激活 ----------
 
     /** V7：邮箱没注册过 → 400，不去调 email（不替别人白白耗掉一个码）。现在：400，但这条写下来防绿灯时先调 email。 */

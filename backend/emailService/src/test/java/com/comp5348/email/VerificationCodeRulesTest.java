@@ -11,10 +11,17 @@ import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.containers.PostgreSQLContainer;
 
+import org.springframework.mail.MailSendException;
+import org.springframework.mail.SimpleMailMessage;
+
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 
 /**
  * A11（Obsidian 50 号文件）V11–V15：激活改成"store 拿着码来问 email"以后，码本身得经得起猜。
@@ -152,6 +159,69 @@ class VerificationCodeRulesTest {
 
         assertThat(emailService.verifyCode(email, first)).as("旧码").isFalse();
         assertThat(emailService.verifyCode(email, second)).as("新码").isTrue();
+    }
+
+    /**
+     * 独立审查（51 号）🟡2：重发时发信失败（SMTP 抖了一下）→ 旧码不能跟着没了，不然用户手里一个能用的码都没有。
+     * 旧码只在新码真的发出去以后才作废。现在：先作废旧码再发信，发信失败旧码也死了。
+     */
+    @Test
+    void resendThatFailsToSend_keepsTheOlderCode() {
+        String email = newEmail();
+        String first = emailService.sendRegistrationVerificationCode(email);
+        doThrow(new MailSendException("smtp down")).when(mailSender).send(any(SimpleMailMessage.class));
+
+        assertThatThrownBy(() -> emailService.sendRegistrationVerificationCode(email))
+                .isInstanceOf(RuntimeException.class); // 这次发信失败，接口会回 400 "Sending failed"
+
+        assertThat(emailService.verifyCode(email, first)).as("旧码还能用").isTrue();
+    }
+
+    // ---------- 独立审查 🟡6：并发（防改坏：把 lockCodes 上的 @Lock 去掉，这两条会红） ----------
+
+    /** 两个请求同时拿同一个对的码来校验（双击、两个标签页）→ 恰好一个成功，码只能用一次。 */
+    @Test
+    void sameRightCode_twiceAtOnce_onlyOneSucceeds() throws Exception {
+        String email = newEmail();
+        String code = emailService.sendRegistrationVerificationCode(email);
+
+        List<Boolean> results = runTogether(2, () -> emailService.verifyCode(email, code));
+
+        assertThat(results).containsExactlyInAnyOrder(true, false);
+    }
+
+    /** 5 个错码同时到 → 计数一个不丢，码作废，之后对的码也不行。没有锁时计数会丢更新，对码还能过。 */
+    @Test
+    void fiveWrongGuessesAtOnce_stillBurnTheCode() throws Exception {
+        String email = newEmail();
+        String code = emailService.sendRegistrationVerificationCode(email);
+
+        runTogether(5, () -> emailService.verifyCode(email, notThe(code)));
+
+        assertThat(emailService.verifyCode(email, code)).isFalse();
+    }
+
+    /** n 个线程在同一时刻开跑同一件事，等它们都做完，返回各自的结果 */
+    private static List<Boolean> runTogether(int n, java.util.concurrent.Callable<Boolean> task) throws Exception {
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(n);
+        try {
+            java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+            List<java.util.concurrent.Future<Boolean>> futures = new java.util.ArrayList<>();
+            for (int i = 0; i < n; i++) {
+                futures.add(pool.submit(() -> {
+                    start.await();
+                    return task.call();
+                }));
+            }
+            start.countDown();
+            List<Boolean> results = new java.util.ArrayList<>();
+            for (java.util.concurrent.Future<Boolean> f : futures) {
+                results.add(f.get(30, java.util.concurrent.TimeUnit.SECONDS));
+            }
+            return results;
+        } finally {
+            pool.shutdownNow();
+        }
     }
 
     // ---------- V15：过期（回归） ----------
