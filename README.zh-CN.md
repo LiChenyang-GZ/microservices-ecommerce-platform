@@ -45,7 +45,7 @@
 | 只有 store 能调 bank、delivery 的 `/internal` 和 email 的找回密码 | 每个被调方一把共享密钥（HTTP 头 `X-Service-Token` / gRPC metadata `x-service-token`），常数时间比较，没配就不启动。store 给每个被调方只发它那一把；被拒时原来的结果不变（付款仍是 UNKNOWN，不会变成 REJECTED），另外打 `ALERT *_auth_failed`。Kubernetes 上还有 NetworkPolicy 只让 store 连 bank 的 gRPC 端口（ADR-23，[学习文档 10](docs/learning/10-service-credentials.zh-CN.md)）。 |
 | 用户只能动自己的订单，管理接口要管理员 | store 除了注册、登录、找回密码和商品目录都要登录。订单归属在 service 层查，别人的订单回 404（和不存在一样），订单号没法被试探。JWT 带角色（USER / ADMIN，没有就是 USER）；管理页的数据、库存、价格、退款和 delivery 的 DLQ 要 ADMIN。第一个管理员来自 `ADMIN_EMAIL` / `ADMIN_PASSWORD`（ADR-24，[学习文档 11](docs/learning/11-login-ownership-admin-role.zh-CN.md)）。 |
 | 账号能用之前先证明邮箱 | 激活要注册邮件里的验证码，由 store 自己去问 email；email 的 `verify-code` 只给 store。码一码一用途，猜错 5 次或重发新码就作废，校验时锁行。本地所有邮件发到 Mailpit，脚本从那里读码。没激活的账号不占邮箱：别人先注册了，主人用找回密码认领，密码是主人自己设的（ADR-25，[学习文档 12](docs/learning/12-activation-code.zh-CN.md)）。 |
-| 注册、登录、找回密码不能被刷 | store 的 5 个公开账号接口都限流（规则见下表）。计数存在 Redis，固定窗口：`INCR` 和第一次的 `PEXPIRE` 在同一个 Lua 脚本里执行，不会留下没有过期时间的键。超了回 429 和 `Retry-After`。验证码由浏览器向 store 要，store 只在账号存在且没激活时才让 email 发；email 不再有公开接口。客户端地址取 `X-Forwarded-For` 的最后一个值，也就是入口写的那个（nginx 覆盖这个头，Envoy 往后追加）；Tomcat 不碰这个头（`server.forward-headers-strategy=none`），否则 Spring Boot 在 Kubernetes 上会信客户端伪造的值（在 kind 上发现的）。Redis 挂了 store 照常服务、不限流，打 `ALERT rate_limit_unavailable`。 |
+| 注册、登录、找回密码不能被刷 | store 的 5 个公开账号接口都限流（规则见下表）。计数存在 Redis，固定窗口：`INCR` 和第一次的 `PEXPIRE` 在同一个 Lua 脚本里执行，不会留下没有过期时间的键。超了回 429 和 `Retry-After`。验证码由浏览器向 store 要，store 只在账号存在且没激活时才让 email 发；email 不再有公开接口。客户端地址取 `X-Forwarded-For` 的最后一个值，也就是入口写的那个（nginx 覆盖这个头，Envoy 往后追加）；Tomcat 不碰这个头（`server.forward-headers-strategy=none`），否则 Spring Boot 在 Kubernetes 上会信客户端伪造的值（在 kind 上发现的）。Redis 挂了 store 照常服务、不限流，打 `ALERT rate_limit_unavailable`（ADR-26，[学习文档 13](docs/learning/13-rate-limits.zh-CN.md)）。 |
 | RabbitMQ 挂着时丢了配送任务 | 场景 05 发现：RabbitMQ 挂着时建的配送单会永远停在 CREATED。现在有扫表任务：非终态、60 秒没动的配送单会被重发任务；先用条件 `UPDATE` 认领，两个实例不会都重发（[学习文档 09](docs/learning/09-stuck-delivery-job-sweeper.zh-CN.md)）。 |
 
 另外：库存用悲观行锁预留（[学习文档 04](docs/learning/04-inventory-pessimistic-lock.zh-CN.md)）；未支付订单超时自动取消，并在订单行锁下复查。
@@ -127,7 +127,7 @@ go test ./...                         # 单元测试
 go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 分钟）
 ```
 
-前端有 `npm test`，但唯一的测试 `App.test.js` 现在是失败的（见下文）。
+前端有 `npm test`（Create React App）：注册、邮箱验证、订单和管理页的组件测试，接口是假的（React Testing Library）。CRA 自带的示例测试 `App.test.js` 是失败的（见下文）。
 
 ## 设计文档
 
