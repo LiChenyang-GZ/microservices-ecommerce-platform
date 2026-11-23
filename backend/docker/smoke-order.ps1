@@ -5,18 +5,18 @@
 $ErrorActionPreference = 'Stop'
 $compose = 'backend/compose.yml'
 $store = 'http://localhost:8082/api'
+. "$PSScriptRoot\mailpit.ps1" # Confirm-ShopperEmail: send the code, read it in Mailpit, activate (A11)
 
 function Sql($db, $query) {
     docker compose -f $compose exec -T postgres psql -U postgres -d $db -tAc $query
 }
 
-# 1. Register + activate + log in (activate takes only the email, so no Gmail is needed)
+# 1. Register + activate + log in (the activation code is read from Mailpit, so no Gmail is needed)
 $email = "smoke-$(Get-Date -Format 'yyyyMMddHHmmss')@example.com"
 $password = 'Smoke-Test-1'
 Invoke-RestMethod -Method Post "$store/user" -ContentType 'application/json' `
     -Body (@{ username = $email.Split('@')[0]; email = $email; password = $password } | ConvertTo-Json) | Out-Null
-Invoke-RestMethod -Method Post "$store/user/activate" -ContentType 'application/json' `
-    -Body (@{ email = $email } | ConvertTo-Json) | Out-Null
+Confirm-ShopperEmail $email
 $login = Invoke-RestMethod -Method Post "$store/user/login" -ContentType 'application/json' `
     -Body (@{ email = $email; password = $password } | ConvertTo-Json)
 # Since auth PR 2 every order call needs the login token; the order belongs to whoever the token says

@@ -8,6 +8,11 @@ data:
   DB_HOST: postgres
   DB_PORT: '5432'
   SPRING_RABBITMQ_HOST: rabbitmq
+  # Mailpit (k8s/base/mailpit.yaml), as in compose. The scripts read verification codes from its API (A11).
+  MAIL_HOST: mailpit
+  MAIL_PORT: '1025'
+  MAIL_SMTP_AUTH: 'false'
+  MAIL_SMTP_STARTTLS: 'false'
   MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: 'true'
   MANAGEMENT_ENDPOINT_HEALTH_GROUP_READINESS_INCLUDE: readinessState,db
   JAVA_TOOL_OPTIONS: -XX:MaxRAMPercentage=75

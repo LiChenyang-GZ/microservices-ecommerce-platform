@@ -43,7 +43,7 @@ Open `http://localhost` in a browser.
 ```
 k8s/
   kind-config.yaml        one node; only 127.0.0.1:80 is mapped in (compose's ports stay free)
-  base/                   namespace, PostgreSQL, db-init Job, RabbitMQ, Kafka, kafka-init Job
+  base/                   namespace, PostgreSQL, db-init Job, RabbitMQ, Kafka, kafka-init Job, Mailpit
   apps/                   store, bank, delivery, email, tracking, frontend
   gateway/gateway.yaml    the single entry: Envoy Gateway (Gateway API)
   gateway/routes.yaml     which path goes to which service
@@ -86,6 +86,9 @@ kubectl -n shop rollout restart deploy/store
 # A password in backend/.env changed: update the Secrets, run db-init again (it sets the password again)
 ./k8s/scripts/apply-secrets.ps1
 kubectl -n shop delete job db-init; kubectl apply -k k8s/base
+
+# Read the mail the shop sent (verification codes go to Mailpit; it is not behind the gateway)
+kubectl -n shop port-forward svc/mailpit 8025:8025   # then http://localhost:8025
 
 # Remove everything (the cluster's data goes with it; compose's volume is not touched)
 kind delete cluster --name shop

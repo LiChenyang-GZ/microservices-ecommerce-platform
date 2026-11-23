@@ -8,6 +8,7 @@ resources:
   - db-init.yaml
   - rabbitmq.yaml
   - kafka.yaml
+  - mailpit.yaml
 configMapGenerator:
   - name: db-init-script
     namespace: shop

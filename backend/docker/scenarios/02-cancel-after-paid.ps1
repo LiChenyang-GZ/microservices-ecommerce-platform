@@ -14,6 +14,7 @@ param([switch]$AfterDelivery)
 $ErrorActionPreference = 'Stop'
 $compose = 'backend/compose.yml'
 $store = 'http://localhost:8082/api'
+. "$PSScriptRoot\..\mailpit.ps1" # Confirm-ShopperEmail：发码、去 Mailpit 读码、激活（A11）
 
 function Sql($db, $query) {
     docker compose -f $compose exec -T postgres psql -U postgres -d $db -tAc $query
@@ -33,8 +34,7 @@ $email = "cancel-$(Get-Date -Format 'yyyyMMddHHmmss')@example.com"
 $password = 'Smoke-Test-1'
 Invoke-RestMethod -Method Post "$store/user" -ContentType 'application/json' `
     -Body (@{ username = $email.Split('@')[0]; email = $email; password = $password } | ConvertTo-Json) | Out-Null
-Invoke-RestMethod -Method Post "$store/user/activate" -ContentType 'application/json' `
-    -Body (@{ email = $email } | ConvertTo-Json) | Out-Null
+Confirm-ShopperEmail $email
 $login = Invoke-RestMethod -Method Post "$store/user/login" -ContentType 'application/json' `
     -Body (@{ email = $email; password = $password } | ConvertTo-Json)
 $auth = @{ Authorization = "Bearer $($login.token)" }

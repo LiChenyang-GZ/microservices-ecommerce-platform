@@ -43,7 +43,7 @@
 ```
 k8s/
   kind-config.yaml        一个节点；只把 127.0.0.1:80 映射进去（compose 的端口都空着）
-  base/                   namespace、PostgreSQL、db-init Job、RabbitMQ、Kafka、kafka-init Job
+  base/                   namespace、PostgreSQL、db-init Job、RabbitMQ、Kafka、kafka-init Job、Mailpit
   apps/                   store、bank、delivery、email、tracking、frontend
   gateway/gateway.yaml    唯一入口：Envoy Gateway（Gateway API）
   gateway/routes.yaml     哪个路径去哪个服务
@@ -85,6 +85,9 @@ kubectl -n shop rollout restart deploy/store
 # 改了 backend/.env 里的密码：更新 Secret，再重跑 db-init（它会把密码重新设一遍）
 ./k8s/scripts/apply-secrets.ps1
 kubectl -n shop delete job db-init; kubectl apply -k k8s/base
+
+# 看商店发出的邮件（验证码发到 Mailpit；它不在入口后面）
+kubectl -n shop port-forward svc/mailpit 8025:8025   # 然后打开 http://localhost:8025
 
 # 全部删掉（集群里的数据一起没，compose 的数据卷不受影响）
 kind delete cluster --name shop

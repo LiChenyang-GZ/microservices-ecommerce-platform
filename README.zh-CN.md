@@ -23,7 +23,7 @@
 | **store** | Java 17、Spring Boot 3.5 | 用户与登录（JWT）、商品与仓库库存、订单、支付；所有扣款和退款都由它发起 | `store_db` | REST `/api/user`、`/api/products`、`/api/store/...`（用户自己的订单），只给管理员的 `/api/orders`、`/api/warehouses`、`/api/payments/{id}/refund`；生产 `order-events`，消费 `delivery-events`；bank 的 gRPC 客户端；发 `email_queue` |
 | **bank** | Java 17、Spring Boot 3.5、grpc-java | 账户和转账 | `bank_db` | gRPC `BankService.Transfer` / `Refund`（:9090，[bank.proto](backend/contracts/src/main/proto/bank/v1/bank.proto)）；REST `/api/bank/...`（开户、查余额） |
 | **delivery** | Java 17、Spring Boot 3.5 | 配送单和模拟快递（CREATED → PICKED_UP → DELIVERING → RECEIVED，或 LOST） | `delivery_db` | REST `/api/deliveries/...`、`/api/admin/dlq/...`、`/internal/deliveries/cancel-by-order/{orderId}`；消费 `order-events`，生产 `delivery-events`；RabbitMQ 任务队列 |
-| **email** | Java 17、Spring Boot 3.5 | 验证码和通知邮件（Gmail SMTP） | `email_db` | REST `/api/email/...`；消费 `email_queue` |
+| **email** | Java 17、Spring Boot 3.5 | 验证码和通知邮件（SMTP：本地发到 Mailpit，配了 Gmail 就发 Gmail） | `email_db` | REST `/api/email/...`；消费 `email_queue` |
 | **tracking** | Go 1.27、franz-go、pgx | 每个订单的只读事件时间线 | `tracking_db` | `GET /api/tracking/orders/{orderId}/timeline`；消费两个 topic |
 | frontend | React 19、nginx | 网店界面 | — | compose 下的统一入口（`localhost:3000`） |
 
@@ -68,13 +68,13 @@
 ```powershell
 Copy-Item backend/.env.example backend/.env
 # 填好 backend/.env：所有 *_PASSWORD，以及 JWT_SECRET（至少 64 个字符）。
-# MAIL_USERNAME / MAIL_PASSWORD 可以留空：只是发不出邮件，其他都正常。
+# MAIL_* 可以留空：所有邮件（包括验证码）都发到 Mailpit（http://localhost:8025）。
 
 docker compose -f backend/compose.yml up -d --build --wait   # 第一次构建要几分钟
 pwsh backend/docker/smoke-order.ps1                          # 下一单：PAID、只扣一次、配送往前走
 ```
 
-打开 http://localhost:3000 注册用户（新用户自动开一个余额 10,000 的银行账户）。端口：store 8082、delivery 8081、email 8083、bank 8084（gRPC 9090 只在 compose 网络内部可达）、tracking 8085、PostgreSQL 5433、RabbitMQ 管理界面 15672、Kafka（宿主机）9094。
+打开 http://localhost:3000 注册用户（新用户自动开一个余额 10,000 的银行账户），验证码在 Mailpit（http://localhost:8025）里看。端口：store 8082、delivery 8081、email 8083、bank 8084（gRPC 9090 只在 compose 网络内部可达）、tracking 8085、PostgreSQL 5433、RabbitMQ 管理界面 15672、Kafka（宿主机）9094。
 
 停止：`docker compose -f backend/compose.yml stop`。`down -v` 会连数据卷一起删。
 
@@ -119,7 +119,7 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
 ## 已知限制和下一步
 
 - **服务间鉴权用共享密钥，不是 mTLS**（ADR-23）：bank、delivery 的 `/internal/...`、email 的找回密码接口只接受带了被调方自己那把凭据的调用；每个服务没配自己的凭据就不启动。没有自动轮换（改 `backend/.env` / Secret 里的值，两边一起重启），`email_queue` 这条路只靠 RabbitMQ 账号挡。
-- **用户和管理员**（鉴权 PR ②、③）：store 除了注册、登录、找回密码和商品目录，都要登录；用户只能查、取消、支付自己的订单。管理接口（全站订单、仓库和库存、商品和价格、退款、delivery 的 DLQ）要 JWT 里带 ADMIN 角色。第一个管理员来自 `ADMIN_EMAIL` / `ADMIN_PASSWORD`。角色写在 JWT 里，在库里改了角色要等用户重新登录才生效（token 有效 24 小时）。激活账号还不检查邮箱验证码，所以注册了就能激活。
+- **用户和管理员**（鉴权 PR ②、③）：store 除了注册、登录、找回密码和商品目录，都要登录；用户只能查、取消、支付自己的订单。管理接口（全站订单、仓库和库存、商品和价格、退款、delivery 的 DLQ）要 JWT 里带 ADMIN 角色。第一个管理员来自 `ADMIN_EMAIL` / `ADMIN_PASSWORD`。角色写在 JWT 里，在库里改了角色要等用户重新登录才生效（token 有效 24 小时）。激活要注册邮件里的验证码：store 拿去问 email；一个码猜错 5 次、或者重发了新码，就作废。
 - **单副本**：所有有状态组件都只有一个；store 只能一个副本，因为 `OutboxProcessor` 没有跨实例的锁。
 - **kind 入口偶发 503**（发现 I2）：一次读请求经过 Envoy Gateway 时在到达 store 之前被重置，重试就过了，原因还没查清。
 - **场景脚本 01–03 只能跑 compose**；04–08 两边都能跑。
