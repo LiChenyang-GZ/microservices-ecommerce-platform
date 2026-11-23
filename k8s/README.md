@@ -33,7 +33,7 @@ About 5 minutes the first time (it pulls the node image and postgres / rabbitmq 
 ```powershell
 ./k8s/scripts/smoke-order.ps1        # one order through the entry: charged once, delivery updates reach store
 ./k8s/scripts/check-config-keys.ps1  # each pod has compose's variable names, and no other service's DB password
-./k8s/scripts/check-entry.ps1        # 58 requests to both entries (kind :80, compose :3000): open / 404 / page as expected
+./k8s/scripts/check-entry.ps1        # 55 requests to both entries (kind :80, compose :3000): open / 401 / 404 / page as expected
 ```
 
 Open `http://localhost` in a browser.
