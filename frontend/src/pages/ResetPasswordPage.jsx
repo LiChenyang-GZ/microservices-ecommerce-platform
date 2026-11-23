@@ -31,6 +31,10 @@ const ResetPasswordPage = () => {
     } else if (emailFromState) {
       setFormData(prev => ({ ...prev, email: emailFromState }));
     }
+    // The forgot-password page comes here on a 429 too (Obsidian 59): say why no new code was sent
+    if (location.state?.error) {
+      setErrors({ submit: `${location.state.error}. Use the newest code already in your inbox.` });
+    }
   }, [location]);
 
   const handleChange = (e) => {
