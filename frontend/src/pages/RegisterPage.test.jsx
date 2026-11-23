@@ -96,6 +96,28 @@ test('a 429 from store still goes to the verification page, with the email and i
     expect(screen.getByTestId('state-error')).toHaveTextContent('Too many attempts, please try again in 600 seconds');
 });
 
+// 抢注（Obsidian 58 号 Q7）：邮箱被别人注册了但没激活 → 留在注册页，显示 store 的提示，再给一个"找回密码"的链接
+// （找回密码就是认领）。红灯：页面只显示文字，没有链接。
+test('an unverified email that is already registered shows a link to claim it with a password reset', async () => {
+    userAPI.createAccount.mockRejectedValue({
+        response: {
+            status: 400,
+            data: {
+                success: false,
+                emailNotVerified: true,
+                message: 'This email is registered but not verified. If it is yours, reset the password to claim it.',
+            },
+        },
+    });
+    renderPage();
+
+    await fillAndSubmit();
+
+    expect(screen.getByText(/If it is yours, reset the password to claim it/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /reset the password/i })).toHaveAttribute('href', '/forgot-password');
+    expect(userAPI.sendVerificationCode).not.toHaveBeenCalled();
+});
+
 // 56 号 🟠1：email 挂了（store 回 503、没有 message）→ 一样去验证页，带一句通用的提示
 test('a 503 without a message still goes to the verification page, with a generic message', async () => {
     userAPI.createAccount.mockResolvedValue({ success: true, message: 'created' });
