@@ -249,9 +249,14 @@ docs/
   - someone with many addresses can still burn another person's codes, or use up that email's 3 messages per 15 minutes, and block a sign-up or password reset for a while (wrong guesses are not yet counted per email);
   - many addresses guessing passwords together (that needs a CAPTCHA or anomaly detection);
   - sign-up itself is not limited, so junk accounts can be created (they cannot be activated, and each gets at most 3 emails per 15 minutes);
-  - a fixed window lets a client use two windows' worth across a boundary.
+  - a fixed window lets a client use two windows' worth across a boundary;
+  - an email outage still uses up the quota: three resends that got 503 leave the fourth waiting about 15 minutes;
+  - many people behind one public address (campus or office network, a mobile carrier's NAT) share the per-address limits, so one heavy user blocks the rest;
+  - with IPv6 one person usually has a whole /64, so the per-address limits do not hold; addresses are not grouped by /64 yet, and Redis has no `maxmemory` (both to do before a cloud deployment);
+  - `send-verification` answers 200 for every address, but for an account that exists and is not active yet it waits for email to send, so it is slower; that tells which addresses signed up without activating (sign-up already says "Email already exists!", so little more is revealed);
+  - someone can sign up first with another person's address (an older gap): the owner can still activate it, but with a password the other person chose.
 
-  While Redis is down there are no limits (fail-open, `ALERT rate_limit_unavailable`). In a cloud with a load balancer in front of Envoy, the last `X-Forwarded-For` value would be the balancer's address; the client-address rule must be checked again there (noted in `ClientIp`).
+  While Redis is down there are no limits (fail-open, `ALERT rate_limit_unavailable`), and each request waits up to about 0.5 s for it (a successful log-in about 1 s: the count and the reset). In a cloud with a load balancer in front of Envoy, the last `X-Forwarded-For` value would be the balancer's address; the client-address rule must be checked again there (noted in `ClientIp`).
 - **Single replicas.** Every stateful component runs once (Redis too), and store runs one replica because `OutboxProcessor` has no lock across instances.
 - **Occasional 503 at the kind entry** (finding I2): a read through Envoy Gateway was once reset before reaching store; a retry passed. Not yet explained.
 - **Scenario scripts 01–03 run on compose only**; 04–08 also run on kind.
