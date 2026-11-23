@@ -14,16 +14,17 @@
 - **RabbitMQ 传任务**：delivery 的模拟快递步骤（每步一个任务，约 10 秒一步），以及 store 的邮件（`email_queue`）。
 - **gRPC** 只用在动钱的那一次调用上：store → bank。
 - **一个 PostgreSQL 服务器，每个服务一个库、一个登录名**；没有服务读别人的库。
+- **Redis 只存 store 的限流计数**，只有 store 连它。
 - **统一入口是白名单**：只转发前端用到的 方法 + 路径；`/internal`、`/actuator` 和没列出来的路径在入口直接 404（[routes.yaml](k8s/gateway/routes.yaml)、[nginx.conf](frontend/nginx.conf)）。
 
 ## 服务
 
 | 服务 | 语言 / 框架 | 负责什么 | 数据库 | 接口 |
 |---|---|---|---|---|
-| **store** | Java 17、Spring Boot 3.5 | 用户与登录（JWT）、商品与仓库库存、订单、支付；所有扣款和退款都由它发起 | `store_db` | REST `/api/user`、`/api/products`、`/api/store/...`（用户自己的订单），只给管理员的 `/api/orders`、`/api/warehouses`、`/api/payments/{id}/refund`；生产 `order-events`，消费 `delivery-events`；bank 的 gRPC 客户端；发 `email_queue` |
+| **store** | Java 17、Spring Boot 3.5 | 用户与登录（JWT）、商品与仓库库存、订单、支付；所有扣款和退款都由它发起；注册、登录、找回密码的限流 | `store_db`；限流计数在 Redis | REST `/api/user`、`/api/products`、`/api/store/...`（用户自己的订单），只给管理员的 `/api/orders`、`/api/warehouses`、`/api/payments/{id}/refund`；生产 `order-events`，消费 `delivery-events`；bank 的 gRPC 客户端；发 `email_queue` |
 | **bank** | Java 17、Spring Boot 3.5、grpc-java | 账户和转账 | `bank_db` | gRPC `BankService.Transfer` / `Refund`（:9090，[bank.proto](backend/contracts/src/main/proto/bank/v1/bank.proto)）；REST `/api/bank/...`（开户、查余额） |
 | **delivery** | Java 17、Spring Boot 3.5 | 配送单和模拟快递（CREATED → PICKED_UP → DELIVERING → RECEIVED，或 LOST） | `delivery_db` | REST `/api/deliveries/...`、`/api/admin/dlq/...`、`/internal/deliveries/cancel-by-order/{orderId}`；消费 `order-events`，生产 `delivery-events`；RabbitMQ 任务队列 |
-| **email** | Java 17、Spring Boot 3.5 | 验证码和通知邮件（SMTP：本地发到 Mailpit，配了 Gmail 就发 Gmail） | `email_db` | REST `/api/email/...`；消费 `email_queue` |
+| **email** | Java 17、Spring Boot 3.5 | 验证码和通知邮件（SMTP：本地发到 Mailpit，配了 Gmail 就发 Gmail） | `email_db` | REST `/api/email/...`，只给 store 调（服务密钥；没有公开接口）；消费 `email_queue` |
 | **tracking** | Go 1.27、franz-go、pgx | 每个订单的只读事件时间线 | `tracking_db` | `GET /api/tracking/orders/{orderId}/timeline`；消费两个 topic |
 | frontend | React 19、nginx | 网店界面 | — | compose 下的统一入口（`localhost:3000`） |
 
@@ -44,9 +45,19 @@
 | 只有 store 能调 bank、delivery 的 `/internal` 和 email 的找回密码 | 每个被调方一把共享密钥（HTTP 头 `X-Service-Token` / gRPC metadata `x-service-token`），常数时间比较，没配就不启动。store 给每个被调方只发它那一把；被拒时原来的结果不变（付款仍是 UNKNOWN，不会变成 REJECTED），另外打 `ALERT *_auth_failed`。Kubernetes 上还有 NetworkPolicy 只让 store 连 bank 的 gRPC 端口（ADR-23，[学习文档 10](docs/learning/10-service-credentials.zh-CN.md)）。 |
 | 用户只能动自己的订单，管理接口要管理员 | store 除了注册、登录、找回密码和商品目录都要登录。订单归属在 service 层查，别人的订单回 404（和不存在一样），订单号没法被试探。JWT 带角色（USER / ADMIN，没有就是 USER）；管理页的数据、库存、价格、退款和 delivery 的 DLQ 要 ADMIN。第一个管理员来自 `ADMIN_EMAIL` / `ADMIN_PASSWORD`（ADR-24，[学习文档 11](docs/learning/11-login-ownership-admin-role.zh-CN.md)）。 |
 | 账号能用之前先证明邮箱 | 激活要注册邮件里的验证码，由 store 自己去问 email；email 的 `verify-code` 只给 store。码一码一用途，猜错 5 次或重发新码就作废，校验时锁行。本地所有邮件发到 Mailpit，脚本从那里读码（ADR-25，[学习文档 12](docs/learning/12-activation-code.zh-CN.md)）。 |
+| 注册、登录、找回密码不能被刷 | store 的 5 个公开账号接口都限流（规则见下表）。计数存在 Redis，固定窗口：`INCR` 和第一次的 `PEXPIRE` 在同一个 Lua 脚本里执行，不会留下没有过期时间的键。超了回 429 和 `Retry-After`。验证码由浏览器向 store 要，store 只在账号存在且没激活时才让 email 发；email 不再有公开接口。客户端地址取 `X-Forwarded-For` 的最后一个值，也就是入口写的那个（nginx 覆盖这个头，Envoy 往后追加）；Tomcat 不碰这个头（`server.forward-headers-strategy=none`），否则 Spring Boot 在 Kubernetes 上会信客户端伪造的值（在 kind 上发现的）。Redis 挂了 store 照常服务、不限流，打 `ALERT rate_limit_unavailable`。 |
 | RabbitMQ 挂着时丢了配送任务 | 场景 05 发现：RabbitMQ 挂着时建的配送单会永远停在 CREATED。现在有扫表任务：非终态、60 秒没动的配送单会被重发任务；先用条件 `UPDATE` 认领，两个实例不会都重发（[学习文档 09](docs/learning/09-stuck-delivery-job-sweeper.zh-CN.md)）。 |
 
 另外：库存用悲观行锁预留（[学习文档 04](docs/learning/04-inventory-pessimistic-lock.zh-CN.md)）；未支付订单超时自动取消，并在订单行锁下复查。
+
+限流规则（每个接口各数各的；邮箱先转小写、去空格，Redis 里只存它的哈希）：
+
+| 接口（`/api/user/...`） | 按什么数 | 上限 |
+|---|---|---|
+| `send-verification`、`forgot-password` | 先数客户端地址，过了再数邮箱 | 同一地址 1 小时 20 次；同一邮箱 15 分钟 3 次 |
+| `activate`、`reset-password` | 客户端地址 | 15 分钟 20 次 |
+| `login` | 客户端地址 + 账号 | 15 分钟 10 次，登录成功就清零 |
+| `login` | 客户端地址 | 15 分钟 100 次 |
 
 ## 端到端场景
 
@@ -57,6 +68,12 @@
 | **下单扣款** | 订单 PAID → PICKED_UP → IN_TRANSIT → DELIVERED；只扣一次；tracking 时间线按顺序有六个事件 | `pwsh backend/docker/scenarios/06-sequence-a-order-to-received.ps1` |
 | **丢件退款** | 以 100% 丢件率重启 delivery；订单 LOST → REFUNDED，只退一次，余额回到原样 | `pwsh backend/docker/scenarios/07-sequence-b-lost-refund.ps1` |
 | **取消竞态** | 停掉 Kafka 让 `OrderPaid` 迟到，用户先取消。取消标记挡住迟到的事件：不建配送单、退一次款、库存还回去 | `pwsh backend/docker/scenarios/08-sequence-c-cancel-before-delivery-reads.ps1` |
+
+每个脚本都会注册用户，而 store 只允许同一地址 1 小时发 20 封验证码：所有场景加两个冒烟脚本跑一轮大约注册 10 个，所以一小时大约能跑两轮。计数只存在 Redis 里，本机想清零：
+
+```powershell
+docker compose -f backend/compose.yml exec redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning FLUSHDB'
+```
 
 04–08 加 `-Target kind` 就在 Kubernetes 上跑。01–05 是故障场景（Pay Now 点两次、付完马上取消、付款时 bank 挂了、Kafka 挂了、RabbitMQ 挂了），见[场景说明](backend/docker/scenarios/README.zh-CN.md)。
 
@@ -94,9 +111,11 @@ docker compose -f backend/compose.yml build    # kind 用 compose 构建出的 s
 
 都来自 `backend/.env`（不进 git，模板 [backend/.env.example](backend/.env.example)）。变量说明见英文版表格；Kafka 和 gRPC 的地址与配置见 [docs/wave2-config-contract.zh-CN.md](docs/wave2-config-contract.zh-CN.md)。
 
+**从旧版本升级**（限流加了 Redis）：在 `backend/.env` 里加 `REDIS_PASSWORD`（随便一个长随机串，比如 `openssl rand -hex 32`）。没有它 compose 起不来；kind 上再跑一次 `./k8s/scripts/up.ps1`，它会建好 Secret 和 Redis。
+
 ## 测试
 
-Java 和 Go 的集成测试用 Testcontainers 起真的 PostgreSQL、Kafka、RabbitMQ，所以 Docker 要开着；先停掉 compose 栈和 kind 节点，不然容器起得慢。
+Java 和 Go 的集成测试用 Testcontainers 起真的 PostgreSQL、Kafka、RabbitMQ（store 还有 Redis），所以 Docker 要开着；先停掉 compose 栈和 kind 节点，不然容器起得慢。
 
 ```powershell
 cd backend
@@ -120,8 +139,15 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
 ## 已知限制和下一步
 
 - **服务间鉴权用共享密钥，不是 mTLS**（ADR-23）：bank、delivery 的 `/internal/...`、email 的找回密码接口只接受带了被调方自己那把凭据的调用；每个服务没配自己的凭据就不启动。没有自动轮换（改 `backend/.env` / Secret 里的值，两边一起重启），`email_queue` 这条路只靠 RabbitMQ 账号挡。
-- **用户和管理员**（鉴权 PR ②、③）：store 除了注册、登录、找回密码和商品目录，都要登录；用户只能查、取消、支付自己的订单。管理接口（全站订单、仓库和库存、商品和价格、退款、delivery 的 DLQ）要 JWT 里带 ADMIN 角色。第一个管理员来自 `ADMIN_EMAIL` / `ADMIN_PASSWORD`。角色写在 JWT 里，在库里改了角色要等用户重新登录才生效（token 有效 24 小时）。激活要注册邮件里的验证码：store 拿去问 email；一个码猜错 5 次、或者重发了新码，就作废。还没有限流，所以知道邮箱的人能一直把码耗掉，让对方注册或找回密码一直失败。
-- **单副本**：所有有状态组件都只有一个；store 只能一个副本，因为 `OutboxProcessor` 没有跨实例的锁。
+- **用户和管理员**（鉴权 PR ②、③）：store 除了注册、登录、找回密码和商品目录，都要登录；用户只能查、取消、支付自己的订单。管理接口（全站订单、仓库和库存、商品和价格、退款、delivery 的 DLQ）要 JWT 里带 ADMIN 角色。第一个管理员来自 `ADMIN_EMAIL` / `ADMIN_PASSWORD`。角色写在 JWT 里，在库里改了角色要等用户重新登录才生效（token 有效 24 小时）。激活要注册邮件里的验证码：store 拿去问 email；一个码猜错 5 次、或者重发了新码，就作废。
+- **限流**（只在 store；Redis 里的固定窗口）。还挡不住的：
+  - 用很多地址的人，还是能把别人的码耗掉，或者用完那个邮箱 15 分钟 3 封信的额度，让对方一段时间内注册 / 找回密码失败（猜错的次数还没有按邮箱数）；
+  - 很多地址一起猜密码（要验证码或异常检测）；
+  - 注册接口本身不限，能批量建垃圾账号（建出来激活不了，每个 15 分钟最多 3 封信）；
+  - 固定窗口在边界上能连用两个窗口的额度。
+
+  Redis 挂着的时候不限流（fail-open，`ALERT rate_limit_unavailable`）。上云后 Envoy 前面如果还有负载均衡，`X-Forwarded-For` 的最后一个值就成了负载均衡的地址，到时要再核对客户端地址的规则（写在 `ClientIp` 里）。
+- **单副本**：所有有状态组件都只有一个（Redis 也是）；store 只能一个副本，因为 `OutboxProcessor` 没有跨实例的锁。
 - **kind 入口偶发 503**（发现 I2）：一次读请求经过 Envoy Gateway 时在到达 store 之前被重置，重试就过了，原因还没查清。
 - **场景脚本 01–03 只能跑 compose**；04–08 两边都能跑。
 - **前端测试**：`App.test.js` 在 `main` 上失败（它是 CRA 自带的示例测试，跑的时候 jest 找不到 `react-router-dom`）。
