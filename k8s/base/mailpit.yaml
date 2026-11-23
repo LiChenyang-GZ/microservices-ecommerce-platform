@@ -1,0 +1,53 @@
+# Mailpit: a fake SMTP server for this local cluster (A11), as in compose. email sends every mail here
+# (MAIL_HOST in apps/email.yaml); nothing leaves the cluster. Its web page and API (8025) are not behind
+# the gateway: open them with
+#   kubectl -n shop port-forward svc/mailpit 8025:8025   ->  http://localhost:8025
+# The scripts read verification codes from that API (backend/docker/mailpit.ps1).
+# Mail is kept in memory only: a restart empties the inbox, which is fine for codes that expire in 5 minutes.
+#
+# LOCAL ONLY. Remove it (and the MAIL_* lines in apps/email.yaml) before this goes anywhere real: real users
+# would get no mail, and its API has no login, so any pod in the cluster could read every registration and
+# password-reset code (review 51 🟡4).
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailpit
+  namespace: shop
+spec:
+  selector:
+    app: mailpit
+  ports:
+    - { name: smtp, port: 1025 }
+    - { name: http, port: 8025 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mailpit
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mailpit
+  template:
+    metadata:
+      labels:
+        app: mailpit
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: mailpit
+          image: axllent/mailpit:v1.21.8
+          ports:
+            - containerPort: 1025
+            - containerPort: 8025
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8025 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /livez, port: 8025 }
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }

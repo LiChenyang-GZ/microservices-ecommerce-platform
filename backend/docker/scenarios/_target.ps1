@@ -13,6 +13,7 @@ param([ValidateSet('compose', 'kind')][string]$Target = 'compose')
 
 $repo = Resolve-Path (Join-Path $PSScriptRoot '..\..\..')
 $compose = Join-Path $repo 'backend/compose.yml'
+. (Join-Path $repo 'backend/docker/mailpit.ps1') # Confirm-ShopperEmail：发码、去 Mailpit 读码、激活（A11）
 if ($Target -eq 'kind') {
     . (Join-Path $repo 'k8s/scripts/tools.ps1') # 选对版本的 kubectl
     $store = 'http://localhost/api/store'
@@ -108,14 +109,13 @@ function Timeline($orderId, $token, [string[]]$Until = @()) {
     }
 }
 
-# 注册 + 激活 + 登录一个新用户（激活只要邮箱，不用真的收信）。返回登录结果，外加 email 和 bank 账号
+# 注册 + 激活 + 登录一个新用户（激活要邮件里的验证码，从 Mailpit 读，不用真的 Gmail）。返回登录结果，外加 email 和 bank 账号
 function New-Shopper($prefix) {
     $email = "$prefix-$(Get-Date -Format 'yyyyMMddHHmmss')@example.com"
     $password = 'Smoke-Test-1'
     Invoke-RestMethod -Method Post "$store/user" -ContentType 'application/json' `
         -Body (@{ username = $email.Split('@')[0]; email = $email; password = $password } | ConvertTo-Json) | Out-Null
-    Invoke-RestMethod -Method Post "$store/user/activate" -ContentType 'application/json' `
-        -Body (@{ email = $email } | ConvertTo-Json) | Out-Null
+    if ($Target -eq 'kind') { Confirm-ShopperEmail $email -Kind $kubectl } else { Confirm-ShopperEmail $email }
     $login = Invoke-RestMethod -Method Post "$store/user/login" -ContentType 'application/json' `
         -Body (@{ email = $email; password = $password } | ConvertTo-Json)
     $login | Add-Member -Force email $email

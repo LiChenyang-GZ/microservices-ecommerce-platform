@@ -158,9 +158,10 @@ export const userAPI = {
   },
 
   // Activate account
-  activateAccount: async (email) => {
+  // Activate account with the code from the registration email; store checks it with email (A11)
+  activateAccount: async (email, code) => {
     try {
-      const response = await api.post('/user/activate', { email });
+      const response = await api.post('/user/activate', { email, code });
       return response.data;
     } catch (error) {
       throw error;
@@ -212,16 +213,7 @@ export const emailAPI = {
     }
   },
 
-  // Verify code
-  verifyCode: async (email, code) => {
-    try {
-      const response = await emailApi.post('/email/verify-code', { email, code });
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  },
-
+  // No verifyCode here: the code goes to store's activate, and store asks email (A11)
 };
 
 // Create a new axios instance specifically for connecting to your DeliveryCo service

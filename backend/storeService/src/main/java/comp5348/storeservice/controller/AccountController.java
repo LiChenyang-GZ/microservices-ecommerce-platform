@@ -46,16 +46,20 @@ public class AccountController {
     }
 
     /**
-     * Activate account (called after email verification succeeds)
+     * Activate an account with the code from the registration email (A11): store checks the code with email itself.
+     * A wrong code and an unknown email get the same answer. That hides little: registration already says
+     * "Email already exists", and an account that is already active gets 200 without spending a code (review 51 🟡7).
      */
     @PostMapping("/activate")
     public ResponseEntity<?> activateAccount(@RequestBody ActivateAccountRequest request) {
-        boolean success = accountService.activateAccount(request.email);
-        if (success) {
-            return ResponseEntity.ok(new ActivateAccountResponse(true, "Account activated successfully"));
-        } else {
-            return ResponseEntity.badRequest().body(new ActivateAccountResponse(false, "Account activation failed"));
-        }
+        return switch (accountService.activateAccount(request.email, request.code)) {
+            case ACTIVATED -> ResponseEntity.ok(new ActivateAccountResponse(true, "Account activated successfully"));
+            case ALREADY_ACTIVE -> ResponseEntity.ok(new ActivateAccountResponse(true, "Account is already activated"));
+            case INVALID_CODE -> ResponseEntity.badRequest()
+                    .body(new ActivateAccountResponse(false, "Verification code is invalid or expired"));
+            case EMAIL_UNAVAILABLE -> ResponseEntity.status(503)
+                    .body(new ActivateAccountResponse(false, "Verification is unavailable right now, please try again later"));
+        };
     }
 
     /**
@@ -151,6 +155,8 @@ public class AccountController {
 
     public static class ActivateAccountRequest {
         public String email;
+        /** the 6-digit code from the registration email */
+        public String code;
     }
 
     public static class ActivateAccountResponse {

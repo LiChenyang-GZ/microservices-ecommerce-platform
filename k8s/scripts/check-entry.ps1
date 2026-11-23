@@ -36,7 +36,6 @@ auth   GET    /api/store/warehouses                                     admin da
 auth   GET    /api/store/warehouses/audit-logs/out-transactions         admin dashboard
 # email, unchanged path
 open   POST   /api/email/send-verification                              register
-open   POST   /api/email/verify-code                                    email verification page
 # delivery, /api/delivery/x -> delivery /api/x
 auth   GET    /api/delivery/deliveries/me                               delivery list
 auth   GET    /api/delivery/deliveries/999999999                        delivery page
@@ -69,8 +68,9 @@ closed POST   /api/store/delivery-webhook                               callback
 # ---- closed: a frontend path with the wrong method ----
 closed POST   /api/store/products/available                             only GET is used
 closed DELETE /api/delivery/deliveries/999999999                        only GET is used
-# ---- closed: email password reset, store -> email only (needs email's service token) ----
+# ---- closed: email password reset and code checks, store -> email only (needs email's service token) ----
 closed POST   /api/email/send-password-reset                            store -> email
+closed POST   /api/email/verify-code                                    store -> email since A11 (activate checks the code)
 # ---- closed: bank (review #3: the frontend calls no bank path; transfer, refund and account/me were removed in auth PR 1) ----
 closed GET    /api/bank/account/CUSTOMER_ACCOUNT_001/balance            only the removed top-up page used it
 # ---- closed: tracking (no page calls it yet) ----

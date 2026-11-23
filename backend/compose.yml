@@ -227,6 +227,11 @@ services:
       SPRING_RABBITMQ_HOST: rabbitmq
       RABBITMQ_USERNAME: ${RABBITMQ_USERNAME}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+      # Mailpit unless backend/.env names a real server (A11: the scripts read the verification code from Mailpit)
+      MAIL_HOST: ${MAIL_HOST:-mailpit}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      MAIL_SMTP_AUTH: ${MAIL_SMTP_AUTH:-false}
+      MAIL_SMTP_STARTTLS: ${MAIL_SMTP_STARTTLS:-false}
       MAIL_USERNAME: ${MAIL_USERNAME:-}
       MAIL_PASSWORD: ${MAIL_PASSWORD:-}
       # Callers of the password-reset endpoints must send this (ADR-23). email refuses to start without it.
@@ -239,6 +244,15 @@ services:
     healthcheck:
       <<: *java-healthcheck
       test: ['CMD', 'curl', '-fsS', 'http://localhost:8083/actuator/health']
+
+  # Fake SMTP server for local runs (A11). email sends here unless backend/.env sets MAIL_HOST.
+  # Every mail shows up on http://localhost:8025 (web page and API); the scripts read verification codes there.
+  # Not a dependency of email: if it is down, sending fails as it would with Gmail down.
+  mailpit:
+    restart: unless-stopped
+    image: axllent/mailpit:v1.21.8
+    ports:
+      - '127.0.0.1:8025:8025'
 
   # Go read service (ADR-11). Healthcheck is built into the image (Dockerfile).
   tracking:

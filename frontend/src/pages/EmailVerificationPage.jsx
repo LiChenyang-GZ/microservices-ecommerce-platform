@@ -47,32 +47,25 @@ const EmailVerificationPage = () => {
     setSuccess('');
 
     try {
-      // Verify verification code
-      const verifyResponse = await emailAPI.verifyCode(email, verificationCode);
-      
-      if (verifyResponse.success) {
-        // Verification successful, activate account
-        const activateResponse = await userAPI.activateAccount(email);
-        
-        if (activateResponse.success) {
-          setSuccess('Email verification successful! Account activated, please login.');
-          // Clear pending email
-          localStorage.removeItem('pendingEmail');
-          
-          // Redirect to login page after 2 seconds
-          setTimeout(() => {
-            navigate('/login', { 
-              state: { 
-                message: 'Email verification successful, please login',
-                email: email 
-              }
-            });
-          }, 2000);
-        } else {
-          setError('Account activation failed, please try again');
-        }
+      // store checks the code with email itself (A11): the page only hands it over
+      const activateResponse = await userAPI.activateAccount(email, verificationCode);
+
+      if (activateResponse.success) {
+        setSuccess('Email verification successful! Account activated, please login.');
+        // Clear pending email
+        localStorage.removeItem('pendingEmail');
+
+        // Redirect to login page after 2 seconds
+        setTimeout(() => {
+          navigate('/login', {
+            state: {
+              message: 'Email verification successful, please login',
+              email: email
+            }
+          });
+        }, 2000);
       } else {
-        setError(verifyResponse.message || 'Verification code invalid or expired');
+        setError(activateResponse.message || 'Verification code invalid or expired');
       }
     } catch (error) {
       console.error('Verification failed:', error);

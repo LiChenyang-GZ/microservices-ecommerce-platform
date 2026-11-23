@@ -43,7 +43,7 @@ Open `http://localhost` in a browser.
 ```
 k8s/
   kind-config.yaml        one node; only 127.0.0.1:80 is mapped in (compose's ports stay free)
-  base/                   namespace, PostgreSQL, db-init Job, RabbitMQ, Kafka, kafka-init Job
+  base/                   namespace, PostgreSQL, db-init Job, RabbitMQ, Kafka, kafka-init Job, Mailpit
   apps/                   store, bank, delivery, email, tracking, frontend
   gateway/gateway.yaml    the single entry: Envoy Gateway (Gateway API)
   gateway/routes.yaml     which path goes to which service
@@ -87,6 +87,9 @@ kubectl -n shop rollout restart deploy/store
 ./k8s/scripts/apply-secrets.ps1
 kubectl -n shop delete job db-init; kubectl apply -k k8s/base
 
+# Read the mail the shop sent (verification codes go to Mailpit; it is not behind the gateway)
+kubectl -n shop port-forward svc/mailpit 8025:8025   # then http://localhost:8025
+
 # Remove everything (the cluster's data goes with it; compose's volume is not touched)
 kind delete cluster --name shop
 ```
@@ -97,3 +100,4 @@ kind delete cluster --name shop
 - `kind delete cluster` deletes all data in the cluster.
 - bank's gRPC port 9090 is limited to store pods by a NetworkPolicy (end of `apps/bank.yaml`). kind's default network plugin enforces it; on a cluster whose plugin does not implement NetworkPolicy, only the service token protects bank.
 - With relative paths in the frontend, local `npm start` needs a proxy (`src/setupProxy.js`); not done yet.
+- Mail goes to Mailpit (`base/mailpit.yaml`), which is for this local cluster only: its API has no login, so any pod could read every verification code. Before deploying anywhere real, remove it and point email's `MAIL_*` at a real SMTP server.

@@ -43,7 +43,7 @@
 ```
 k8s/
   kind-config.yaml        一个节点；只把 127.0.0.1:80 映射进去（compose 的端口都空着）
-  base/                   namespace、PostgreSQL、db-init Job、RabbitMQ、Kafka、kafka-init Job
+  base/                   namespace、PostgreSQL、db-init Job、RabbitMQ、Kafka、kafka-init Job、Mailpit
   apps/                   store、bank、delivery、email、tracking、frontend
   gateway/gateway.yaml    唯一入口：Envoy Gateway（Gateway API）
   gateway/routes.yaml     哪个路径去哪个服务
@@ -86,6 +86,9 @@ kubectl -n shop rollout restart deploy/store
 ./k8s/scripts/apply-secrets.ps1
 kubectl -n shop delete job db-init; kubectl apply -k k8s/base
 
+# 看商店发出的邮件（验证码发到 Mailpit；它不在入口后面）
+kubectl -n shop port-forward svc/mailpit 8025:8025   # 然后打开 http://localhost:8025
+
 # 全部删掉（集群里的数据一起没，compose 的数据卷不受影响）
 kind delete cluster --name shop
 ```
@@ -96,3 +99,4 @@ kind delete cluster --name shop
 - `kind delete cluster` 会删掉集群里的所有数据。
 - bank 的 gRPC 端口 9090 由 NetworkPolicy 限定只有 store 的 pod 能连（`apps/bank.yaml` 最后）。kind 默认的网络插件会执行它；换到不支持 NetworkPolicy 的网络插件，就只剩服务凭据在保护 bank。
 - 前端用相对路径以后，本地 `npm start` 需要另配代理（`src/setupProxy.js`），还没做。
+- 邮件发到 Mailpit（`base/mailpit.yaml`），只给本机集群用：它的 API 没有登录，集群里任何 pod 都能读到所有验证码。部署到真环境前要去掉它，把 email 的 `MAIL_*` 指向真的 SMTP。

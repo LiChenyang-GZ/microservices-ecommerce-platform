@@ -51,6 +51,15 @@ public class EmailOutbox {
     @Setter
     private String verificationType; // REGISTRATION, PASSWORD_RESET, etc.
 
+    /**
+     * Wrong guesses against this code (A11, V13). At MAX_FAILED_ATTEMPTS the code is marked EXPIRED.
+     * The column definition carries a default so ddl-auto=update can add it to a table that already has rows.
+     */
+    @Getter
+    @Setter
+    @Column(name = "failed_attempts", columnDefinition = "integer default 0 not null")
+    private int failedAttempts = 0;
+
     public boolean isExpired() {
         return LocalDateTime.now().isAfter(expireAt);
     }

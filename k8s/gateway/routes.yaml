@@ -60,7 +60,6 @@ spec:
         - { name: delivery, port: 8081 }
     - matches:
         - { method: POST, path: { type: Exact, value: /api/email/send-verification } }
-        - { method: POST, path: { type: Exact, value: /api/email/verify-code } }
       backendRefs:
         - { name: email, port: 8083 }
     # Everything else under these prefixes: 404 from the entry. Without this

@@ -73,7 +73,7 @@ flowchart LR
 | **store** | Java 17, Spring Boot 3.5 | users and login (JWT), products and warehouse stock, orders, payments; starts every charge and refund | `store_db` | REST `/api/user`, `/api/products`, `/api/store/...` (a user's own orders), admin-only `/api/orders`, `/api/warehouses`, `/api/payments/{id}/refund`; produces `order-events`, consumes `delivery-events`; gRPC client of bank; publishes to `email_queue` |
 | **bank** | Java 17, Spring Boot 3.5, grpc-java | accounts and money transfers | `bank_db` | gRPC `BankService.Transfer` / `Refund` on :9090 ([bank.proto](backend/contracts/src/main/proto/bank/v1/bank.proto)); REST `/api/bank/...` for accounts and balances |
 | **delivery** | Java 17, Spring Boot 3.5 | deliveries and the simulated courier (CREATED → PICKED_UP → DELIVERING → RECEIVED, or LOST) | `delivery_db` | REST `/api/deliveries/...`, `/api/admin/dlq/...`, `/internal/deliveries/cancel-by-order/{orderId}`; consumes `order-events`, produces `delivery-events`; RabbitMQ job queue |
-| **email** | Java 17, Spring Boot 3.5 | verification codes and notification emails (Gmail SMTP) | `email_db` | REST `/api/email/...`; consumes `email_queue` |
+| **email** | Java 17, Spring Boot 3.5 | verification codes and notification emails (SMTP: Mailpit locally, Gmail if configured) | `email_db` | REST `/api/email/...`; consumes `email_queue` |
 | **tracking** | Go 1.27, franz-go, pgx | a read-only timeline of every event per order | `tracking_db` | `GET /api/tracking/orders/{orderId}/timeline`; consumes both topics |
 | frontend | React 19, served by nginx | shop UI | — | the single entry in compose (`localhost:3000`) |
 
@@ -120,17 +120,18 @@ You need Docker Desktop and PowerShell 7. All commands run from the repository r
 ```powershell
 Copy-Item backend/.env.example backend/.env
 # Fill in backend/.env: every *_PASSWORD, and JWT_SECRET (at least 64 characters).
-# MAIL_USERNAME / MAIL_PASSWORD can stay empty: emails are then not sent, the rest works.
+# MAIL_* can stay empty: every email goes to Mailpit (http://localhost:8025), including verification codes.
 
 docker compose -f backend/compose.yml up -d --build --wait   # first build takes several minutes
 pwsh backend/docker/smoke-order.ps1                          # one order: PAID, charged once, delivery moves
 ```
 
-Open http://localhost:3000 and register a user (new users get a bank account with 10,000). Other addresses on this machine:
+Open http://localhost:3000 and register a user (new users get a bank account with 10,000); the verification code arrives in Mailpit at http://localhost:8025. Other addresses on this machine:
 
 | What | Address |
 |---|---|
 | shop | http://localhost:3000 |
+| Mailpit (every email the shop sends) | http://localhost:8025 |
 | store / delivery / email / bank / tracking | `localhost:8082` / `8081` / `8083` / `8084` / `8085` (bank's gRPC `9090` is reachable only inside the compose network) |
 | PostgreSQL | `localhost:5433` (user `postgres`, databases `store_db`, `bank_db`, ...) |
 | RabbitMQ management | http://localhost:15672 |
@@ -162,7 +163,7 @@ All secrets come from `backend/.env` (git-ignored; template in [backend/.env.exa
 | `STORE_DB_PASSWORD`, `BANK_DB_PASSWORD`, `DELIVERY_DB_PASSWORD`, `EMAIL_DB_PASSWORD`, `TRACKING_DB_PASSWORD` | one login per service database, created on the first start of an empty volume |
 | `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD` | RabbitMQ |
 | `JWT_SECRET` | store signs login tokens (HS512, at least 64 characters) |
-| `MAIL_USERNAME`, `MAIL_PASSWORD` | email: a Gmail address and a 16-character app password |
+| `MAIL_USERNAME`, `MAIL_PASSWORD` | email: a Gmail address and a 16-character app password. Used only if `MAIL_HOST` (and `MAIL_PORT`, `MAIL_SMTP_AUTH`, `MAIL_SMTP_STARTTLS`) point at Gmail; by default compose sends to Mailpit |
 
 The full list of addresses and settings for Kafka and gRPC is in [docs/wave2-config-contract.md](docs/wave2-config-contract.md).
 
@@ -222,7 +223,7 @@ docs/
 ## Known limitations and next steps
 
 - **Service-to-service calls use shared secrets, not mTLS** (ADR-23). bank, delivery's `/internal/...` and email's password-reset endpoints accept only callers that send the callee's own token; each service refuses to start without its token. There is no automatic rotation (change the value in `backend/.env` / the Secret and restart both sides), and the `email_queue` path is protected only by the RabbitMQ account.
-- **Users and admins** (auth PRs 2 and 3). store requires a login everywhere except sign-up, log-in, password reset and the catalogue; a user can read, cancel and pay only their own orders. Admin endpoints (all orders, warehouses and stock, products and prices, refunds, delivery's DLQ) need the ADMIN role carried in the JWT. The first admin comes from `ADMIN_EMAIL` / `ADMIN_PASSWORD`. The role travels in the JWT, so a role changed in the database applies at the user's next log-in (tokens last 24 hours). Account activation still does not check the email verification code, so anyone can activate any account they registered.
+- **Users and admins** (auth PRs 2 and 3). store requires a login everywhere except sign-up, log-in, password reset and the catalogue; a user can read, cancel and pay only their own orders. Admin endpoints (all orders, warehouses and stock, products and prices, refunds, delivery's DLQ) need the ADMIN role carried in the JWT. The first admin comes from `ADMIN_EMAIL` / `ADMIN_PASSWORD`. The role travels in the JWT, so a role changed in the database applies at the user's next log-in (tokens last 24 hours). Activation needs the code from the registration email: store checks it with email, and a code dies after 5 wrong guesses or when a new one is sent. There is no rate limit yet, so someone who knows an address can keep burning its codes and block that sign-up or password reset.
 - **Single replicas.** Every stateful component runs once, and store runs one replica because `OutboxProcessor` has no lock across instances.
 - **Occasional 503 at the kind entry** (finding I2): a read through Envoy Gateway was once reset before reaching store; a retry passed. Not yet explained.
 - **Scenario scripts 01–03 run on compose only**; 04–08 also run on kind.
