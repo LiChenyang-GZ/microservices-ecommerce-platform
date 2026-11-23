@@ -36,7 +36,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * email 的接口分两类：给浏览器的（公开）和给别的服务的（要服务凭据）。失败场景表（Obsidian 36 号文件）E1。
  * 这是 email 的第一个测试。
  *
- *   公开（注册页在用，入口放行）：POST /api/email/send-verification、/verify-code
+ *   公开（注册页在用，入口放行）：POST /api/email/send-verification。verify-code 在 A11（Obsidian 50 号）之后只给 store。
  *   要服务凭据：其余全部 —— 四个通知（send-delivery-update、send-order-cancelled、send-order-failed、
  *     send-refund-success）、找回密码的两个（只有 store 的 AccountService 在调，前端不调）、check-verified。
  *
@@ -162,19 +162,46 @@ class EmailServiceTokenIntegrationTest {
 
     // ---------- 回归（这两条现在就是绿的，写下来防以后改坏） ----------
 
-    /** 注册页的两个接口保持公开：不带任何凭据也能发验证码、校验验证码。绿灯时不能把它们一起锁上。 */
+    /** 注册页发验证码的接口保持公开：不带任何凭据也能发。 */
     @Test
-    void registrationEndpoints_stayPublic() throws Exception {
+    void sendVerification_staysPublic() throws Exception {
         String email = newEmail();
 
         mvc.perform(postJson("/api/email/send-verification", "{\"email\":\"%s\"}".formatted(email), null))
                 .andExpect(status().isOk());
 
         verify(mailSender, times(1)).send(any(SimpleMailMessage.class));
-        String code = outboxRepository.findAll().stream()
-                .filter(row -> email.equals(row.getEmail())).findFirst().orElseThrow().getCode();
+    }
+
+    // ---------- A11（Obsidian 50 号文件 V10）：校验注册验证码只给 store ----------
+
+    /**
+     * V10：以前 verify-code 是公开的，浏览器自己调完再告诉 store "验证过了"，store 没法确认。
+     * 现在由 store 的 activate 带着码来问，所以 verify-code 只认 store 的服务凭据：
+     * 不带 / 带错 → 401，码没被用掉（外人不能绕过 store 一个个试）。现在：200，码被用掉。
+     */
+    @ParameterizedTest(name = "token = {0}")
+    @NullSource
+    @ValueSource(strings = "not-the-token")
+    void verifyCode_withoutOrWrongToken_is401_andDoesNotUseUpTheCode(String token) throws Exception {
+        String email = newEmail();
+        String code = emailService.sendRegistrationVerificationCode(email);
+
         mvc.perform(postJson("/api/email/verify-code",
-                        "{\"email\":\"%s\",\"code\":\"%s\"}".formatted(email, code), null))
+                        "{\"email\":\"%s\",\"code\":\"%s\"}".formatted(email, code), token))
+                .andExpect(status().isUnauthorized());
+
+        assertThat(emailService.verifyCode(email, code)).as("码还没被用掉").isTrue();
+    }
+
+    /** V10：带对凭据（store 的 activate 就是这样调的）→ 200。这条现在就绿，防绿灯时把它锁死。 */
+    @Test
+    void verifyCode_withCorrectToken_works() throws Exception {
+        String email = newEmail();
+        String code = emailService.sendRegistrationVerificationCode(email);
+
+        mvc.perform(postJson("/api/email/verify-code",
+                        "{\"email\":\"%s\",\"code\":\"%s\"}".formatted(email, code), SERVICE_TOKEN))
                 .andExpect(status().isOk());
     }
 
