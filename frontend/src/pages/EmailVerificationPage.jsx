@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import Input from '../components/Input';
 import Button from '../components/Button';
-import { emailAPI, userAPI } from '../services/api';
+import { userAPI } from '../services/api';
 import './EmailVerificationPage.css';
 
 const EmailVerificationPage = () => {
@@ -24,6 +24,10 @@ const EmailVerificationPage = () => {
     if (emailFromState) {
       setEmail(emailFromState);
       localStorage.setItem('pendingEmail', emailFromState);
+      // The register page comes here even when the code was not sent (429 / 503; review 1, Obsidian 56)
+      if (location.state?.error) {
+        setError(location.state.error);
+      }
     } else if (emailFromStorage) {
       setEmail(emailFromStorage);
     } else {
@@ -85,7 +89,7 @@ const EmailVerificationPage = () => {
     setSuccess('');
 
     try {
-      const response = await emailAPI.sendVerificationCode(email);
+      const response = await userAPI.sendVerificationCode(email);
       if (response.success) {
         setSuccess('Verification code has been resent to your email');
         setCountdown(60); // 60 second countdown

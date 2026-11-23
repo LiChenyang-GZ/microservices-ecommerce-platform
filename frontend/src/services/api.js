@@ -178,6 +178,13 @@ export const userAPI = {
     }
   },
 
+  // Send (or resend) the registration code. Store counts the request and asks email to send it; the browser no
+  // longer talks to email at all (rate limits, Obsidian 54). Too many requests: 429 with a "try again" message.
+  sendVerificationCode: async (email) => {
+    const response = await api.post('/user/send-verification', { email });
+    return response.data;
+  },
+
   // Reset password
   resetPassword: async (email, code, newPassword) => {
     try {
@@ -191,29 +198,6 @@ export const userAPI = {
       throw error;
     }
   }
-};
-
-// Email service API - using separate axios instance
-const emailApi = axios.create({
-  baseURL: '/api', // email's own paths already start with /api/email
-  timeout: 10000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-});
-
-export const emailAPI = {
-  // Send verification code
-  sendVerificationCode: async (email) => {
-    try {
-      const response = await emailApi.post('/email/send-verification', { email });
-      return response.data;
-    } catch (error) {
-      throw error;
-    }
-  },
-
-  // No verifyCode here: the code goes to store's activate, and store asks email (A11)
 };
 
 // Create a new axios instance specifically for connecting to your DeliveryCo service

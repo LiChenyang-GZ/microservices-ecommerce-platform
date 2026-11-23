@@ -23,10 +23,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Import;
+import org.springframework.data.redis.core.RedisCallback;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.kafka.KafkaContainer;
 
@@ -107,11 +110,20 @@ public abstract class StoreIntegrationTest {
 
     protected static final KafkaProbe kafka;
 
+    /**
+     * 限流（Obsidian 54 号）：真的 Redis，限流的计数存在这里。@ServiceConnection(name = "redis")：
+     * Spring Boot 自动把 spring.data.redis 的地址换成这个容器的。没设密码（生产有，见 compose.yml）。
+     * 每个测试前清空（resetExternalWorld），所以一个测试的请求不会占下一个测试的额度。
+     */
+    @ServiceConnection(name = "redis")
+    protected static final GenericContainer<?> REDIS = new GenericContainer<>("redis:7.4-alpine").withExposedPorts(6379);
+
     static {
         POSTGRES.start();
         FAKE_BANK.start();
         FAKE_BANK_GRPC.start();
         KAFKA.start();
+        REDIS.start();
         kafka = new KafkaProbe(KAFKA.getBootstrapServers());
         kafka.createTopics(KafkaProbe.ALL_TOPICS);
     }
@@ -144,11 +156,17 @@ public abstract class StoreIntegrationTest {
     @Autowired protected WarehouseProductRepository warehouseProductRepository;
     @Autowired protected AccountRepository accountRepository;
     @Autowired protected JdbcTemplate jdbc;
+    @Autowired protected StringRedisTemplate redis;
 
     @BeforeEach
     void resetExternalWorld() {
         // 每个测试从干净的假 bank 开始：清掉上一个测试的剧本和请求记录
         FAKE_BANK.resetAll();
+        // 限流的计数从零开始（54 号）
+        redis.execute((RedisCallback<Object>) connection -> {
+            connection.serverCommands().flushAll();
+            return null;
+        });
         FAKE_BANK_GRPC.reset();
         // 默认剧本：查余额总是够；建配送单总是成功（不返回 id，避免 orders.delivery_id 唯一约束在测试之间撞车）
         FAKE_BANK.stubFor(get(urlPathMatching("/api/bank/account/.*/balance"))

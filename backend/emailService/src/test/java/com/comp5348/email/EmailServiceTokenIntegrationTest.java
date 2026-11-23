@@ -36,8 +36,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * email 的接口分两类：给浏览器的（公开）和给别的服务的（要服务凭据）。失败场景表（Obsidian 36 号文件）E1。
  * 这是 email 的第一个测试。
  *
- *   公开（注册页在用，入口放行）：POST /api/email/send-verification。verify-code 在 A11（Obsidian 50 号）之后只给 store。
- *   要服务凭据：其余全部 —— 四个通知（send-delivery-update、send-order-cancelled、send-order-failed、
+ *   公开：没有了。send-verification 以前给注册页用，限流（Obsidian 54 号）之后由 store 转过来；
+ *     verify-code 在 A11（Obsidian 50 号）之后只给 store。
+ *   要服务凭据：全部 —— 四个通知（send-delivery-update、send-order-cancelled、send-order-failed、
  *     send-refund-success）、找回密码的两个（只有 store 的 AccountService 在调，前端不调）、check-verified。
  *
  * 【层】集成测试：真的 email（Spring + 真 Postgres），MockMvc 发请求，会经过 servlet 过滤器，不经过网络。
@@ -108,6 +109,9 @@ class EmailServiceTokenIntegrationTest {
                         Arguments.of("/api/email/send-refund-success",
                                 "{\"email\":\"%s\",\"orderId\":\"42\",\"refundTxnId\":\"9101\"}"),
                         Arguments.of("/api/email/send-password-reset",
+                                "{\"email\":\"%s\"}"),
+                        // 限流（Obsidian 54 号 R21）：注册验证码也挪到 store 后面了，email 没有公开接口
+                        Arguments.of("/api/email/send-verification",
                                 "{\"email\":\"%s\"}"))
                 .flatMap(endpoint -> Stream.of(
                         Arguments.of(endpoint.get()[0], endpoint.get()[1], null),
@@ -162,12 +166,16 @@ class EmailServiceTokenIntegrationTest {
 
     // ---------- 回归（这两条现在就是绿的，写下来防以后改坏） ----------
 
-    /** 注册页发验证码的接口保持公开：不带任何凭据也能发。 */
+    /**
+     * 限流（Obsidian 54 号 R21）：以前注册页直接调这个接口（公开），谁都能让 email 给任意地址发信。
+     * 现在浏览器调 store 的 /api/user/send-verification，store 数过、看过账号，再带服务凭据来这里。
+     * 带对凭据 → 200，发一封信。（不带 / 带错的 401 在上面 sendingEndpoint_… 里。）
+     */
     @Test
-    void sendVerification_staysPublic() throws Exception {
+    void sendVerification_withCorrectToken_stillSends() throws Exception {
         String email = newEmail();
 
-        mvc.perform(postJson("/api/email/send-verification", "{\"email\":\"%s\"}".formatted(email), null))
+        mvc.perform(postJson("/api/email/send-verification", "{\"email\":\"%s\"}".formatted(email), SERVICE_TOKEN))
                 .andExpect(status().isOk());
 
         verify(mailSender, times(1)).send(any(SimpleMailMessage.class));

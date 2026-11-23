@@ -30,7 +30,7 @@ public class AccountService {
 
     private final AccountRepository accountRepository;
     private final PasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
-    /** Only talks to email (the two password-reset calls), so it carries email's own service token on every call */
+    /** Only talks to email (codes: send, check, reset), so it carries email's own service token on every call */
     private final RestTemplate emailRestTemplate;
     @Value("${email.service.url:http://localhost:8083}")
     private String emailServiceUrl;
@@ -189,6 +189,49 @@ public class AccountService {
         return activeNow ? ActivationResult.ALREADY_ACTIVE : ActivationResult.INVALID_CODE;
     }
 
+    /** What sendVerificationCode did; AccountController turns it into the HTTP answer */
+    public enum SendCodeResult {
+        /** email sent a new registration code */
+        SENT,
+        /** no account with this email, or it is active already: nothing sent, same answer as SENT */
+        NOTHING_TO_SEND,
+        /** email refused store's token, failed to send, is down or slow: not the user's fault (503) */
+        EMAIL_UNAVAILABLE
+    }
+
+    /**
+     * Ask email to send a registration code (rate limits, Obsidian 54). The browser used to call email's
+     * send-verification itself; email knows no accounts, so anyone could make it mail any address. Now store
+     * looks first and only asks email for an account that exists and is not active yet, with its service token.
+     */
+    public SendCodeResult sendVerificationCode(String email) {
+        Optional<Account> accountOpt = accountRepository.findByEmail(email);
+        if (accountOpt.isEmpty()) {
+            return SendCodeResult.NOTHING_TO_SEND;
+        }
+        Account account = accountOpt.get();
+        if (Boolean.TRUE.equals(account.getActive()) && Boolean.TRUE.equals(account.getEmailVerified())) {
+            return SendCodeResult.NOTHING_TO_SEND;
+        }
+        try {
+            PasswordResetResponse response = emailRestTemplate.postForObject(
+                    emailServiceUrl + "/api/email/send-verification", new PasswordResetRequest(email),
+                    PasswordResetResponse.class);
+            if (response == null || !response.success) {
+                logger.error("Send verification: email answered without success");
+                return SendCodeResult.EMAIL_UNAVAILABLE;
+            }
+            return SendCodeResult.SENT;
+        } catch (HttpClientErrorException.Unauthorized e) {
+            alertEmailAuthFailed("send-verification");
+            return SendCodeResult.EMAIL_UNAVAILABLE;
+        } catch (Exception e) {
+            // email answers 400 when its own SMTP send fails: that is email's problem too, not the user's
+            logger.warn("Send verification: email failed: {}", e.getMessage());
+            return SendCodeResult.EMAIL_UNAVAILABLE;
+        }
+    }
+
     /**
      * Verify login (only allow verified accounts to login)
      */
@@ -320,7 +363,7 @@ public class AccountService {
                 + "check email.service-token)", endpoint);
     }
 
-    // Inner class for API calls
+    // Inner class for API calls. {email}: also the body of email's send-verification
     private static class PasswordResetRequest {
         public String email;
         

@@ -16,6 +16,8 @@ data:
   EMAIL_SERVICE_URL: http://email:8083
   SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka:9092
   BANK_GRPC_ADDRESS: bank:9090
+  # Rate-limit counters (Obsidian 54); REDIS_PASSWORD is in Secret "store". Not waited for below: fail-open.
+  SPRING_DATA_REDIS_HOST: redis
   # Kubernetes only (not in compose). Probes: /actuator/health/liveness and
   # /readiness; readiness also checks the database (not RabbitMQ or Kafka).
   # JVM heap follows the container memory limit.

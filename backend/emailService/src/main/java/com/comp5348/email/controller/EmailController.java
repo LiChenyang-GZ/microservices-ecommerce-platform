@@ -6,9 +6,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * email's HTTP side. Public: send-verification (the registration page). Service token (ServiceTokenFilter):
- * verify-code (store's activate, A11), send-password-reset and verify-password-reset, all called only by store's
- * AccountService.
+ * email's HTTP side. Nothing public: every endpoint needs store's service token (ServiceTokenFilter) and is
+ * called only by store's AccountService: send-verification (store's send-verification, rate limits, Obsidian 54),
+ * verify-code (store's activate, A11), send-password-reset and verify-password-reset.
  * Notification emails do not come through here: they go over RabbitMQ (email_queue → EmailQueueConsumer).
  * The old send-delivery-update / send-order-cancelled / send-order-failed / send-refund-success and
  * check-verified had no callers and were removed (Christy's decision 3, 2026-11-17).
@@ -24,7 +24,8 @@ public class EmailController {
     private EmailService emailService;
 
     /**
-     * Send registration verification code
+     * Send a registration code. Only store calls it (service token), from AccountService#sendVerificationCode,
+     * after counting the request and checking that the account exists and is not active yet.
      */
     @PostMapping("/send-verification")
     public ResponseEntity<?> sendVerificationCode(@RequestBody SendVerificationRequest request) {

@@ -20,10 +20,11 @@ flowchart LR
     gw --> fe[frontend<br/>React]
     gw -->|/api/store/...| store
     gw -->|/api/delivery/...| delivery
-    gw -->|/api/email/...| email
 
     store[store<br/>Spring Boot] -->|gRPC Transfer / Refund| bank[bank<br/>Spring Boot]
     store -->|HTTP /internal cancel| delivery[delivery<br/>Spring Boot]
+    store -->|HTTP verification codes| email
+    store --- redis[(Redis<br/>rate-limit counters)]
 
     subgraph kafka[Kafka · 3 partitions, key = orderId]
         oe[(order-events)]
@@ -70,10 +71,10 @@ flowchart LR
 
 | Service | Language / framework | What it owns | Database | Interfaces |
 |---|---|---|---|---|
-| **store** | Java 17, Spring Boot 3.5 | users and login (JWT), products and warehouse stock, orders, payments; starts every charge and refund | `store_db` | REST `/api/user`, `/api/products`, `/api/store/...` (a user's own orders), admin-only `/api/orders`, `/api/warehouses`, `/api/payments/{id}/refund`; produces `order-events`, consumes `delivery-events`; gRPC client of bank; publishes to `email_queue` |
+| **store** | Java 17, Spring Boot 3.5 | users and login (JWT), products and warehouse stock, orders, payments; starts every charge and refund; rate limits on sign-up, log-in and password reset | `store_db`; Redis for the rate-limit counters | REST `/api/user`, `/api/products`, `/api/store/...` (a user's own orders), admin-only `/api/orders`, `/api/warehouses`, `/api/payments/{id}/refund`; produces `order-events`, consumes `delivery-events`; gRPC client of bank; publishes to `email_queue` |
 | **bank** | Java 17, Spring Boot 3.5, grpc-java | accounts and money transfers | `bank_db` | gRPC `BankService.Transfer` / `Refund` on :9090 ([bank.proto](backend/contracts/src/main/proto/bank/v1/bank.proto)); REST `/api/bank/...` for accounts and balances |
 | **delivery** | Java 17, Spring Boot 3.5 | deliveries and the simulated courier (CREATED → PICKED_UP → DELIVERING → RECEIVED, or LOST) | `delivery_db` | REST `/api/deliveries/...`, `/api/admin/dlq/...`, `/internal/deliveries/cancel-by-order/{orderId}`; consumes `order-events`, produces `delivery-events`; RabbitMQ job queue |
-| **email** | Java 17, Spring Boot 3.5 | verification codes and notification emails (SMTP: Mailpit locally, Gmail if configured) | `email_db` | REST `/api/email/...`; consumes `email_queue` |
+| **email** | Java 17, Spring Boot 3.5 | verification codes and notification emails (SMTP: Mailpit locally, Gmail if configured) | `email_db` | REST `/api/email/...`, for store only (service token; nothing public); consumes `email_queue` |
 | **tracking** | Go 1.27, franz-go, pgx | a read-only timeline of every event per order | `tracking_db` | `GET /api/tracking/orders/{orderId}/timeline`; consumes both topics |
 | frontend | React 19, served by nginx | shop UI | — | the single entry in compose (`localhost:3000`) |
 
@@ -96,9 +97,19 @@ Each rule below is enforced in code and covered by tests. The reasoning behind e
 | Only store may call bank, delivery's `/internal` and email's password reset | Each called service has its own shared secret (`X-Service-Token` header / `x-service-token` gRPC metadata), compares it in constant time and refuses to start without it. store sends each callee only that callee's secret; a refusal keeps the usual result (a payment stays UNKNOWN, never REJECTED) and logs `ALERT *_auth_failed`. On Kubernetes a NetworkPolicy also limits bank's gRPC port to store ([ADR-23](docs/adr/23-service-credentials.md)). | bank [ServiceTokenServerInterceptor.java](backend/bankService/src/main/java/com/comp5348/bank/grpc/ServiceTokenServerInterceptor.java), store [BankAdapter.java](backend/storeService/src/main/java/comp5348/storeservice/adapter/BankAdapter.java), [learning note 10](docs/learning/10-service-credentials.md) |
 | Users touch only their own orders; admin endpoints need an admin | store requires a login everywhere except sign-up, log-in, password reset and the catalogue. Ownership is checked in the service layer; someone else's order answers 404, like a missing one, so ids cannot be probed. The JWT carries a role (USER / ADMIN, missing = USER); the admin dashboard's data, stock, prices, refunds and delivery's DLQ need ADMIN. The first admin comes from `ADMIN_EMAIL` / `ADMIN_PASSWORD` ([ADR-24](docs/adr/24-login-ownership-admin-role.md)). | store [SecurityConfig.java](backend/storeService/src/main/java/comp5348/storeservice/config/SecurityConfig.java), [OrderProductService.java](backend/storeService/src/main/java/comp5348/storeservice/service/OrderProductService.java), delivery [AdminOnlyInterceptor.java](backend/deliveryService/src/main/java/com/comp5348/delivery/config/AdminOnlyInterceptor.java), [learning note 11](docs/learning/11-login-ownership-admin-role.md) |
 | An email address is proved before the account works | Activation needs the code from the registration email, and store checks it with email itself; email's `verify-code` is for store only. A code is for one purpose, dies after 5 wrong guesses or when a new one is sent, and is checked under a row lock. Locally all mail goes to Mailpit, and the scripts read the code there ([ADR-25](docs/adr/25-activation-needs-the-emailed-code.md)). | store [AccountService.java](backend/storeService/src/main/java/comp5348/storeservice/service/AccountService.java), email [EmailService.java](backend/emailService/src/main/java/com/comp5348/email/service/EmailService.java), [learning note 12](docs/learning/12-activation-code.md) |
+| Sign-up, log-in and password reset cannot be hammered | The five public account endpoints are rate limited in store (table below). Counts live in Redis, in fixed windows: `INCR` and the first `PEXPIRE` run in one Lua script, so no key is left without an expiry. Over the limit: 429 with `Retry-After`. The browser asks store for a verification code, and store has email send one only to an account that exists and is not active yet; email has no public endpoint left. The client address is the last `X-Forwarded-For` value, the one the entry wrote (nginx replaces the header, Envoy appends to it); Tomcat leaves the header alone (`server.forward-headers-strategy=none`), because on Kubernetes Spring Boot would otherwise trust a forged value (found on kind). If Redis is down store keeps serving without limits and logs `ALERT rate_limit_unavailable`. | store [RateLimiter.java](backend/storeService/src/main/java/comp5348/storeservice/ratelimit/RateLimiter.java), [AuthRateLimits.java](backend/storeService/src/main/java/comp5348/storeservice/ratelimit/AuthRateLimits.java), [ClientIp.java](backend/storeService/src/main/java/comp5348/storeservice/ratelimit/ClientIp.java) |
 | A delivery job lost while RabbitMQ is down | Found by scenario 05: a delivery created while RabbitMQ was down stayed CREATED forever. A sweeper now re-sends the job of any non-final delivery that has not moved for 60 s; it claims the row with a conditional `UPDATE` first, so two instances never both resend. | [StuckDeliveryJobSweeper.java](backend/deliveryService/src/main/java/com/comp5348/delivery/service/messaging/StuckDeliveryJobSweeper.java), [learning note 09](docs/learning/09-stuck-delivery-job-sweeper.md) |
 
 Also: stock is reserved with pessimistic row locks ([learning note 04](docs/learning/04-inventory-pessimistic-lock.md)); unpaid orders are cancelled automatically after a timeout, re-checked under the order's row lock ([UnpaidOrderCanceller.java](backend/storeService/src/main/java/comp5348/storeservice/scheduler/UnpaidOrderCanceller.java)).
+
+The rate limits (each endpoint counts on its own; an email address is lower-cased and trimmed, then stored only as a hash):
+
+| Endpoint (`/api/user/...`) | Counted by | Limit |
+|---|---|---|
+| `send-verification`, `forgot-password` | client address, then email | 20 per hour per address; 3 per 15 minutes per email |
+| `activate`, `reset-password` | client address | 20 per 15 minutes |
+| `login` | client address + account | 10 per 15 minutes; a successful log-in resets it |
+| `login` | client address | 100 per 15 minutes |
 
 ## End-to-end scenarios
 
@@ -109,6 +120,12 @@ Scripts in [backend/docker/scenarios](backend/docker/scenarios/README.md) drive 
 | **Order and pay** | One order goes PAID → PICKED_UP → IN_TRANSIT → DELIVERED; the account is charged once; the tracking timeline shows all six events in order. | `pwsh backend/docker/scenarios/06-sequence-a-order-to-received.ps1` |
 | **Lost parcel → refund** | delivery is restarted with a 100% loss rate; the order goes LOST → REFUNDED, the customer is refunded once and the balance is back where it started. | `pwsh backend/docker/scenarios/07-sequence-b-lost-refund.ps1` |
 | **Cancel races delivery** | Kafka is stopped so `OrderPaid` arrives late; the customer cancels first. The cancel marker stops the late event: no delivery is created, one refund, stock returned. | `pwsh backend/docker/scenarios/08-sequence-c-cancel-before-delivery-reads.ps1` |
+
+Every script registers users, and store allows 20 verification emails per hour from one address: one run of all scenarios and both smoke scripts registers about 10, so about two full runs an hour. The counts live only in Redis; to start them again on this machine:
+
+```powershell
+docker compose -f backend/compose.yml exec redis sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning FLUSHDB'
+```
 
 Add `-Target kind` to run 04–08 on the Kubernetes cluster instead of compose. Failure scenarios 01–05 cover double Pay Now, cancel after paying, bank down during payment, Kafka down, and RabbitMQ down; see the [scenario README](backend/docker/scenarios/README.md).
 
@@ -164,13 +181,16 @@ All secrets come from `backend/.env` (git-ignored; template in [backend/.env.exa
 | `STORE_DB_PASSWORD`, `BANK_DB_PASSWORD`, `DELIVERY_DB_PASSWORD`, `EMAIL_DB_PASSWORD`, `TRACKING_DB_PASSWORD` | one login per service database, created on the first start of an empty volume |
 | `RABBITMQ_USERNAME`, `RABBITMQ_PASSWORD` | RabbitMQ |
 | `JWT_SECRET` | store signs login tokens (HS512, at least 64 characters) |
+| `REDIS_PASSWORD` | Redis, which holds store's rate-limit counters; only the redis container and store get it |
 | `MAIL_USERNAME`, `MAIL_PASSWORD` | email: a Gmail address and a 16-character app password. Used only if `MAIL_HOST` (and `MAIL_PORT`, `MAIL_SMTP_AUTH`, `MAIL_SMTP_STARTTLS`) point at Gmail; by default compose sends to Mailpit |
+
+**Upgrading an existing checkout** (the rate limits added Redis): add `REDIS_PASSWORD` to `backend/.env` (any long random string, e.g. `openssl rand -hex 32`). compose refuses to start without it; on kind, run `./k8s/scripts/up.ps1` again, which creates the Secrets and the Redis pod.
 
 The full list of addresses and settings for Kafka and gRPC is in [docs/wave2-config-contract.md](docs/wave2-config-contract.md).
 
 ## Tests
 
-The Java integration tests and the Go integration tests start real PostgreSQL, Kafka and RabbitMQ with Testcontainers, so Docker must be running. Stop the compose stack and the kind node first; they compete for memory and make the containers slow to start.
+The Java integration tests and the Go integration tests start real PostgreSQL, Kafka and RabbitMQ (and Redis for store) with Testcontainers, so Docker must be running. Stop the compose stack and the kind node first; they compete for memory and make the containers slow to start.
 
 ```powershell
 cd backend
@@ -186,7 +206,7 @@ What the tests cover, beyond unit tests:
 
 - **contracts**: every example event decodes and re-encodes the same in Java; the Go service runs the same examples.
 - **bank**: concurrent transfers from one account, repeated and conflicting idempotency keys.
-- **store**: idempotency keys and unknown results, Pay Now twice, refunds, cancel after payment, unpaid-order auto-cancel, concurrent stock holds, publishing `order-events`, consuming `delivery-events` and the DLT, and an architecture test that only `OutboxProcessor` calls bank.
+- **store**: idempotency keys and unknown results, Pay Now twice, refunds, cancel after payment, unpaid-order auto-cancel, concurrent stock holds, publishing `order-events`, consuming `delivery-events` and the DLT, an architecture test that only `OutboxProcessor` calls bank, and the rate limits (per address, per email, log-in reset, Redis paused, and the client address on a real Tomcat started as on Kubernetes).
 - **delivery**: cancel marker, duplicate `OrderPaid`, lost parcels, DLT, and the stuck-job sweeper with RabbitMQ stopped and started again.
 - **tracking**: crashes before and after the database write, broken messages to the DLT, cross-topic ordering, rebalance, replay and graceful shutdown, against real Kafka and Postgres.
 
@@ -205,7 +225,7 @@ backend/
   docker/scenarios/      end-to-end scenario scripts (01–08)
   docker/smoke-order.ps1 happy-path check
 frontend/                React app; nginx.conf is the compose entry
-k8s/                     kind config, base (Postgres, Kafka, RabbitMQ), apps, gateway, scripts
+k8s/                     kind config, base (Postgres, Kafka, RabbitMQ, Redis), apps, gateway, scripts
 docs/
   adr/                   architecture decision records
   learning/              design notes, one per change (English and Chinese)
@@ -224,8 +244,20 @@ docs/
 ## Known limitations and next steps
 
 - **Service-to-service calls use shared secrets, not mTLS** (ADR-23). bank, delivery's `/internal/...` and email's password-reset endpoints accept only callers that send the callee's own token; each service refuses to start without its token. There is no automatic rotation (change the value in `backend/.env` / the Secret and restart both sides), and the `email_queue` path is protected only by the RabbitMQ account.
-- **Users and admins** (auth PRs 2 and 3). store requires a login everywhere except sign-up, log-in, password reset and the catalogue; a user can read, cancel and pay only their own orders. Admin endpoints (all orders, warehouses and stock, products and prices, refunds, delivery's DLQ) need the ADMIN role carried in the JWT. The first admin comes from `ADMIN_EMAIL` / `ADMIN_PASSWORD`. The role travels in the JWT, so a role changed in the database applies at the user's next log-in (tokens last 24 hours). Activation needs the code from the registration email: store checks it with email, and a code dies after 5 wrong guesses or when a new one is sent. There is no rate limit yet, so someone who knows an address can keep burning its codes and block that sign-up or password reset.
-- **Single replicas.** Every stateful component runs once, and store runs one replica because `OutboxProcessor` has no lock across instances.
+- **Users and admins** (auth PRs 2 and 3). store requires a login everywhere except sign-up, log-in, password reset and the catalogue; a user can read, cancel and pay only their own orders. Admin endpoints (all orders, warehouses and stock, products and prices, refunds, delivery's DLQ) need the ADMIN role carried in the JWT. The first admin comes from `ADMIN_EMAIL` / `ADMIN_PASSWORD`. The role travels in the JWT, so a role changed in the database applies at the user's next log-in (tokens last 24 hours). Activation needs the code from the registration email: store checks it with email, and a code dies after 5 wrong guesses or when a new one is sent.
+- **Rate limits** (store only; fixed windows in Redis). What they do not stop yet:
+  - someone with many addresses can still burn another person's codes, or use up that email's 3 messages per 15 minutes, and block a sign-up or password reset for a while (wrong guesses are not yet counted per email);
+  - many addresses guessing passwords together (that needs a CAPTCHA or anomaly detection);
+  - sign-up itself is not limited, so junk accounts can be created (they cannot be activated, and each gets at most 3 emails per 15 minutes);
+  - a fixed window lets a client use two windows' worth across a boundary;
+  - an email outage still uses up the quota: three resends that got 503 leave the fourth waiting about 15 minutes;
+  - many people behind one public address (campus or office network, a mobile carrier's NAT) share the per-address limits, so one heavy user blocks the rest;
+  - with IPv6 one person usually has a whole /64, so the per-address limits do not hold; addresses are not grouped by /64 yet, and Redis has no `maxmemory` (both to do before a cloud deployment);
+  - `send-verification` answers 200 for every address, but for an account that exists and is not active yet it waits for email to send, so it is slower; that tells which addresses signed up without activating (sign-up already says "Email already exists!", so little more is revealed);
+  - someone can sign up first with another person's address (an older gap): the owner can still activate it, but with a password the other person chose.
+
+  While Redis is down there are no limits (fail-open, `ALERT rate_limit_unavailable`), and each request waits up to about 0.5 s for it (a successful log-in about 1 s: the count and the reset). In a cloud with a load balancer in front of Envoy, the last `X-Forwarded-For` value would be the balancer's address; the client-address rule must be checked again there (noted in `ClientIp`).
+- **Single replicas.** Every stateful component runs once (Redis too), and store runs one replica because `OutboxProcessor` has no lock across instances.
 - **Occasional 503 at the kind entry** (finding I2): a read through Envoy Gateway was once reset before reaching store; a retry passed. Not yet explained.
 - **Scenario scripts 01–03 run on compose only**; 04–08 also run on kind.
 - **Frontend test**: `App.test.js` fails on `main` (it is the Create React App sample test, and jest cannot resolve `react-router-dom` when it runs).

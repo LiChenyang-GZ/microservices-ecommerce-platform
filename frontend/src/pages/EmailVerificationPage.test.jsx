@@ -21,7 +21,7 @@ jest.mock('react-router-dom', () => {
 
 jest.mock('../services/api', () => ({
     emailAPI: { verifyCode: jest.fn(), sendVerificationCode: jest.fn() },
-    userAPI: { activateAccount: jest.fn() },
+    userAPI: { activateAccount: jest.fn(), sendVerificationCode: jest.fn() },
 }));
 
 const EMAIL = 'new-user@example.com';
@@ -71,4 +71,50 @@ test('a wrong code shows the message store sends back', async () => {
 
     expect(screen.getByText('Verification code is invalid or expired')).toBeInTheDocument();
     expect(emailAPI.verifyCode).not.toHaveBeenCalled();
+});
+
+// 限流（Obsidian 54 号 R23）：重发也找 store 要码，不直接调 email（email 没有公开接口了）。
+// 红灯：handleResendCode 还在调 emailAPI.sendVerificationCode。
+test('resending asks store for a new code, not email', async () => {
+    userAPI.sendVerificationCode.mockResolvedValue({ success: true, message: 'sent' });
+    renderPage();
+
+    await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Resend Verification Code' }));
+    });
+
+    expect(userAPI.sendVerificationCode).toHaveBeenCalledWith(EMAIL);
+    expect(emailAPI.sendVerificationCode).not.toHaveBeenCalled();
+    expect(screen.getByText('Verification code has been resent to your email')).toBeInTheDocument();
+});
+
+test('a 429 on resend shows store\'s "try again" message', async () => {
+    userAPI.sendVerificationCode.mockRejectedValue({
+        response: { status: 429, data: { success: false, message: 'Too many attempts, please try again in 600 seconds' } },
+    });
+    renderPage();
+
+    await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: 'Resend Verification Code' }));
+    });
+
+    expect(screen.getByText('Too many attempts, please try again in 600 seconds')).toBeInTheDocument();
+});
+
+// 审查 🟠1（Obsidian 56 号）：注册页发码失败（429 / 503）也会跳过来，把后端的提示放在 state.error 里。
+// 这里要一进来就显示它，用户才知道码没发出去、要等多久再点"重发"。红灯：页面不看 state.error。
+test('arriving with an error from the register page shows it', () => {
+    render(
+        <MemoryRouter initialEntries={[{
+            pathname: '/verify-email',
+            state: { email: EMAIL, error: 'Too many attempts, please try again in 600 seconds' },
+        }]}>
+            <Routes>
+                <Route path="/verify-email" element={<EmailVerificationPage />} />
+            </Routes>
+        </MemoryRouter>
+    );
+
+    expect(screen.getByText('Too many attempts, please try again in 600 seconds')).toBeInTheDocument();
+    expect(screen.getByText(EMAIL)).toBeInTheDocument();
 });

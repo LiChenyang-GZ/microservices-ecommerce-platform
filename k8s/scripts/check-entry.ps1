@@ -20,6 +20,7 @@ $cases = @'
 # store, /api/store/x -> store /api/x
 open   POST   /api/store/user                                           register
 open   POST   /api/store/user/login                                     login
+open   POST   /api/store/user/send-verification                         register, resend code (rate limits, Obsidian 54)
 open   POST   /api/store/user/activate                                  email verification page
 open   POST   /api/store/user/forgot-password                           forgot password
 open   POST   /api/store/user/reset-password                            reset password
@@ -34,8 +35,6 @@ auth   POST   /api/store/store/orders/999999999/retry-payment           order pa
 auth   GET    /api/store/orders                                         admin dashboard
 auth   GET    /api/store/warehouses                                     admin dashboard
 auth   GET    /api/store/warehouses/audit-logs/out-transactions         admin dashboard
-# email, unchanged path
-open   POST   /api/email/send-verification                              register
 # delivery, /api/delivery/x -> delivery /api/x
 auth   GET    /api/delivery/deliveries/me                               delivery list
 auth   GET    /api/delivery/deliveries/999999999                        delivery page
@@ -68,9 +67,10 @@ closed POST   /api/store/delivery-webhook                               callback
 # ---- closed: a frontend path with the wrong method ----
 closed POST   /api/store/products/available                             only GET is used
 closed DELETE /api/delivery/deliveries/999999999                        only GET is used
-# ---- closed: email password reset and code checks, store -> email only (needs email's service token) ----
+# ---- closed: all of email, store -> email only (needs email's service token) ----
 closed POST   /api/email/send-password-reset                            store -> email
 closed POST   /api/email/verify-code                                    store -> email since A11 (activate checks the code)
+closed POST   /api/email/send-verification                              store -> email since the rate limits (Obsidian 54)
 # ---- closed: bank (review #3: the frontend calls no bank path; transfer, refund and account/me were removed in auth PR 1) ----
 closed GET    /api/bank/account/CUSTOMER_ACCOUNT_001/balance            only the removed top-up page used it
 # ---- closed: tracking (no page calls it yet) ----

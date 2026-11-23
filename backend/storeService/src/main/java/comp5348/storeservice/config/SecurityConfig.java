@@ -44,9 +44,9 @@ public class SecurityConfig {
                 .requestMatchers("/api/products/*/inventory-records").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.POST, "/api/products", "/api/products/**").hasRole("ADMIN")
                 .requestMatchers(HttpMethod.PUT, "/api/products/**").hasRole("ADMIN")
-                // sign-up, log-in, email verification, password reset
-                .requestMatchers(HttpMethod.POST, "/api/user", "/api/user/login", "/api/user/activate",
-                    "/api/user/forgot-password", "/api/user/reset-password").permitAll()
+                // sign-up, log-in, email verification, password reset. Rate-limited in AccountController (Obsidian 54)
+                .requestMatchers(HttpMethod.POST, "/api/user", "/api/user/login", "/api/user/send-verification",
+                    "/api/user/activate", "/api/user/forgot-password", "/api/user/reset-password").permitAll()
                 // delivery (TokenValidationClient) and tracking (auth.go) check user tokens here without logging in
                 .requestMatchers(HttpMethod.POST, "/api/user/validate-token").permitAll()
                 // the catalogue: list, available, one product, search by name or price. Not /api/products/**:

@@ -11,7 +11,7 @@
 | Docker Desktop | 跑着 | kind 的节点就是一个 Docker 容器 |
 | [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) | v0.33.0 | 一个 exe，放进 PATH |
 | kubectl | ≥ 1.33 | 节点是 1.34；kubectl 只保证和集群差一个小版本。Docker Desktop 自带的是 1.32，太老。脚本按这个顺序找：环境变量 `KUBECTL` → 和 `kind.exe` 同目录的 `kubectl.exe` → PATH 里的 |
-| `backend/.env` | 填好 | 和 compose 用同一个文件，Secret 从这里生成 |
+| `backend/.env` | 填好 | 和 compose 用同一个文件，Secret 从这里生成。限流以后要有 `REDIS_PASSWORD`：旧文件加上以后再跑一次 `up.ps1` |
 | `shop-*` 镜像 | 构建好 | `docker compose -f backend/compose.yml build` |
 
 空间：节点和镜像都在 Docker 的虚拟磁盘里，约多占 4–5 GB。
@@ -43,7 +43,7 @@
 ```
 k8s/
   kind-config.yaml        一个节点；只把 127.0.0.1:80 映射进去（compose 的端口都空着）
-  base/                   namespace、PostgreSQL、db-init Job、RabbitMQ、Kafka、kafka-init Job、Mailpit
+  base/                   namespace、PostgreSQL、db-init Job、RabbitMQ、Kafka、kafka-init Job、Mailpit、Redis
   apps/                   store、bank、delivery、email、tracking、frontend
   gateway/gateway.yaml    唯一入口：Envoy Gateway（Gateway API）
   gateway/routes.yaml     哪个路径去哪个服务
@@ -57,8 +57,7 @@ k8s/
 | `/` 和其他非 API 路径 | frontend |
 | 名单里的 `/api/store/x` | store 的 `/api/x`（store 自己的路径是 `/api/user`、`/api/orders`…） |
 | 名单里的 `/api/delivery/x` | delivery 的 `/api/x` |
-| 名单里的 `/api/email/…` | email，原样转发 |
-| bank、tracking | 一条都不放：前端不调它们（bank 的转账 / 退款只给集群里的 store 用） |
+| bank、tracking、email | 一条都不放：前端不调它们（bank 的转账 / 退款只给集群里的 store 用；验证码向 store 要，store 再调 email） |
 | `/api` 下其他路径、`/actuator`、`/internal` | 404 `not found` |
 
 `frontend/nginx.conf` 里有同一份名单，所以 compose 的 `localhost:3000` 行为一样。前端加新调用，两份都要加一行；两边不一致时 `check-entry.ps1` 会显示出来。
@@ -70,6 +69,8 @@ k8s/
 - **探针分开**：liveness 只看进程；readiness 加上自己的数据库，不含 RabbitMQ / Kafka。完整的 `/actuator/health` 含 RabbitMQ，RabbitMQ 一挂它就是 503，拿它当 liveness 会让所有服务被反复重启。
 - **store 1 副本 + `Recreate`**：OutboxProcessor 没有跨实例的锁，两个 store 并存会拿到同一个扣款任务。更新时会停几十秒。
 - **Kafka 挂数据卷**：契约里 compose 不挂卷，因为 `stop` 能保留数据；K8s 删 pod 就等于 `down`，不挂卷 topic 会跟着消失。
+- **Redis 存 store 的限流计数**（`base/redis.yaml`）：一个 pod，不挂卷、不存快照，重启只是计数从头算。密码在 Secret `redis`，store 的 Secret `store` 里也有同一个值。store 不等它：Redis 挂了 store 照常服务、不限流，打 `ALERT rate_limit_unavailable`（fail-open）；store 的健康检查不含 Redis，K8s 不会因此把 store 摘掉。
+- **客户端地址**：Envoy 把它看到的地址追加到 `X-Forwarded-For` 最后，store 按最后一个值数。store 设了 `server.forward-headers-strategy=none`：否则 Spring Boot 在 Kubernetes 上会自动打开 Tomcat 的 `RemoteIpValve`，它把内网地址当可信代理跳过。kind 里的客户端是 `172.22.0.1`，是内网地址，于是伪造的 `X-Forwarded-For: 1.2.3.4` 成了"客户端"，每换一个值就是新额度。compose 和 MockMvc 都测不出来，只有真集群看得到。
 - **`enableServiceLinks: false`**：否则 K8s 会给每个 pod 注入 `KAFKA_PORT=tcp://…`，apache/kafka 镜像会把它当成 broker 配置。
 
 ## 常用操作
@@ -86,6 +87,9 @@ kubectl -n shop rollout restart deploy/store
 ./k8s/scripts/apply-secrets.ps1
 kubectl -n shop delete job db-init; kubectl apply -k k8s/base
 
+# 限流计数清零（只存在 Redis 里；脚本跑一轮大约注册 10 个用户）
+kubectl -n shop exec deploy/redis -- sh -c 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning FLUSHDB'
+
 # 看商店发出的邮件（验证码发到 Mailpit；它不在入口后面）
 kubectl -n shop port-forward svc/mailpit 8025:8025   # 然后打开 http://localhost:8025
 
@@ -95,7 +99,8 @@ kind delete cluster --name shop
 
 ## 已知限制
 
-- 所有有状态组件都是单副本，没有高可用（ADR-13 的代价）。
+- 所有有状态组件都是单副本（Redis 也是），没有高可用（ADR-13 的代价）。
+- 上云后 Envoy 前面如果还有负载均衡，`X-Forwarded-For` 的最后一个值就是负载均衡的地址，所有用户共用一份限流额度。到时要让 Envoy 信任那一跳，再核对 `ClientIp` 里的规则。
 - `kind delete cluster` 会删掉集群里的所有数据。
 - bank 的 gRPC 端口 9090 由 NetworkPolicy 限定只有 store 的 pod 能连（`apps/bank.yaml` 最后）。kind 默认的网络插件会执行它；换到不支持 NetworkPolicy 的网络插件，就只剩服务凭据在保护 bank。
 - 前端用相对路径以后，本地 `npm start` 需要另配代理（`src/setupProxy.js`），还没做。

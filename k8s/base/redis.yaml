@@ -1,0 +1,53 @@
+# Redis: counters for store's rate limits on sign-up, log-in and password reset (Obsidian 54), as in compose.
+# Password from Secret "redis" (scripts/apply-secrets.ps1); store gets the same value in Secret "store".
+# Not behind the gateway; only store connects. No volume and no snapshots (--save ""): a restart only starts
+# the limits again. store does not wait for it (no init container): with Redis down store serves without
+# limits (fail-open) and logs ALERT rate_limit_unavailable.
+# In a real cloud this would be a managed Redis (e.g. ElastiCache) with TLS; the store side stays the same.
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: shop
+spec:
+  selector:
+    app: redis
+  ports:
+    - { name: redis, port: 6379 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+  template:
+    metadata:
+      labels:
+        app: redis
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: redis
+          image: redis:7.4-alpine
+          command: ['sh', '-c', 'exec redis-server --requirepass "$REDIS_PASSWORD" --save ""']
+          env:
+            - name: REDIS_PASSWORD
+              valueFrom: { secretKeyRef: { name: redis, key: REDIS_PASSWORD } }
+          ports:
+            - containerPort: 6379
+          readinessProbe:
+            exec:
+              command: ['sh', '-c', 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG']
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ['sh', '-c', 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG']
+            periodSeconds: 30
+          resources:
+            requests: { cpu: 20m, memory: 32Mi }
+            limits: { memory: 128Mi }
