@@ -99,3 +99,4 @@ kind delete cluster --name shop
 - `kind delete cluster` 会删掉集群里的所有数据。
 - bank 的 gRPC 端口 9090 由 NetworkPolicy 限定只有 store 的 pod 能连（`apps/bank.yaml` 最后）。kind 默认的网络插件会执行它；换到不支持 NetworkPolicy 的网络插件，就只剩服务凭据在保护 bank。
 - 前端用相对路径以后，本地 `npm start` 需要另配代理（`src/setupProxy.js`），还没做。
+- 邮件发到 Mailpit（`base/mailpit.yaml`），只给本机集群用：它的 API 没有登录，集群里任何 pod 都能读到所有验证码。部署到真环境前要去掉它，把 email 的 `MAIL_*` 指向真的 SMTP。

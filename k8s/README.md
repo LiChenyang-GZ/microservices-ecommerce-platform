@@ -100,3 +100,4 @@ kind delete cluster --name shop
 - `kind delete cluster` deletes all data in the cluster.
 - bank's gRPC port 9090 is limited to store pods by a NetworkPolicy (end of `apps/bank.yaml`). kind's default network plugin enforces it; on a cluster whose plugin does not implement NetworkPolicy, only the service token protects bank.
 - With relative paths in the frontend, local `npm start` needs a proxy (`src/setupProxy.js`); not done yet.
+- Mail goes to Mailpit (`base/mailpit.yaml`), which is for this local cluster only: its API has no login, so any pod could read every verification code. Before deploying anywhere real, remove it and point email's `MAIL_*` at a real SMTP server.

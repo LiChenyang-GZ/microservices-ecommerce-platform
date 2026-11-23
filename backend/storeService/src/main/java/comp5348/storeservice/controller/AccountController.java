@@ -47,7 +47,8 @@ public class AccountController {
 
     /**
      * Activate an account with the code from the registration email (A11): store checks the code with email itself.
-     * A wrong code and an unknown email get the same answer, so the endpoint does not say which addresses have accounts.
+     * A wrong code and an unknown email get the same answer. That hides little: registration already says
+     * "Email already exists", and an account that is already active gets 200 without spending a code (review 51 🟡7).
      */
     @PostMapping("/activate")
     public ResponseEntity<?> activateAccount(@RequestBody ActivateAccountRequest request) {

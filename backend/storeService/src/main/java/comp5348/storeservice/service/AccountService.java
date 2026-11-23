@@ -127,6 +127,8 @@ public class AccountService {
      * anyone could activate any address. Now store asks email, with its service token, the same way resetPassword does.
      *
      * Not @Transactional on purpose: no database transaction stays open while store waits up to 5 seconds for email.
+     * (spring.jpa.open-in-view is on, so the request may still hold its JDBC connection meanwhile: review 51 🟡11,
+     * not checked yet, a separate piece of work.)
      * Two activations with the same code race safely because email locks the code row and uses it up once.
      * If saving fails after email said yes, the code is already used up: the user asks for a new one (V9).
      */
@@ -147,13 +149,17 @@ public class AccountService {
             CodeCheckResponse response = emailRestTemplate.postForObject(
                     emailServiceUrl + "/api/email/verify-code", new CodeCheckRequest(email, code), CodeCheckResponse.class);
             if (response == null || !response.success) {
-                return ActivationResult.INVALID_CODE;
+                return codeRefused(email);
             }
         } catch (HttpClientErrorException.Unauthorized e) {
             alertEmailAuthFailed("verify-code");
             return ActivationResult.EMAIL_UNAVAILABLE;
+        } catch (HttpClientErrorException.BadRequest e) {
+            return codeRefused(email); // email answers 400 for a wrong or expired code, and only for that
         } catch (HttpClientErrorException e) {
-            return ActivationResult.INVALID_CODE; // email answers 400 for a wrong or expired code
+            // Any other 4xx (404: email.service.url points somewhere else) is not the user's mistake (review 51 🟡1)
+            logger.error("Activation: email answered {} to verify-code; check email.service.url", e.getStatusCode());
+            return ActivationResult.EMAIL_UNAVAILABLE;
         } catch (Exception e) {
             logger.warn("Activation could not reach email: {}", e.getMessage());
             return ActivationResult.EMAIL_UNAVAILABLE;
@@ -170,6 +176,17 @@ public class AccountService {
         }
         accountRepository.save(account);
         return ActivationResult.ACTIVATED;
+    }
+
+    /**
+     * email said no. If the account is active by now, the same code was used a moment ago by a double click or a
+     * second tab, and that request activated it: say so instead of "wrong code" (review 51 🟡8).
+     */
+    private ActivationResult codeRefused(String email) {
+        boolean activeNow = accountRepository.findByEmail(email)
+                .map(a -> Boolean.TRUE.equals(a.getActive()) && Boolean.TRUE.equals(a.getEmailVerified()))
+                .orElse(false);
+        return activeNow ? ActivationResult.ALREADY_ACTIVE : ActivationResult.INVALID_CODE;
     }
 
     /**

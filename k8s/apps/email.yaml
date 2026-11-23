@@ -9,6 +9,7 @@ data:
   DB_PORT: '5432'
   SPRING_RABBITMQ_HOST: rabbitmq
   # Mailpit (k8s/base/mailpit.yaml), as in compose. The scripts read verification codes from its API (A11).
+  # Local only: point these at a real SMTP server before deploying anywhere else (review 51 🟡4).
   MAIL_HOST: mailpit
   MAIL_PORT: '1025'
   MAIL_SMTP_AUTH: 'false'

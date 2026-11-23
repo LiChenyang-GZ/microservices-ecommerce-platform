@@ -38,29 +38,43 @@ public class EmailService {
         return String.format("%06d", RANDOM.nextInt(1000000));
     }
 
-    /** Expire the address's live codes of this kind, then store a new one (A11, V14: one live code at a time) */
-    private String newCode(String email, String verificationType) {
-        emailOutboxRepository.expireLiveCodes(email, verificationType);
-        String code = generateVerificationCode();
-        emailOutboxRepository.save(new EmailOutbox(email, code, verificationType));
-        return code;
+    /** Store a new code (PENDING). The older codes stay live until this one is sent: see markSent */
+    private EmailOutbox newCode(String email, String verificationType) {
+        return emailOutboxRepository.save(new EmailOutbox(email, generateVerificationCode(), verificationType));
+    }
+
+    /**
+     * The mail went out: this code is live, the address's older codes of the same kind are not (A11, V14).
+     * Only now, not before sending: if sending fails, the code the user already has keeps working (review 51 🟡2).
+     */
+    private void markSent(EmailOutbox row) {
+        row.setStatus("SENT");
+        emailOutboxRepository.save(row);
+        emailOutboxRepository.expireOtherLiveCodes(row.getEmail(), row.getVerificationType(), row.getId());
+    }
+
+    private void markFailed(EmailOutbox row) {
+        row.setStatus("FAILED");
+        row.setRetryCount(row.getRetryCount() + 1);
+        emailOutboxRepository.save(row);
     }
 
     /**
      * Send registration verification code
      */
     public String sendRegistrationVerificationCode(String email) {
-        String code = newCode(email, REGISTRATION);
-        sendVerificationCode(email, code, "Registration Verification Code");
-        return code;
+        EmailOutbox row = newCode(email, REGISTRATION);
+        sendVerificationCode(row, "Registration Verification Code");
+        return row.getCode();
     }
 
     /**
      * Send verification code email
      */
-    public void sendVerificationCode(String to, String code, String type) {
+    private void sendVerificationCode(EmailOutbox row, String type) {
+        String code = row.getCode();
         SimpleMailMessage message = new SimpleMailMessage();
-        message.setTo(to);
+        message.setTo(row.getEmail());
         message.setSubject("Your " + type);
         
         String emailContent = String.format(
@@ -76,22 +90,11 @@ public class EmailService {
         
         try {
             mailSender.send(message);
-            // Update status to SENT
-            EmailOutbox emailOutbox = emailOutboxRepository.findByEmailAndCodeAndStatus(to, code, "PENDING");
-            if (emailOutbox != null) {
-                emailOutbox.setStatus("SENT");
-                emailOutboxRepository.save(emailOutbox);
-            }
         } catch (Exception e) {
-            // Update status to FAILED
-            EmailOutbox emailOutbox = emailOutboxRepository.findByEmailAndCodeAndStatus(to, code, "PENDING");
-            if (emailOutbox != null) {
-                emailOutbox.setStatus("FAILED");
-                emailOutbox.setRetryCount(emailOutbox.getRetryCount() + 1);
-                emailOutboxRepository.save(emailOutbox);
-            }
+            markFailed(row);
             throw new RuntimeException("Email sending failed: " + e.getMessage());
         }
+        markSent(row);
     }
 
     /**
@@ -135,17 +138,18 @@ public class EmailService {
      * Send password reset verification code
      */
     public String sendPasswordResetCode(String email) {
-        String code = newCode(email, PASSWORD_RESET);
-        sendPasswordResetEmail(email, code);
-        return code;
+        EmailOutbox row = newCode(email, PASSWORD_RESET);
+        sendPasswordResetEmail(row);
+        return row.getCode();
     }
 
     /**
      * Send password reset email
      */
-    public void sendPasswordResetEmail(String to, String code) {
+    private void sendPasswordResetEmail(EmailOutbox row) {
+        String code = row.getCode();
         SimpleMailMessage message = new SimpleMailMessage();
-        message.setTo(to);
+        message.setTo(row.getEmail());
         message.setSubject("Password Reset Verification Code");
         
         String emailContent = String.format(
@@ -161,22 +165,11 @@ public class EmailService {
         
         try {
             mailSender.send(message);
-            // Update status to SENT
-            EmailOutbox emailOutbox = emailOutboxRepository.findByEmailAndCodeAndStatus(to, code, "PENDING");
-            if (emailOutbox != null) {
-                emailOutbox.setStatus("SENT");
-                emailOutboxRepository.save(emailOutbox);
-            }
         } catch (Exception e) {
-            // Update status to FAILED
-            EmailOutbox emailOutbox = emailOutboxRepository.findByEmailAndCodeAndStatus(to, code, "PENDING");
-            if (emailOutbox != null) {
-                emailOutbox.setStatus("FAILED");
-                emailOutbox.setRetryCount(emailOutbox.getRetryCount() + 1);
-                emailOutboxRepository.save(emailOutbox);
-            }
+            markFailed(row);
             throw new RuntimeException("Password reset email sending failed: " + e.getMessage());
         }
+        markSent(row);
     }
 
     /**

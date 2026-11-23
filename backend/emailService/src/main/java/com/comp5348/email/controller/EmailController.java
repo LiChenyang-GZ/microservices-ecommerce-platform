@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.*;
 @CrossOrigin(origins = "http://localhost:3000")
 public class EmailController {
 
+    private static final org.slf4j.Logger logger = org.slf4j.LoggerFactory.getLogger(EmailController.class);
+
     @Autowired
     private EmailService emailService;
 
@@ -47,7 +49,11 @@ public class EmailController {
                 return ResponseEntity.badRequest().body(new VerifyCodeResponse(false, "Verification code is invalid or expired"));
             }
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new VerifyCodeResponse(false, "Verification failed: " + e.getMessage()));
+            // email's own failure (database down, deadlock, commit failed), not a wrong code: 500, so store
+            // answers "try again later" instead of "wrong code" (review 51 🟡1). No exception text to the caller.
+            logger.error("verify-code failed: {}", e.toString());
+            return ResponseEntity.internalServerError()
+                    .body(new VerifyCodeResponse(false, "Verification failed, please try again later"));
         }
     }
 
@@ -77,7 +83,9 @@ public class EmailController {
                 return ResponseEntity.badRequest().body(new VerifyPasswordResetResponse(false, "Verification code is invalid or expired"));
             }
         } catch (Exception e) {
-            return ResponseEntity.badRequest().body(new VerifyPasswordResetResponse(false, "Verification failed: " + e.getMessage()));
+            logger.error("verify-password-reset failed: {}", e.toString()); // as verify-code (review 51 🟡1)
+            return ResponseEntity.internalServerError()
+                    .body(new VerifyPasswordResetResponse(false, "Verification failed, please try again later"));
         }
     }
 

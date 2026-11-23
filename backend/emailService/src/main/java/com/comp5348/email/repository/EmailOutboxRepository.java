@@ -27,14 +27,20 @@ public interface EmailOutboxRepository extends JpaRepository<EmailOutbox, Long> 
      * cannot be used twice (A11, V13).
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
-    @Query("select o from EmailOutbox o where o.email = :email and o.verificationType = :type and o.status in :statuses")
+    // order by id: every transaction locks the rows in the same order, so two of them cannot deadlock (review 51 🟡6)
+    @Query("select o from EmailOutbox o where o.email = :email and o.verificationType = :type and o.status in :statuses"
+            + " order by o.id")
     List<EmailOutbox> lockCodes(@Param("email") String email, @Param("type") String verificationType,
                                 @Param("statuses") Collection<String> statuses);
 
-    /** A new code replaces the old ones: only one live code per address and kind at a time (A11, V14). */
+    /**
+     * A code that was just sent replaces the older ones: only one live code per address and kind (A11, V14).
+     * Called after the new code's mail went out, so a resend that fails to send keeps the older code (review 51 🟡2).
+     */
     @Transactional
     @Modifying
     @Query("update EmailOutbox o set o.status = 'EXPIRED' where o.email = :email and o.verificationType = :type"
-            + " and o.status in ('PENDING', 'SENT')")
-    int expireLiveCodes(@Param("email") String email, @Param("type") String verificationType);
+            + " and o.status in ('PENDING', 'SENT') and o.id <> :keepId")
+    int expireOtherLiveCodes(@Param("email") String email, @Param("type") String verificationType,
+                             @Param("keepId") Long keepId);
 }
