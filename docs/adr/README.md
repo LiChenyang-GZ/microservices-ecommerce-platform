@@ -30,9 +30,10 @@ ADR-01 to ADR-14 were written before the redesign was built. Code comments refer
 | [20](20-stock-pessimistic-lock.md) | Stock is reserved with pessimistic row locks | Accepted |
 | [21](21-schema-changes-at-startup.md) | Schema changes run as idempotent SQL at startup, not Flyway | Accepted |
 | [22](22-grpc-result-mapping.md) | How a gRPC reply from bank maps to succeeded, rejected or unknown | Accepted, amended by 23 |
-| [23](23-service-credentials.md) | Calls between services carry a shared secret, one per called service | Accepted, amended by 25 |
+| [23](23-service-credentials.md) | Calls between services carry a shared secret, one per called service | Accepted, amended by 25, 26 |
 | [24](24-login-ownership-admin-role.md) | Store requires a login, users touch only their own orders, admin endpoints need an admin role | Accepted, amended by 25 |
-| [25](25-activation-needs-the-emailed-code.md) | Activation needs the emailed code, and store checks it with email | Accepted |
+| [25](25-activation-needs-the-emailed-code.md) | Activation needs the emailed code, and store checks it with email | Accepted, amended by 26 |
+| [26](26-rate-limits-in-redis.md) | Rate limits on store's public account endpoints, counted in Redis | Accepted |
 
 ## Reliability rules
 

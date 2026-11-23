@@ -133,7 +133,7 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
 
 - [docs/learning/](docs/learning/)：每次改动一篇，讲问题、复现它的失败测试、修法和取舍（中英文各一份）。
 - 模块说明：[contracts](backend/contracts/README.zh-CN.md)、[delivery](backend/deliveryService/README.zh-CN.md)、[tracking](backend/trackingService/README.zh-CN.md)、[k8s](k8s/README.zh-CN.md)、[场景脚本](backend/docker/scenarios/README.zh-CN.md)。
-- [docs/adr/](docs/adr/README.zh-CN.md)：架构决策记录 ADR-01 到 ADR-23（中英文），以及代码注释引用的 8 条可靠性规则。
+- [docs/adr/](docs/adr/README.zh-CN.md)：架构决策记录 ADR-01 到 ADR-26（中英文），以及代码注释引用的 8 条可靠性规则。
 - [docs/legacy/](docs/legacy/)：原课程项目（只有 RabbitMQ 的版本）留下的笔记。
 
 ## 已知限制和下一步

@@ -2,7 +2,7 @@
 
 [English](23-service-credentials.md) | **中文**
 
-**状态：** 已采纳，由 25 补充（`verify-code` 只给 store）
+**状态：** 已采纳，由 25 补充（`verify-code` 只给 store），由 26 补充（email 不再有公开接口）
 
 ## 背景
 在这之前，网络里没有任何地方检查"是谁在调"。bank 的 gRPC `Transfer` / `Refund` 没有拦截器；bank 的 REST 不带 token 也放行，`POST /api/bank/transfer` 能从 `SYSTEM` 给任何账户转钱；delivery 的 `/internal/deliveries/cancel-by-order` 什么都不查；email 的通知接口能以商店的名义给任意邮箱发信。入口的允许名单（ADR-15）把这些挡在外面，但集群里任何一个 pod、compose 网络里任何一个容器、本机上任何一个进程都能直接调。
@@ -22,7 +22,7 @@
   |---|---|---|
   | bank | gRPC（`ServerInterceptor` 包住整个服务）和所有 `/api/bank/*` REST 路径；`/actuator` 留给探针 | `UNAUTHENTICATED` / 401，什么都不执行 |
   | delivery | 只查 `/internal/*`；`/api/*` 还是原来的用户 token 过滤器 | 401 |
-  | email | `/api/*` 下**除了** `send-verification`、`verify-code`（注册页在用）以外的所有路径，精确匹配。ADR-25 之后只剩 `send-verification` | 401 |
+  | email | `/api/*` 下**除了** `send-verification`、`verify-code`（注册页在用）以外的所有路径，精确匹配。ADR-25 之后只剩 `send-verification`；ADR-26 之后一个都没有（验证码由 store 向 email 要） | 401 |
 
 - email 的检查是**允许名单**：只有名单上的路径是公开的，以后新加的接口在有人打开之前都是关着的。旧过滤器用 `startsWith` 判断公开路径，`/api/email/send-verification-随便什么` 也能混过去。
 - 用 `MessageDigest.isEqual` 比较（常数时间）。被拒的请求只记"no / wrong service token"和方法、路径，不记密钥。
