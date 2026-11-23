@@ -104,19 +104,25 @@ public class AccountController {
     /**
      * User login. Counted before the password is checked: once over the limit even the right password gets 429,
      * otherwise the answer would tell a guesser they got it. A successful login clears its IP + account count.
+     *
+     * The count is per account, not per text typed: the box takes an email or a username, and both reach the same
+     * account (AccountService#verifyLogin). Keyed by what was typed, "alice@x.com" and "alice" were two counts, so 20
+     * guesses per 15 minutes instead of 10 (review 2, Obsidian 56). An identifier that matches no account is counted
+     * by its text; the two prefixes keep a typed "account:7" apart from account 7.
      */
     @PostMapping("/login")
     public ResponseEntity<?> loginUser(@RequestBody LoginRequest request, HttpServletRequest http) {
         String ip = ClientIp.of(http);
-        Optional<RateLimiter.Decision> blocked = limits.login(ip, request.email);
+        Optional<Account> accountOpt = accountService.getAccountByIdentifier(request.email);
+        String counted = accountOpt.map(a -> "account:" + a.getId()).orElse("typed:" + request.email);
+        Optional<RateLimiter.Decision> blocked = limits.login(ip, counted);
         if (blocked.isPresent()) {
             return tooManyAttempts(blocked.get());
         }
         boolean success = accountService.verifyLogin(request.email, request.password);
         if (success) {
-            limits.loginSucceeded(ip, request.email);
-            // Get user information and generate JWT token
-            Optional<Account> accountOpt = accountService.getAccountByIdentifier(request.email);
+            limits.loginSucceeded(ip, counted);
+            // Generate the JWT for the account found above
             if (accountOpt.isPresent()) {
                 Account account = accountOpt.get();
                 String token = jwtUtil.generateToken(account.getId(), account.getEmail(), account.getRole());

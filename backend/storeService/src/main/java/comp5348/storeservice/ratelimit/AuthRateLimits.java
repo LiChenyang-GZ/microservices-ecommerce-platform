@@ -59,18 +59,22 @@ public class AuthRateLimits {
         return blocking(limiter.hit("rl:reset-password:ip:" + ip, CODE_CHECKS_PER_IP, FIFTEEN_MINUTES));
     }
 
-    /** Counts this attempt, before the password is checked: a blocked attempt is 429 even with the right password */
-    public Optional<Decision> login(String ip, String identifier) {
+    /**
+     * Counts this attempt, before the password is checked: a blocked attempt is 429 even with the right password.
+     * {@code account} names the account, not the text typed (an email and a username reach the same one; the
+     * caller resolves it, see AccountController#loginUser).
+     */
+    public Optional<Decision> login(String ip, String account) {
         Decision byIp = limiter.hit("rl:login:ip:" + ip, LOGINS_PER_IP, FIFTEEN_MINUTES);
         if (byIp.outcome() != RateLimiter.Outcome.ALLOWED) {
             return blocking(byIp);
         }
-        return blocking(limiter.hit(loginKey(ip, identifier), LOGINS_PER_IP_AND_ACCOUNT, FIFTEEN_MINUTES));
+        return blocking(limiter.hit(loginKey(ip, account), LOGINS_PER_IP_AND_ACCOUNT, FIFTEEN_MINUTES));
     }
 
     /** A successful login: the failed attempts for this IP + account start again from zero (R14) */
-    public void loginSucceeded(String ip, String identifier) {
-        limiter.clear(loginKey(ip, identifier));
+    public void loginSucceeded(String ip, String account) {
+        limiter.clear(loginKey(ip, account));
     }
 
     private Optional<Decision> ipThenEmail(String endpoint, String ip, String email) {

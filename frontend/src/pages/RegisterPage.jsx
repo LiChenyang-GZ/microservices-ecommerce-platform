@@ -72,7 +72,19 @@ const RegisterPage = () => {
     
     setIsLoading(true);
     setErrors({});
-    
+
+    // The account exists by now, so the code page is the only way on: going back to sign up says
+    // "Email already exists!" and log-in says "verify your email first" (review 1, Obsidian 56). The message
+    // (e.g. store's 429 "try again in N seconds") goes along, and the user resends from there.
+    const goVerifyWithError = (message) => {
+      navigate('/email-verification', {
+        state: {
+          email: formData.email,
+          error: message || 'Failed to send verification code, please try again'
+        }
+      });
+    };
+
     try {
       // 1. Create account
       const accountData = {
@@ -103,15 +115,11 @@ const RegisterPage = () => {
               }
             });
           } else {
-            setErrors({ submit: emailResponse.message || 'Failed to send verification code' });
+            goVerifyWithError(emailResponse.message);
           }
         } catch (emailError) {
           console.error('Failed to send verification code:', emailError);
-          if (emailError.response?.data?.message) {
-            setErrors({ submit: emailError.response.data.message });
-          } else {
-            setErrors({ submit: 'Failed to send verification code, please try again' });
-          }
+          goVerifyWithError(emailError.response?.data?.message);
         }
       } else {
         setErrors({ submit: response.message || 'Registration failed' });

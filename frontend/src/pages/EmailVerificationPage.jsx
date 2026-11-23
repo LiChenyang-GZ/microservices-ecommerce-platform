@@ -24,6 +24,10 @@ const EmailVerificationPage = () => {
     if (emailFromState) {
       setEmail(emailFromState);
       localStorage.setItem('pendingEmail', emailFromState);
+      // The register page comes here even when the code was not sent (429 / 503; review 1, Obsidian 56)
+      if (location.state?.error) {
+        setError(location.state.error);
+      }
     } else if (emailFromStorage) {
       setEmail(emailFromStorage);
     } else {
