@@ -87,6 +87,9 @@ public class PaymentService {
     /** The refund reason written when a charge succeeds for an order that was already cancelled */
     private static final String PAID_AFTER_CANCEL_REASON = "Paid after order was cancelled";
 
+    /** Payment error message while a sent charge waits for its buyer account; also marks "already alerted" */
+    private static final String NO_ACCOUNT_AFTER_SEND = "Bank account not found for a charge that was already sent";
+
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // ------------------------------------------------------------------ keys
@@ -252,17 +255,25 @@ public class PaymentService {
 
     /**
      * A PAY task that was sent but has no recorded buyer account, and the buyer's account cannot be read now.
-     * PAY_UNKNOWN with an alert, task kept and looked at again in slowRetryMinutes: someone sorts out the account
-     * (or the bank's record of the key), and the next look sends the same key again.
+     * PAY_UNKNOWN with an alert, task kept and looked at again in slowRetryMinutes.
+     * What a person does: look the key up at bank (transaction_ref). Found → copy its from / to accounts into this
+     * task's from_account / to_account, and the next look resends the identical request and gets bank's real answer.
+     * Not found → the charge never reached bank, so marking the payment FAILED is safe. Do not just link the buyer a new bank account: the same key with
+     * another account is a KEY_CONFLICT at bank, which store reads as a "no" (review 63, item 2).
      */
     private void holdUnknownWithoutAccount(PaymentOutbox task, Payment payment) {
         if (payment.getStatus() == PaymentStatus.PENDING) {
             payment.setStatus(PaymentStatus.PAY_UNKNOWN);
-            payment.setErrorMessage("Bank account not found for a charge that was already sent");
-            paymentRepository.save(payment);
         }
-        logger.error("ALERT payment_no_account orderId={} paymentId={} key={} attempts={}",
-                task.getOrderId(), payment.getId(), task.getIdempotencyKey(), task.getRetryCount());
+        if (NO_ACCOUNT_AFTER_SEND.equals(payment.getErrorMessage())) {
+            // Alerted on the first look; every 10 minutes after that is a reminder, not a new alert (review 63, item 4)
+            logger.warn("Payment still has no bank account: orderId={}, key={}", task.getOrderId(), task.getIdempotencyKey());
+        } else {
+            payment.setErrorMessage(NO_ACCOUNT_AFTER_SEND);
+            logger.error("ALERT payment_no_account orderId={} paymentId={} key={} attempts={}",
+                    task.getOrderId(), payment.getId(), task.getIdempotencyKey(), task.getRetryCount());
+        }
+        paymentRepository.save(payment);
         task.setNextAttemptAt(LocalDateTime.now(clock).plusMinutes(slowRetryMinutes));
         outboxRepository.save(task);
     }
@@ -276,7 +287,7 @@ public class PaymentService {
     @Transactional
     public void onPaySucceeded(Long taskId, String bankTxnId) {
         PaymentOutbox task = outboxRepository.findById(taskId).orElseThrow();
-        Order order = orderRepository.findByIdForUpdate(task.getOrderId()).orElseThrow();
+        Order order = orderRepository.findByIdForUpdate(task.getOrderId()).orElse(null);
         Payment payment = paymentRepository.findByOrderIdForUpdate(task.getOrderId()).orElseThrow();
 
         if (!CHARGE_OPEN.contains(payment.getStatus())) {
@@ -287,7 +298,15 @@ public class PaymentService {
         payment.setPaymentDate(LocalDateTime.now(clock));
         payment.setErrorMessage(null);
 
-        if (isCancelled(order)) {
+        if (order == null) {
+            // The order row is gone (only by hand today), but bank says the money moved: record that and stop.
+            // Throwing here would roll back and resend every round, forever (review 63, item 1). Nothing to ship,
+            // and whether to refund is a person's call
+            payment.setStatus(PaymentStatus.SUCCESS);
+            paymentRepository.save(payment);
+            logger.error("ALERT payment_no_order orderId={} paymentId={} key={} bankTxnId={}",
+                    task.getOrderId(), payment.getId(), task.getIdempotencyKey(), bankTxnId);
+        } else if (isCancelled(order)) {
             payment.setStatus(PaymentStatus.REFUND_PENDING);
             payment.setRefundKeyNonce(newKeyNonce());
             paymentRepository.save(payment);
