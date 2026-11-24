@@ -226,6 +226,14 @@ class PayRetryAccountIntegrationTest extends StoreIntegrationTest {
         runOutboxRounds(1);
         assertThat(transferRequests()).isEmpty();
 
+        // 审查 63 🟡4：10 分钟后再看、账号还是读不到 → 还是不发，但 ALERT 只打第一次（之后 WARN），不每 10 分钟刷一条
+        clock.advance(Duration.ofMinutes(10));
+        runOutboxRounds(1);
+        assertThat(transferRequests()).isEmpty();
+        assertThat(paymentOf(order).getStatus()).isEqualTo(PaymentStatus.PAY_UNKNOWN);
+        assertThat(countOf(output.getAll(), "ALERT payment_no_account orderId=" + order.orderId() + " "))
+                .as("同一单的告警只打一次").isEqualTo(1);
+
         // F7：账号回来了，10 分钟后低频重试照常发同一个键
         setBankAccount(order, order.buyerBankAccount());
         clock.advance(Duration.ofMinutes(10));
@@ -234,5 +242,57 @@ class PayRetryAccountIntegrationTest extends StoreIntegrationTest {
         assertThat(transferRequests()).extracting(StoreIntegrationTest::keyOf).containsOnly(payKeyOf(order));
         assertThat(paymentOf(order).getStatus()).isEqualTo(PaymentStatus.SUCCESS);
         assertThat(orderOf(order).getStatus()).isEqualTo(OrderStatus.PAID);
+    }
+
+    /**
+     * 审查 63 🟡3：升级时停机中断留下的老任务——发过（retryCount = 1）、没记账号、payment 还是 PENDING，账号又读不到。
+     * 兜底要把 PENDING 改成 PAY_UNKNOWN（否则前端一直"处理中"、Pay Now 也不动），F6 只覆盖了已经是 PAY_UNKNOWN 的一半。
+     */
+    @Test
+    void oldTaskInterruptedWhilePending_noAccount_becomesPayUnknownWithAlert(CapturedOutput output) {
+        PlacedOrder order = placeOrder();
+        jdbc.update("UPDATE payment_outbox SET retry_count = 1, from_account = NULL, to_account = NULL "
+                + "WHERE order_id = ? AND event_type = 'PAY'", order.orderId());
+        clearBankAccount(order);
+        bankTransferSucceeds();
+
+        runOutboxRounds(1);
+
+        assertThat(transferRequests()).as("不知道该从哪个账号扣，就不发").isEmpty();
+        assertThat(paymentOf(order).getStatus()).isEqualTo(PaymentStatus.PAY_UNKNOWN);
+        assertThat(paymentOf(order).getErrorMessage()).contains("already sent");
+        assertThat(openTasksOf(order, "PAY")).hasSize(1);
+        assertThat(output.getAll()).contains("ALERT payment_no_account orderId=" + order.orderId() + " ");
+    }
+
+    /**
+     * F9（审查 63 🟠1）：发过、账号已经记下，之后订单行没了（手工改库 / 以后的"清理老订单"）。
+     * 现在：照常发 → bank 说成功 → onPaySucceeded 找不到订单抛异常 → 回滚，任务一直 PENDING → 每轮都再打一次 bank。
+     * 应该：bank 说扣了就是扣了——payment 记 SUCCESS、任务关掉、ALERT payment_no_order 交给人处理（没有订单，不发货）。
+     */
+    @Test
+    void sentOnce_orderDeleted_bankSaysCharged_recordsSuccessClosesTaskWithAlert(CapturedOutput output) {
+        PlacedOrder order = placeOrder();
+        givenPayUnknown(order);
+        jdbc.update("DELETE FROM orders WHERE id = ?", order.orderId());
+        forgetBankRequests();
+        bankTransferSucceeds();
+
+        clock.advance(Duration.ofMinutes(10));
+        runOutboxRounds(3);
+
+        assertThat(transferRequests()).as("同一个键发一次就拿到结果，不是每轮都打").hasSize(1);
+        assertThat(transferRequests()).extracting(StoreIntegrationTest::keyOf).containsOnly(payKeyOf(order));
+        assertThat(openTasksOf(order, "PAY")).as("任务关掉了").isEmpty();
+        assertThat(paymentOf(order).getStatus()).as("bank 说扣了").isEqualTo(PaymentStatus.SUCCESS);
+        assertThat(output.getAll()).contains("ALERT payment_no_order orderId=" + order.orderId() + " ");
+    }
+
+    private static int countOf(String text, String needle) {
+        int count = 0;
+        for (int i = text.indexOf(needle); i >= 0; i = text.indexOf(needle, i + 1)) {
+            count++;
+        }
+        return count;
     }
 }
