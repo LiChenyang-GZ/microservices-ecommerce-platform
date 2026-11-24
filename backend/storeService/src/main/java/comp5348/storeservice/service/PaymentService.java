@@ -468,7 +468,11 @@ public class PaymentService {
     /**
      * Bank answered KEY_CONFLICT to a refund: the refund key was used for another original transaction. The money
      * may already have gone back, so the refund is not given up (as a rejection would be): REFUND_UNKNOWN, one ALERT,
-     * the same key again in slowRetryMinutes (ADR-29).
+     * the same key again in slowRetryMinutes (ADR-29). It stays that way until a person looks (review 67, item 1):
+     * find bank's transaction for this refund key (transaction_ref). It refunded this payment's real charge → set
+     * payment.bank_txn_id to that original transaction; the next look gets bank's success. It refunded another
+     * transaction → the key collided: give the payment a new refund key; bank's check for an earlier refund of the
+     * same original transaction keeps it from being refunded twice.
      */
     @Transactional
     public void onRefundKeyConflict(Long taskId, String reason) {

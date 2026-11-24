@@ -30,7 +30,11 @@ public class BankService {
     @Autowired
     private TransactionRepository transactionRepository;
 
-    /** Answer for a reused key with different content. A rejection, so store never records it as paid / refunded. */
+    /**
+     * Answer for a reused key with different content (sent with the keyConflict flag, so gRPC says KEY_CONFLICT).
+     * Never a success, so store never records it as paid / refunded; never a plain rejection either, because the
+     * key's first request may have moved money (ADR-29).
+     */
     static final String KEY_CONFLICT = "Idempotency key conflict: this key was already used for a different request";
 
     /**

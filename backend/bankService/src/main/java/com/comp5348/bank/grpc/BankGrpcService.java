@@ -20,7 +20,8 @@ import java.math.BigDecimal;
  * Both call the same BankService, so idempotency and locking are identical.
  *
  * How answers are encoded (contracts/bank.proto):
- * - bank's own answer, yes or no → status OK + outcome SUCCEEDED / REJECTED.
+ * - bank's own answer → status OK + outcome SUCCEEDED / REJECTED, or KEY_CONFLICT when the key was already used for
+ *   a different request (not a "no": the key's first request may have moved money, ADR-29).
  * - anything else (an exception) → a gRPC error status. Store reads every error status as "unknown" and retries
  *   with the same key. A business "no" must never be an error status (store would retry it forever), and an
  *   exception must never be REJECTED (store would mark the payment FAILED and Pay Now would charge with a new key).

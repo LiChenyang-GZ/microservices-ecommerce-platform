@@ -84,7 +84,7 @@ class BankKeyConflictIntegrationTest {
      * 然后 store 用同一个键发真正的 100 元扣款。
      */
     @Test
-    void reusedTransferKey_withDifferentContent_isRejected() {
+    void reusedTransferKey_withDifferentContent_isKeyConflict() {
         String attacker = newAccount("10.00");
         String buyer = newAccount("1000.00");
         String store = newAccount("0.00");
@@ -99,6 +99,9 @@ class BankKeyConflictIntegrationTest {
 
         // 断言 1（核心）：绝不能回"成功"——否则 store 会把订单标成已支付，而买家一分钱没付
         assertThat(real.isSuccess()).as("同一个键、内容不一样，bank 不能说成功").isFalse();
+        // 断言 1b（66 号、审查 67 🟡2）：也不能只是"拒绝"：要标成冲突，store 才不会换新键再扣（ADR-29）
+        assertThat(real.isKeyConflict()).as("冲突要带标记，gRPC 才会回 KEY_CONFLICT 而不是 REJECTED").isTrue();
+        assertThat(real.getOutcome()).isEqualTo("KEY_CONFLICT");
         // 断言 2：钱没有动（不能把第二笔当成新转账偷偷做了，也不能动攻击者的钱）
         assertThat(balanceOf(buyer)).isEqualByComparingTo("1000.00");
         assertThat(balanceOf(store)).isEqualByComparingTo("0.00");
@@ -111,7 +114,7 @@ class BankKeyConflictIntegrationTest {
      * 之后受害者取消订单，store 用 REFUND-88 去退受害者的 T2。
      */
     @Test
-    void reusedRefundKey_forAnotherTransaction_isRejected() {
+    void reusedRefundKey_forAnotherTransaction_isKeyConflict() {
         String attacker = newAccount("10.00");
         String victim = newAccount("1000.00");
         String store = newAccount("5000.00"); // 商店账户里有别人付的钱
@@ -133,6 +136,9 @@ class BankKeyConflictIntegrationTest {
 
         // 断言 1（核心）：绝不能回"成功"——否则 store 记 REFUNDED、发退款邮件，钱其实还在商店账户
         assertThat(real.isSuccess()).as("同一个键、退的不是同一笔交易，bank 不能说成功").isFalse();
+        // 断言 1b（审查 67 🟡2）：标成冲突，store 不会把这笔退款当"被拒绝"放弃
+        assertThat(real.isKeyConflict()).isTrue();
+        assertThat(real.getOutcome()).isEqualTo("KEY_CONFLICT");
         // 断言 2：受害者那笔确实还没退（钱的状态和回答一致：说没退就是没退）
         assertThat(balanceOf(victim)).isEqualByComparingTo("900.00");
         long victimRefunds = transactionRepository.findAll().stream()
