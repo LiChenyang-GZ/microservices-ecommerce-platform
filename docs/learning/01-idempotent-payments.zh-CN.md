@@ -80,7 +80,7 @@
 
 ### 2.10 告警 = 带固定标记的日志
 - `ALERT payment_unknown …`、`ALERT refund_unknown …`、`ALERT refund_rejected …`：[PaymentService#onPayStillUnknown](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)、[PaymentService#onRefundRejected](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)
-- 后来加的（[15](15-retry-sends-the-first-request.zh-CN.md)）：`ALERT payment_no_account …`（发过的扣款找不到买家账号来重发；怎么处理写在 [PaymentService#holdUnknownWithoutAccount](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)）和 `ALERT payment_no_order …`（bank 说扣了，订单行却没了；[PaymentService#onPaySucceeded](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)）
+- 后来加的（[15](15-retry-sends-the-first-request.zh-CN.md)）：`ALERT payment_no_account …`（发过的扣款找不到买家账号来重发；怎么处理写在 [PaymentService#holdUnknownWithoutAccount](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)）和 `ALERT payment_no_order …`（bank 说扣了，订单行却没了；[PaymentService#onPaySucceeded](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)）；[16](16-key-conflict-is-not-a-failure.zh-CN.md) 起还有 `ALERT payment_key_conflict …` 和 `ALERT refund_key_conflict …`（bank 说这个键已经用于另一个请求；[PaymentService#onPayKeyConflict](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)、`#onRefundKeyConflict`）
 - 运维按这个标记搜日志或配日志告警。测试用 Spring Boot 的 `OutputCaptureExtension` 抓控制台输出来断言。告警表留到以后。
 
 ### 2.11 测试工具（这一步新用到的）
@@ -99,7 +99,7 @@
 独立审查（Obsidian `07-第1波审查-A-修钱`）找到了表里没有的问题。三条都先写了红灯（`1aafbbe`），再修（`5194401`）。
 
 - **键能被抢先占用（#17、#18）**：旧键 `PAY-{paymentId}-{attempt}` 是连号，paymentId 页面上看得到；bank 见到用过的键只回"第一次的结果"，不看内容。攻击者先用受害订单的下一个键给自己转 0.01，store 真正的扣款就拿到"已成功"，订单 0 元变 PAID。两处都改：
-  - bank 见到用过的键，先**比对内容**（转账：类型、付款人、收款人、金额；退款：类型、原交易）。一样才返回第一次的结果；不一样就是"键冲突"，回 REJECTED，钱不动：[BankService.java](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java)（`previousTransferResult`、`previousRefundResult`）
+  - bank 见到用过的键，先**比对内容**（转账：类型、付款人、收款人、金额；退款：类型、原交易）。一样才返回第一次的结果；不一样就是"键冲突"，钱不动（原来回 REJECTED；[16](16-key-conflict-is-not-a-failure.zh-CN.md) 以后是单独的 outcome KEY_CONFLICT，store 当成"未知"）：[BankService.java](../../backend/bankService/src/main/java/com/comp5348/bank/service/BankService.java)（`previousTransferResult`、`previousRefundResult`）
   - store 的键加**随机段**：`PAY-{paymentId}-{attempt}-{随机}`、`REFUND-{paymentId}-{随机}`。随机段是 `SecureRandom` 的 16 位十六进制，存在 Payment 上，加了 `@JsonIgnore`，任何接口都不返回；每次新的扣款尝试换一个，同一次尝试的重试用任务里存好的同一个键：[PaymentService.java](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)（`payKey`、`newKeyNonce`）
   - 契约 README 第 4 节和 `bank.proto` 的注释同步改了；proto 的字段没动，键还是不透明的字符串。
 - **自动取消取消了已付款的订单（#19）**：取消器先读"待支付"列表，期间扣款成功；`cancelOrder` 不拒绝 PAID。现在自动取消走 `OrderService.cancelIfStillUnpaid`：**锁住订单行之后再看一眼**，不是待支付就跳过。用户自己取消已付款的订单仍然允许（会退款）。测试用 `@MockitoSpyBean` 让 `findByStatus` 返回旧列表，稳定复现时间窗。

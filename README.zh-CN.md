@@ -34,7 +34,7 @@
 
 | 问题 | 代码怎么做 |
 |---|---|
-| 重试不能扣两次 | 每笔扣款 / 退款带幂等键（`PAY-{paymentId}-{attempt}-{随机}` / `REFUND-{paymentId}-{随机}`）。bank 用唯一约束存键，按固定顺序锁两个账户行，拿到锁后再查一次键；同一个键、内容不同直接判冲突。超时记为 `PAY_UNKNOWN`，不是失败，用**同一个键**重试，而且重试发的是第一次发送时记下的账号，一个键永远只对应一个请求（ADR-04、ADR-05、ADR-16、ADR-28）。 |
+| 重试不能扣两次 | 每笔扣款 / 退款带幂等键（`PAY-{paymentId}-{attempt}-{随机}` / `REFUND-{paymentId}-{随机}`）。bank 用唯一约束存键，按固定顺序锁两个账户行，拿到锁后再查一次键；同一个键、内容不同就是冲突（`KEY_CONFLICT`），store 当成"未知"，绝不当失败。超时记为 `PAY_UNKNOWN`，不是失败，用**同一个键**重试，而且重试发的是第一次发送时记下的账号，一个键永远只对应一个请求（ADR-04、ADR-05、ADR-16、ADR-28、ADR-29）。 |
 | 扣款 / 退款要扛得住崩溃 | store 不在请求里直接调 bank，而是在改订单的同一个事务里写一条 PAY / REFUND 任务到 `payment_outbox`，由 `OutboxProcessor` 执行，带快重试和慢重试。 |
 | "提交"和"发送"之间不能丢事件 | 事件先作为一行写进各服务的 `event_outbox`，和业务数据同一个事务。发布器按 id 顺序逐条等 Kafka 确认，并持有 `pg_try_advisory_xact_lock`，两个实例不会发同一批（ADR-06）。Kafka 挂着也能正常付款，事件在表里等着。 |
 | Saga 补偿：丢件 | delivery 发 `Lost`；store 在同一个事务里把订单标成 LOST 并写退款任务；bank 确认后订单变 REFUNDED，再发 `OrderRefunded`。 |
@@ -133,7 +133,7 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
 
 - [docs/learning/](docs/learning/)：每次改动一篇，讲问题、复现它的失败测试、修法和取舍（中英文各一份）。
 - 模块说明：[contracts](backend/contracts/README.zh-CN.md)、[delivery](backend/deliveryService/README.zh-CN.md)、[tracking](backend/trackingService/README.zh-CN.md)、[k8s](k8s/README.zh-CN.md)、[场景脚本](backend/docker/scenarios/README.zh-CN.md)。
-- [docs/adr/](docs/adr/README.zh-CN.md)：架构决策记录 ADR-01 到 ADR-28（中英文），以及代码注释引用的 8 条可靠性规则。
+- [docs/adr/](docs/adr/README.zh-CN.md)：架构决策记录 ADR-01 到 ADR-29（中英文），以及代码注释引用的 8 条可靠性规则。
 - [docs/legacy/](docs/legacy/)：原课程项目（只有 RabbitMQ 的版本）留下的笔记。
 
 ## 已知限制和下一步
@@ -152,7 +152,7 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
   - 别人还是能先用你的邮箱注册；你用找回密码认领（密码是你设的，账号随之激活），但用户名还是他起的；而且只要他一直耗掉这个邮箱的码（见第一条），认领也会失败。
 
   Redis 挂着的时候不限流（fail-open，`ALERT rate_limit_unavailable`），每个请求最多多等约 0.5 秒（登录成功约 1 秒：计数一次、清零一次）。上云后 Envoy 前面如果还有负载均衡，`X-Forwarded-For` 的最后一个值就成了负载均衡的地址，到时要再核对客户端地址的规则（写在 `ClientIp` 里）。
-- **同一个键、不同请求的扣款重试**：bank 回 `KEY_CONFLICT`，store 当成"拒绝"（FAILED，Pay Now 可能再扣一次）。现在重试发的是第一次发送时记下的账号（ADR-28），但上线时正在路上、期间买家账号又被换掉的任务仍会撞上。下一步：`bank.proto` 加 `KEY_CONFLICT` 结果，store 当成"未知"。
+- **因为键冲突停住的扣款 / 退款要等人处理**（ADR-29）：键带着不同的请求回来时 bank 回 `KEY_CONFLICT`；store 把 payment 记成 `PAY_UNKNOWN` / `REFUND_UNKNOWN`，告警一次，每 10 分钟重发同一个请求，直到有人把任务改对（步骤写在 `PaymentService#onPayKeyConflict` / `#onRefundKeyConflict`）。bank 要先于 store 发布：新 store 配老 bank，冲突还是 `REJECTED`。
 - **单副本**：所有有状态组件都只有一个（Redis 也是）；store 只能一个副本，因为 `OutboxProcessor` 没有跨实例的锁。
 - **kind 入口偶发 503**（发现 I2）：一次读请求经过 Envoy Gateway 时在到达 store 之前被重置，重试就过了，原因还没查清。
 - **场景脚本 01–03 只能跑 compose**；04–08 两边都能跑。

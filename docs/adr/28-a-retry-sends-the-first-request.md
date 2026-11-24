@@ -2,7 +2,7 @@
 
 **English** | [中文](28-a-retry-sends-the-first-request.zh-CN.md)
 
-**Status:** Accepted. Amends ADR-16 (bank compares content, so store must send the same content).
+**Status:** Accepted. Amends ADR-16 (bank compares content, so store must send the same content). Amended by ADR-29: the "next item" below is done, a key conflict is held as unknown.
 
 ## Context
 A PAY task can be sent several times: up to 5 fast retries in one round, then one try every 10 minutes while the result is unknown (ADR-05). Every send used the same key, but `PaymentService#startPayAttempt` read the buyer's bank account again before each one. Two things went wrong when that read changed between sends:

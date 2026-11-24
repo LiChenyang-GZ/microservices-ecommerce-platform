@@ -2,7 +2,7 @@
 
 **English** | [中文](16-unguessable-idempotency-keys.zh-CN.md)
 
-**Status:** Accepted (amends ADR-04). Amended by ADR-28: because bank compares content, a retry must send the accounts of the first send.
+**Status:** Accepted (amends ADR-04). Amended by ADR-28: because bank compares content, a retry must send the accounts of the first send. Amended by ADR-29: a different request under a used key is now `KEY_CONFLICT`, which store holds as unknown, not a rejection.
 
 ## Context
 The first key format was `PAY-{paymentId}-{attempt}` and `REFUND-{paymentId}`, and bank de-duplicated by key alone. A review found that the two together are a hole. The key was predictable (the payment id is visible in the UI), and bank answered a reused key with "the first result" without looking at the content. An attacker could use the victim's next key for a 0.01 transfer to themselves; store's real charge then got "already succeeded", and an order became PAID while the customer paid nothing.
