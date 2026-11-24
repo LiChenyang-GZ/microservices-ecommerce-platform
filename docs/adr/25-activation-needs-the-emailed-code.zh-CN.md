@@ -2,7 +2,7 @@
 
 [English](25-activation-needs-the-emailed-code.md) | **中文**
 
-**状态：** 已采纳，由 26 补充（验证码改向 store 要；限流）。修订 ADR-23（email 的 `verify-code` 不再公开）和 ADR-24（激活现在能证明邮箱）。
+**状态：** 已采纳，由 26 补充（验证码改向 store 要；限流），由 27 补充（找回密码能认领没激活的账号）。修订 ADR-23（email 的 `verify-code` 不再公开）和 ADR-24（激活现在能证明邮箱）。
 
 ## 背景
 ADR-24 之后，store 要登录、查订单归属，但"你是谁"的起点还是一个没证明过的邮箱。`POST /api/user/activate` 只收 `{email}`。验证页先拿码去调 email 公开的 `verify-code`，再告诉 store"激活这个地址"；store 看不到第一步有没有发生。所以任何人都能用别人的邮箱注册，再发一个请求就激活（场景 A11）。
@@ -50,7 +50,7 @@ email 的 `ServiceTokenFilter` 允许名单里只剩 `send-verification` 是公�
 ## 代价与影响
 - **还没有限流。** `send-verification`、`activate`、`reset-password` 都公开、不限速。知道某个邮箱的人能让 email 给它发一堆码，也能每秒发 5 个错码，让这个地址的注册或找回密码一直失败。这个决定之前，同一个人能直接把码猜出来；现在只能捣乱。下一步是按地址和 IP 限速（ADR-26 做了）。
 - **码可能用掉了却没激活。** email 把码标成 VERIFIED 之后 store 存库失败，或者 email 的"对"晚于 store 的 5 秒超时到达（store 已经回了 503），码就没了，用户要重发。
-- **没激活的账号占着邮箱。** 别人先用你的地址注册，他激活不了，但你注册时会看到"Email already exists"，直到那一行被处理。`AdminBootstrap` 仍然不提升已有账号，也是这个原因。
+- **没激活的账号占着邮箱。** 别人先用你的地址注册，他激活不了，但你注册时会看到"Email already exists"，直到那一行被处理（ADR-27 之后，找回密码就能认领它）。`AdminBootstrap` 仍然不提升已有账号，也是这个原因。
 - **Mailpit 只给本机用。** 它的 API 没有登录；放在真集群里，任何 pod 都能读到所有注册码和重置码，真用户也收不到任何信。部署到真环境前，去掉 `k8s/base/mailpit.yaml`，把 email 的 `MAIL_*` 指向真的 SMTP。
 - **升级后 compose 的邮件去向变了。** `backend/.env` 里只有 `MAIL_USERNAME` / `MAIL_PASSWORD`（以前的 Gmail 配法）的，现在发到 Mailpit；启动时的 WARN 会提示。要继续发真邮件，设好四个 `MAIL_*`，这时脚本就读不到码了。
 - **两个标签页同一刻重发**，可能互相把对方的码作废，用户再点一次重发。页面有 60 秒倒计时，很少碰到。

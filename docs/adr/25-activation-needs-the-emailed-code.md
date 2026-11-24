@@ -2,7 +2,7 @@
 
 **English** | [中文](25-activation-needs-the-emailed-code.zh-CN.md)
 
-**Status:** Accepted, amended by 26 (a code is asked from store; rate limits). Amends ADR-23 (email's `verify-code` is no longer public) and ADR-24 (activation now proves the address).
+**Status:** Accepted, amended by 26 (a code is asked from store; rate limits) and 27 (a password reset claims an unverified account). Amends ADR-23 (email's `verify-code` is no longer public) and ADR-24 (activation now proves the address).
 
 ## Context
 After ADR-24, store required a login and checked who owned each order, but "who you are" still started with an unproved email address. `POST /api/user/activate` took only `{email}`. The verification page checked the code with email's public `verify-code`, then told store "activate this address"; store could not tell whether the first step had happened. So anyone could register an account under someone else's address and activate it with one request (scenario A11).
@@ -50,7 +50,7 @@ email's `ServiceTokenFilter` allowlist keeps only `send-verification` public. ng
 ## Consequences
 - **No rate limit yet.** `send-verification`, `activate` and `reset-password` are public and unthrottled. Someone who knows an address can make email send it many codes, and can send five wrong codes every second so that address's sign-up or password reset never succeeds. Before this decision the same person could guess the code outright; now they can only get in the way. Limiting by address and by IP is the next step (done in ADR-26).
 - **A code can be used up without an activation.** If email marks the code VERIFIED and store then fails to save, or email's yes arrives after store's 5-second timeout (store said 503), the code is gone and the user asks for a new one.
-- **An unactivated account keeps its email.** Someone who registers your address first cannot activate it, but you see "Email already exists" until that row is dealt with. `AdminBootstrap` still never promotes an existing account for the same reason.
+- **An unactivated account keeps its email.** Someone who registers your address first cannot activate it, but you see "Email already exists" until that row is dealt with (since ADR-27 a password reset claims it). `AdminBootstrap` still never promotes an existing account for the same reason.
 - **Mailpit is for local runs only.** Its API has no login; in a real cluster any pod could read every registration and reset code, and real users would receive nothing. Before deploying anywhere real, remove `k8s/base/mailpit.yaml` and point email's `MAIL_*` at a real SMTP server.
 - **Upgrading changes where compose sends mail.** A `backend/.env` with only `MAIL_USERNAME` / `MAIL_PASSWORD` (the Gmail setup before this) now sends to Mailpit; the startup WARN says so. To keep real mail, set the four `MAIL_*` variables; the scripts can then no longer read codes.
 - **Two tabs resending at the same moment** can each expire the other's code; the user presses resend once more. The page's 60-second countdown makes this rare.

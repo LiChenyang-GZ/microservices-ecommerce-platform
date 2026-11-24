@@ -2,7 +2,7 @@
 
 **English** | [中文](26-rate-limits-in-redis.zh-CN.md)
 
-**Status:** Accepted. Amends ADR-23 (email has no public endpoint left) and ADR-25 (a code is asked from store; the "no rate limit yet" consequence).
+**Status:** Accepted, amended by 27 (the squatted-address consequence). Amends ADR-23 (email has no public endpoint left) and ADR-25 (a code is asked from store; the "no rate limit yet" consequence).
 
 ## Context
 After ADR-25 an account needed the emailed code, but nothing limited how often anyone could ask:
@@ -62,7 +62,7 @@ After ADR-25 an account needed the emailed code, but nothing limited how often a
 - **IPv6**: one person usually has a whole /64, so the per-address limits do not hold against them, and each new address adds keys to a Redis with no `maxmemory`. To do before a cloud deployment: group by /64, set `maxmemory` with `volatile-ttl`.
 - **A load balancer in front of Envoy** (likely in a cloud) would make its own address the last `X-Forwarded-For` value, so everyone would share one count. Envoy must then trust that hop, and `ClientIp` must be checked again.
 - **`send-verification` timing**: it answers 200 for every address, but for an account that exists and is not active it waits for email, so it is slower. That tells such addresses apart; sign-up already answers "Email already exists!", so little more is revealed.
-- **Someone can still sign up first with another person's address** (older than this decision): the owner can now reach the verification page and activate, but the account has the other person's password.
+- **Someone can still sign up first with another person's address** (older than this decision). This said the owner could reach the verification page and activate; they could not (the page is reached only by a successful sign-up). ADR-27 lets a password reset claim the account.
 - **Upgrade**: `backend/.env` needs `REDIS_PASSWORD`; compose refuses to start without it, and kind needs `up.ps1` again. The scripts register about 10 users per full run, so about two full runs an hour; the READMEs show how to reset the counts.
 - **One more container**, single replica, like every stateful part (ADR-13).
 
