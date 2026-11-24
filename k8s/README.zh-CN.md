@@ -33,7 +33,7 @@
 ```powershell
 ./k8s/scripts/smoke-order.ps1        # 经入口下一单：钱只扣一次、配送状态回到 store
 ./k8s/scripts/check-config-keys.ps1  # 每个 pod 的变量名和 compose 一致，没有别人的库密码
-./k8s/scripts/check-entry.ps1        # 对两个入口（kind :80、compose :3000）发同一组 58 个请求：该放的放、该挡的 404
+./k8s/scripts/check-entry.ps1        # 对两个入口（kind :80、compose :3000）发同一组 55 个请求：该放的放、要登录的 401、该挡的 404
 ```
 
 浏览器打开 `http://localhost`。
