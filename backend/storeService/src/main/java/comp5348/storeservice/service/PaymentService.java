@@ -219,20 +219,52 @@ public class PaymentService {
             return Optional.empty();
         }
 
-        String fromAccount = order == null ? null : accountRepository.findById(order.getUserId())
-                .map(acc -> acc.getBankAccountNumber())
-                .filter(acc -> !acc.isEmpty())
-                .orElse(null);
-        if (fromAccount == null) {
-            handlePaymentFailure(payment, "No linked bank account for user");
-            closeTask(task, "PROCESSED", "no bank account");
-            return Optional.empty();
+        // Same key, same request (rule 7): once a task has accounts recorded, it never reads them again. A retry with
+        // other accounts gets KEY_CONFLICT from bank → FAILED → Pay Now charges again with a new key (A#4)
+        if (task.getFromAccount() == null) {
+            String buyerAccount = order == null ? null : accountRepository.findById(order.getUserId())
+                    .map(acc -> acc.getBankAccountNumber())
+                    .filter(acc -> !acc.isEmpty())
+                    .orElse(null);
+            if (buyerAccount == null) {
+                if (task.getRetryCount() == 0) {
+                    // Never sent: no money can have moved, so this is a definite failure and Pay Now may start again
+                    handlePaymentFailure(payment, "No linked bank account for user");
+                    closeTask(task, "PROCESSED", "no bank account");
+                } else {
+                    // Sent before accounts were recorded: the charge may have gone through, from an account we no
+                    // longer know. Not FAILED (a new key could charge twice); wait and look again
+                    holdUnknownWithoutAccount(task, payment);
+                }
+                return Optional.empty();
+            }
+            task.setFromAccount(buyerAccount);
+        }
+        if (task.getToAccount() == null) {
+            task.setToAccount(storeAccount);
         }
 
         task.setRetryCount(task.getRetryCount() + 1);
         outboxRepository.save(task);
-        return Optional.of(new PayCall(taskId, task.getOrderId(), task.getIdempotencyKey(), fromAccount, storeAccount,
-                payment.getAmount(), payment.getStatus() == PaymentStatus.PAY_UNKNOWN));
+        return Optional.of(new PayCall(taskId, task.getOrderId(), task.getIdempotencyKey(), task.getFromAccount(),
+                task.getToAccount(), payment.getAmount(), payment.getStatus() == PaymentStatus.PAY_UNKNOWN));
+    }
+
+    /**
+     * A PAY task that was sent but has no recorded buyer account, and the buyer's account cannot be read now.
+     * PAY_UNKNOWN with an alert, task kept and looked at again in slowRetryMinutes: someone sorts out the account
+     * (or the bank's record of the key), and the next look sends the same key again.
+     */
+    private void holdUnknownWithoutAccount(PaymentOutbox task, Payment payment) {
+        if (payment.getStatus() == PaymentStatus.PENDING) {
+            payment.setStatus(PaymentStatus.PAY_UNKNOWN);
+            payment.setErrorMessage("Bank account not found for a charge that was already sent");
+            paymentRepository.save(payment);
+        }
+        logger.error("ALERT payment_no_account orderId={} paymentId={} key={} attempts={}",
+                task.getOrderId(), payment.getId(), task.getIdempotencyKey(), task.getRetryCount());
+        task.setNextAttemptAt(LocalDateTime.now(clock).plusMinutes(slowRetryMinutes));
+        outboxRepository.save(task);
     }
 
     /**
