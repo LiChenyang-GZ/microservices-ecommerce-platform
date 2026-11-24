@@ -67,6 +67,12 @@ const ForgotPasswordPage = () => {
     } catch (error) {
       console.error('Forgot password failed:', error);
       const errorMessage = error.response?.data?.message || 'Failed to send, please try again';
+      if (error.response?.status === 429) {
+        // Codes went to this address recently (maybe asked for by someone squatting it, Obsidian 59): the newest one
+        // in the inbox still works, so go on to the reset page instead of leaving the owner stuck here.
+        navigate('/reset-password', { state: { email: formData.email, error: errorMessage } });
+        return;
+      }
       setErrors({ submit: errorMessage });
     } finally {
       setIsLoading(false);

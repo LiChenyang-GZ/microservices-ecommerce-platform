@@ -73,8 +73,14 @@ public class AccountService {
         if (email == null || !EMAIL_FORMAT.matcher(email).matches()) {
             throw new IllegalArgumentException("Please enter a valid email address");
         }
-        if (accountRepository.findByEmail(email).isPresent()) {
-            throw new IllegalArgumentException("Email already exists!");
+        Optional<Account> existing = accountRepository.findByEmail(email);
+        if (existing.isPresent()) {
+            if (isClaimed(existing.get())) {
+                throw new IllegalArgumentException("Email already exists!");
+            }
+            // Someone registered this address and never proved it: maybe its owner, maybe a squatter (Obsidian 58).
+            // A password reset claims it, because the reset code only reaches the owner's inbox.
+            throw new EmailNotVerifiedException();
         }
         
         // Check if username already exists
@@ -109,6 +115,36 @@ public class AccountService {
         );
     }
 
+    /** Sign-up found the address registered but not verified: AccountController tells the user how to claim it */
+    public static class EmailNotVerifiedException extends IllegalArgumentException {
+        public EmailNotVerifiedException() {
+            super("This email is registered but not verified. If it is yours, reset the password to claim it.");
+        }
+    }
+
+    /** Active and verified: someone proved this address. Until then the account does not own it (Obsidian 58) */
+    private static boolean isClaimed(Account account) {
+        return Boolean.TRUE.equals(account.getActive()) && Boolean.TRUE.equals(account.getEmailVerified());
+    }
+
+    /**
+     * Proving the address (the registration code in activateAccount, or the reset code in resetPassword) makes the
+     * account usable, and opens its bank account (default balance 10000) if sign-up could not.
+     * In resetPassword this runs inside its transaction, so a slow bank holds a database connection meanwhile (up to
+     * 10 s), and a bank account made just before a failed commit is left behind. Only when sign-up could not reach bank;
+     * rare, recorded (review 59 🟡3).
+     */
+    private void markEmailProved(Account account) {
+        account.setEmailVerified(true);
+        account.setActive(true);
+        if (account.getBankAccountNumber() == null || account.getBankAccountNumber().isEmpty()) {
+            try {
+                String acctNo = bankAdapter.createCustomerAccount(account.getEmail(), new java.math.BigDecimal("10000"));
+                if (acctNo != null) account.setBankAccountNumber(acctNo);
+            } catch (Exception ignore) {}
+        }
+    }
+
     /** What activateAccount found; AccountController turns it into the HTTP answer */
     public enum ActivationResult {
         /** the code was right, the account is active now */
@@ -131,6 +167,15 @@ public class AccountService {
      * not checked yet, a separate piece of work.)
      * Two activations with the same code race safely because email locks the code row and uses it up once.
      * If saving fails after email said yes, the code is already used up: the user asks for a new one (V9).
+     *
+     * The account's password is whatever was typed at sign-up. That is safe only because the verification page is
+     * reached by signing up successfully, i.e. by the person who typed it. Do not give an unverified account another
+     * way to this page (a "verify now" button on the log-in page, say): if a squatter registered the address, its owner
+     * would activate the squatter's password. Send such users to the password reset instead, which claims the account
+     * with a password they choose (Obsidian 58).
+     * The same hole by timing: this method reads the account, waits for email, then saves the whole entity. A reset
+     * that commits in between (the owner claiming it with a new password) would be overwritten with the old password.
+     * Only reachable by using a registration code and a reset code at once, which a squatter cannot arrange (review 59 🟡4).
      */
     public ActivationResult activateAccount(String email, String code) {
         if (code == null || code.isBlank()) {
@@ -165,15 +210,7 @@ public class AccountService {
             return ActivationResult.EMAIL_UNAVAILABLE;
         }
 
-        account.setEmailVerified(true);
-        account.setActive(true);
-        // Open account for user upon activation (default balance 10000), only if bank account is not yet bound
-        if (account.getBankAccountNumber() == null || account.getBankAccountNumber().isEmpty()) {
-            try {
-                String acctNo = bankAdapter.createCustomerAccount(account.getEmail(), new java.math.BigDecimal("10000"));
-                if (acctNo != null) account.setBankAccountNumber(acctNo);
-            } catch (Exception ignore) {}
-        }
+        markEmailProved(account);
         accountRepository.save(account);
         return ActivationResult.ACTIVATED;
     }
@@ -315,7 +352,9 @@ public class AccountService {
     }
 
     /**
-     * Reset password
+     * Reset password. On an account that was never verified this also claims it (Obsidian 58): the reset code reached
+     * this inbox, which proves the address as well as a registration code does, and the password is the one the
+     * owner just chose, so whoever registered the address first (a squatter, say) can no longer log in with theirs.
      */
     @Transactional
     public boolean resetPassword(String email, String code, String newPassword) {
@@ -340,6 +379,9 @@ public class AccountService {
                 Account account = accountOpt.get();
                 String encodedPassword = passwordEncoder.encode(newPassword);
                 account.setPassword(encodedPassword);
+                if (!isClaimed(account)) {
+                    markEmailProved(account);
+                }
                 accountRepository.save(account);
                 return true;
             }

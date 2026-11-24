@@ -56,6 +56,12 @@ public class AccountController {
                     request.username, request.email, request.password
             );
             return ResponseEntity.ok(new CreateAccountResponse(true, "Account created successfully, please check your email and complete verification", accountDTO));
+        } catch (AccountService.EmailNotVerifiedException e) {
+            // Registered but never verified (maybe by a squatter): the register page links to the password reset,
+            // which claims the account (Obsidian 58)
+            CreateAccountResponse body = new CreateAccountResponse(false, e.getMessage(), null);
+            body.emailNotVerified = true;
+            return ResponseEntity.badRequest().body(body);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(new CreateAccountResponse(false, e.getMessage(), null));
         }
@@ -205,6 +211,8 @@ public class AccountController {
         public boolean success;
         public String message;
         public AccountDTO account;
+        /** true when the email is registered but not verified: a password reset claims it (Obsidian 58) */
+        public boolean emailNotVerified;
 
         public CreateAccountResponse(boolean success, String message, AccountDTO account) {
             this.success = success;
