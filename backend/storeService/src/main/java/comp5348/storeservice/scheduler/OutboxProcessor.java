@@ -167,6 +167,11 @@ public class OutboxProcessor {
                     paymentService.onPayRejected(taskId, result.message());
                     return;
                 }
+                case KEY_CONFLICT -> {
+                    // Sending it again now gets the same answer: hold it and look again in 10 minutes
+                    paymentService.onPayKeyConflict(taskId, result.message());
+                    return;
+                }
                 case UNKNOWN -> lastError = result.message();
             }
             if (shuttingDown(taskId, call.idempotencyKey())) {
@@ -198,6 +203,10 @@ public class OutboxProcessor {
                 }
                 case REJECTED -> {
                     paymentService.onRefundRejected(taskId, result.message());
+                    return;
+                }
+                case KEY_CONFLICT -> {
+                    paymentService.onRefundKeyConflict(taskId, result.message());
                     return;
                 }
                 case UNKNOWN -> lastError = result.message();

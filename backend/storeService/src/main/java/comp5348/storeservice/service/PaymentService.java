@@ -87,6 +87,10 @@ public class PaymentService {
     /** The refund reason written when a charge succeeds for an order that was already cancelled */
     private static final String PAID_AFTER_CANCEL_REASON = "Paid after order was cancelled";
 
+    /** Payment error message after bank answered KEY_CONFLICT; also marks "already alerted" (ADR-29) */
+    private static final String KEY_CONFLICT_AT_BANK =
+            "Bank: this key was already used for a different request; the first request may have moved money";
+
     /** Payment error message while a sent charge waits for its buyer account; also marks "already alerted" */
     private static final String NO_ACCOUNT_AFTER_SEND = "Bank account not found for a charge that was already sent";
 
@@ -223,7 +227,7 @@ public class PaymentService {
         }
 
         // Same key, same request (rule 7): once a task has accounts recorded, it never reads them again. A retry with
-        // other accounts gets KEY_CONFLICT from bank → FAILED → Pay Now charges again with a new key (A#4)
+        // other accounts would get KEY_CONFLICT from bank and stay unknown until a person looks (A#4, ADR-28)
         if (task.getFromAccount() == null) {
             String buyerAccount = order == null ? null : accountRepository.findById(order.getUserId())
                     .map(acc -> acc.getBankAccountNumber())
@@ -258,8 +262,8 @@ public class PaymentService {
      * PAY_UNKNOWN with an alert, task kept and looked at again in slowRetryMinutes.
      * What a person does: look the key up at bank (transaction_ref). Found → copy its from / to accounts into this
      * task's from_account / to_account, and the next look resends the identical request and gets bank's real answer.
-     * Not found → the charge never reached bank, so marking the payment FAILED is safe. Do not just link the buyer a new bank account: the same key with
-     * another account is a KEY_CONFLICT at bank, which store reads as a "no" (review 63, item 2).
+     * Not found → the charge never reached bank, so marking the payment FAILED is safe. Do not just link the buyer
+     * a new bank account: the same key with another account is a KEY_CONFLICT at bank (held as unknown, ADR-29).
      */
     private void holdUnknownWithoutAccount(PaymentOutbox task, Payment payment) {
         if (payment.getStatus() == PaymentStatus.PENDING) {
@@ -361,6 +365,26 @@ public class PaymentService {
         outboxRepository.save(task);
     }
 
+    /**
+     * Bank answered KEY_CONFLICT: this key was already used for a different request (an old task whose buyer
+     * account changed, two store instances some day, a regression). Nothing moved for this call, but the key's first
+     * request may have charged, so this is not a "no": no FAILED, no PaymentFailed, no new key (ADR-29).
+     * PAY_UNKNOWN, one ALERT per payment, and the same key again in slowRetryMinutes. What a person does: compare the
+     * task's request with bank's transaction for the key (transaction_ref) and copy bank's accounts into the task's
+     * from_account / to_account; the next look then resends the identical request and gets bank's real answer.
+     */
+    @Transactional
+    public void onPayKeyConflict(Long taskId, String reason) {
+        PaymentOutbox task = outboxRepository.findById(taskId).orElseThrow();
+        Payment payment = paymentRepository.findByOrderIdForUpdate(task.getOrderId()).orElseThrow();
+        if (CHARGE_OPEN.contains(payment.getStatus())) {
+            payment.setStatus(PaymentStatus.PAY_UNKNOWN);
+            alertOnce(payment, "payment_key_conflict", task, reason);
+        }
+        task.setNextAttemptAt(LocalDateTime.now(clock).plusMinutes(slowRetryMinutes));
+        outboxRepository.save(task);
+    }
+
     // ------------------------------------------------------------------ refunds
 
     /**
@@ -439,6 +463,35 @@ public class PaymentService {
         closeTask(task, "FAILED", "refund rejected: " + reason);
         logger.error("ALERT refund_rejected orderId={} paymentId={} key={} reason={}",
                 task.getOrderId(), payment.getId(), task.getIdempotencyKey(), reason);
+    }
+
+    /**
+     * Bank answered KEY_CONFLICT to a refund: the refund key was used for another original transaction. The money
+     * may already have gone back, so the refund is not given up (as a rejection would be): REFUND_UNKNOWN, one ALERT,
+     * the same key again in slowRetryMinutes (ADR-29).
+     */
+    @Transactional
+    public void onRefundKeyConflict(Long taskId, String reason) {
+        PaymentOutbox task = outboxRepository.findById(taskId).orElseThrow();
+        Payment payment = paymentRepository.findByOrderIdForUpdate(task.getOrderId()).orElseThrow();
+        if (REFUND_OPEN.contains(payment.getStatus())) {
+            payment.setStatus(PaymentStatus.REFUND_UNKNOWN);
+            alertOnce(payment, "refund_key_conflict", task, reason);
+        }
+        task.setNextAttemptAt(LocalDateTime.now(clock).plusMinutes(slowRetryMinutes));
+        outboxRepository.save(task);
+    }
+
+    /** The first KEY_CONFLICT for a payment is an ALERT; later looks at the same task only log a WARN */
+    private void alertOnce(Payment payment, String marker, PaymentOutbox task, String reason) {
+        if (KEY_CONFLICT_AT_BANK.equals(payment.getErrorMessage())) {
+            logger.warn("Still a key conflict at bank: orderId={}, key={}", task.getOrderId(), task.getIdempotencyKey());
+        } else {
+            payment.setErrorMessage(KEY_CONFLICT_AT_BANK);
+            logger.error("ALERT {} orderId={} paymentId={} key={} reason={}",
+                    marker, task.getOrderId(), payment.getId(), task.getIdempotencyKey(), reason);
+        }
+        paymentRepository.save(payment);
     }
 
     @Transactional

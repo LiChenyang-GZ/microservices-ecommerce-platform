@@ -56,7 +56,7 @@ public class BankGrpcService extends BankServiceGrpc.BankServiceImplBase {
             return;
         }
         reply(responseObserver, com.comp5348.contracts.bank.v1.TransferResponse.newBuilder()
-                .setOutcome(result.isSuccess() ? Outcome.SUCCEEDED : Outcome.REJECTED)
+                .setOutcome(outcome(result.isSuccess(), result.isKeyConflict()))
                 .setTransactionId(result.isSuccess() ? nullToEmpty(result.getTransactionId()) : "")
                 .setReason(result.isSuccess() ? "" : nullToEmpty(result.getMessage()))
                 .build());
@@ -74,10 +74,18 @@ public class BankGrpcService extends BankServiceGrpc.BankServiceImplBase {
             return;
         }
         reply(responseObserver, com.comp5348.contracts.bank.v1.RefundResponse.newBuilder()
-                .setOutcome(result.isSuccess() ? Outcome.SUCCEEDED : Outcome.REJECTED)
+                .setOutcome(outcome(result.isSuccess(), result.isKeyConflict()))
                 .setRefundTransactionId(result.isSuccess() ? nullToEmpty(result.getRefundTransactionId()) : "")
                 .setReason(result.isSuccess() ? "" : nullToEmpty(result.getMessage()))
                 .build());
+    }
+
+    /**
+     * A key conflict is its own outcome, not REJECTED: store treats REJECTED as "no money moved" and lets the buyer
+     * pay again with a new key, but the conflicting key's first request may have moved money (ADR-29).
+     */
+    private static Outcome outcome(boolean success, boolean keyConflict) {
+        return success ? Outcome.SUCCEEDED : keyConflict ? Outcome.KEY_CONFLICT : Outcome.REJECTED;
     }
 
     private static com.comp5348.contracts.bank.v1.TransferResponse rejectedTransfer(String reason) {

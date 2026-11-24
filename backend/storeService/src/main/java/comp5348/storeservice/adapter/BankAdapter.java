@@ -156,6 +156,8 @@ public class BankAdapter {
             // proto3 has no null: "" means "no transaction id". Keep it null, as the HTTP version did (row 12)
             case SUCCEEDED -> BankCallResult.succeeded(transactionId.isEmpty() ? null : transactionId, null);
             case REJECTED -> BankCallResult.rejected(reason);
+            // Not REJECTED: the key's first request may have moved money (ADR-29)
+            case KEY_CONFLICT -> BankCallResult.keyConflict(reason);
             default -> BankCallResult.unknown("bank answered OK without an outcome (" + outcome + ")");
         };
     }

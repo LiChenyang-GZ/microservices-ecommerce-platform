@@ -38,7 +38,8 @@ public class BankService {
      *
      * Order of steps matters:
      * 1. Key already seen → same request: return the first result, move no money.
-     *    Different request under the same key (someone else used it first) → key conflict, never success.
+     *    Different request under the same key → key conflict: never success, and not a "no" either: the key's
+     *    first request may have moved money (ADR-29). No money moves for this one.
      * 2. Lock both account rows (SELECT ... FOR UPDATE), in account-number order.
      * 3. Check the key again. A request with the same key may have committed while we waited for the lock;
      *    now we can see it and return its result instead of failing on the unique constraint.
@@ -210,7 +211,7 @@ public class BankService {
                 logger.warn("Idempotency key conflict: key={} was used for txnId={} ({} → {}, {}), now {} → {}, {}",
                         key, txn.getId(), txn.getFromAccount(), txn.getToAccount(), txn.getAmount(),
                         request.getFromAccount(), request.getToAccount(), request.getAmount());
-                return new TransferResponse(false, null, KEY_CONFLICT);
+                return TransferResponse.keyConflict(KEY_CONFLICT);
             }
             logger.info("Transfer key already processed: key={}, txnId={}, status={}", key, txn.getId(), txn.getStatus());
             if (txn.getStatus() == Transaction.TransactionStatus.SUCCESS) {
@@ -236,7 +237,7 @@ public class BankService {
             if (!sameRefund) {
                 logger.warn("Idempotency key conflict: key={} was used for txnId={} (type={}, original={}), now refund of {}",
                         key, txn.getId(), txn.getType(), txn.getOriginalTransactionId(), originalId);
-                return new RefundResponse(false, null, KEY_CONFLICT);
+                return RefundResponse.keyConflict(KEY_CONFLICT);
             }
             logger.info("Refund key already processed: key={}, txnId={}", key, txn.getId());
             return new RefundResponse(true, txn.getId().toString(), "Refund already processed");
