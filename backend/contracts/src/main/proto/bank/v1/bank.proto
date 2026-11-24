@@ -4,13 +4,16 @@
 //   outcome = SUCCEEDED            -> done; transaction_id is the bank's id
 //   outcome = REJECTED             -> definite business failure (e.g. insufficient funds,
 //                                     refund not allowed); reason says why
+//   outcome = KEY_CONFLICT         -> this key was already used for a DIFFERENT request. No money moved
+//                                     for this call, but the key's first request may have moved money.
+//                                     NOT a failure: never start a new attempt with a new key (ADR-29).
 //   gRPC status DEADLINE_EXCEEDED,
 //   UNAVAILABLE or any other error -> result UNKNOWN. Retry with the SAME idempotency_key.
 //                                     Never treat it as REJECTED.
 //
 // Idempotency (ADR-04): bank stores idempotency_key with a unique constraint.
 // A repeated key with the same request returns the first call's response and moves no money.
-// A repeated key with a different request is REJECTED (key conflict), never SUCCEEDED.
+// A repeated key with a different request is KEY_CONFLICT, never SUCCEEDED.
 // Keys are opaque to bank. Store sends Transfer = "PAY-{paymentId}-{attempt}-{random}",
 // Refund = "REFUND-{paymentId}-{random}"; the random part makes them impossible to guess.
 syntax = "proto3";
@@ -30,6 +33,7 @@ enum Outcome {
   OUTCOME_UNSPECIFIED = 0;
   SUCCEEDED = 1;
   REJECTED = 2;
+  KEY_CONFLICT = 3;
 }
 
 message TransferRequest {

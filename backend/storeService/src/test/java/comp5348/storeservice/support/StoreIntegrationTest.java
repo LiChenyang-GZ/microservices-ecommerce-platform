@@ -366,6 +366,12 @@ public abstract class StoreIntegrationTest {
                 TransferResponse.newBuilder().setOutcome(Outcome.REJECTED).setReason(reason).build()));
     }
 
+    /** bank：这个扣款键用过、请求不同（KEY_CONFLICT，66 号）。钱这次没动，但第一次可能动过 */
+    protected void bankTransferKeyConflict() {
+        FAKE_BANK_GRPC.onTransfer(Reply.ok(TransferResponse.newBuilder().setOutcome(Outcome.KEY_CONFLICT)
+                .setReason("Idempotency key conflict: this key was already used for a different request").build()));
+    }
+
     /** bank 自己出错了（比如它的数据库挂了）：gRPC 的 INTERNAL，不是 bank 的"拒绝"回答。钱动没动，store 不知道。 */
     protected void bankTransferFailsInternally() {
         bankTransferFailsWith(Status.Code.INTERNAL);
@@ -430,6 +436,12 @@ public abstract class StoreIntegrationTest {
     /** 退款：状态 OK，但 outcome 没设（OUTCOME_UNSPECIFIED） */
     protected void bankRefundAnswersWithoutOutcome() {
         FAKE_BANK_GRPC.onRefund(Reply.ok(RefundResponse.newBuilder().setRefundTransactionId("9101").build()));
+    }
+
+    /** bank：这个退款键用过、请求不同（KEY_CONFLICT，66 号） */
+    protected void bankRefundKeyConflict() {
+        FAKE_BANK_GRPC.onRefund(Reply.ok(RefundResponse.newBuilder().setOutcome(Outcome.KEY_CONFLICT)
+                .setReason("Idempotency key conflict: this key was already used for a different request").build()));
     }
 
     protected void bankRejectsRefund(String reason) {
