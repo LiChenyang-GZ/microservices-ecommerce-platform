@@ -23,7 +23,7 @@ ADR-01 to ADR-14 were written before the redesign was built. Code comments refer
 | [13](13-kubernetes-single-entry.md) | Run on Kubernetes behind a single entry | Accepted, entry decided by 15 |
 | [14](14-out-of-scope.md) | What this design leaves as it was | Accepted |
 | [15](15-gateway-api-allowlist-entry.md) | The single entry is Gateway API (Envoy Gateway) with an allowlist | Accepted, amended by 23 |
-| [16](16-unguessable-idempotency-keys.md) | Idempotency keys carry a random part, and bank compares content | Accepted |
+| [16](16-unguessable-idempotency-keys.md) | Idempotency keys carry a random part, and bank compares content | Accepted, amended by 28 |
 | [17](17-probes-and-replicas.md) | Probes check the service itself; store runs one replica | Accepted |
 | [18](18-stuck-delivery-sweeper.md) | A sweeper re-sends delivery jobs that stopped moving | Accepted |
 | [19](19-shared-event-contract.md) | One event contract, shared by Java and Go | Accepted |
@@ -35,6 +35,7 @@ ADR-01 to ADR-14 were written before the redesign was built. Code comments refer
 | [25](25-activation-needs-the-emailed-code.md) | Activation needs the emailed code, and store checks it with email | Accepted, amended by 26, 27 |
 | [26](26-rate-limits-in-redis.md) | Rate limits on store's public account endpoints, counted in Redis | Accepted, amended by 27 |
 | [27](27-password-reset-claims-unverified-account.md) | An unverified account does not hold its address: a password reset claims it | Accepted |
+| [28](28-a-retry-sends-the-first-request.md) | A retried charge sends exactly the accounts of its first send | Accepted |
 
 ## Reliability rules
 

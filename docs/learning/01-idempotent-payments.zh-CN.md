@@ -80,6 +80,7 @@
 
 ### 2.10 告警 = 带固定标记的日志
 - `ALERT payment_unknown …`、`ALERT refund_unknown …`、`ALERT refund_rejected …`：[PaymentService#onPayStillUnknown](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)、[PaymentService#onRefundRejected](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)
+- 后来加的（[15](15-retry-sends-the-first-request.zh-CN.md)）：`ALERT payment_no_account …`（发过的扣款找不到买家账号来重发；怎么处理写在 [PaymentService#holdUnknownWithoutAccount](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)）和 `ALERT payment_no_order …`（bank 说扣了，订单行却没了；[PaymentService#onPaySucceeded](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)）
 - 运维按这个标记搜日志或配日志告警。测试用 Spring Boot 的 `OutputCaptureExtension` 抓控制台输出来断言。告警表留到以后。
 
 ### 2.11 测试工具（这一步新用到的）

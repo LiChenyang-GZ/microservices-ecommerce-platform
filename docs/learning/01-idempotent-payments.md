@@ -80,6 +80,7 @@ The red commits reproduced 16 problems on the old code. The four most typical:
 
 ### 2.10 Alert = a log line with a fixed marker
 - `ALERT payment_unknown …`, `ALERT refund_unknown …`, `ALERT refund_rejected …`: [PaymentService#onPayStillUnknown](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java), [PaymentService#onRefundRejected](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java)
+- Added later ([15](15-retry-sends-the-first-request.md)): `ALERT payment_no_account …` (a charge that was sent has no buyer account to resend from; [PaymentService#holdUnknownWithoutAccount](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java) says what to do) and `ALERT payment_no_order …` (bank says charged, the order row is gone; [PaymentService#onPaySucceeded](../../backend/storeService/src/main/java/comp5348/storeservice/service/PaymentService.java))
 - Operations search for the marker or set a log alert on it. Tests check it with Spring Boot's `OutputCaptureExtension`. An alert table comes later.
 
 ### 2.11 Test tools new in this step
