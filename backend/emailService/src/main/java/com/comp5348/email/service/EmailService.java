@@ -25,17 +25,21 @@ public class EmailService {
 
     static final String REGISTRATION = "REGISTRATION";
     static final String PASSWORD_RESET = "PASSWORD_RESET";
-    /** Wrong guesses a code survives; the next wrong one after this many kills it (A11, V13) */
-    static final int MAX_FAILED_ATTEMPTS = 5;
+    /**
+     * Digits in a code. 10^10 codes: long enough that a wrong guess does not have to kill the code (Obsidian 70).
+     * With 6 digits it had to (five wrong guesses and the code was dead, A11 V13), and then anyone who knew your
+     * address could kill your code from one IP (Obsidian 58 Q16). How many guesses one caller gets is store's limit:
+     * 5 per IP + email per 15 minutes (AuthRateLimits).
+     */
+    static final int CODE_DIGITS = 10;
+    private static final long CODE_SPACE = 10_000_000_000L;
 
     /** Codes must not be predictable from earlier ones: java.util.Random is a linear generator, SecureRandom is not */
     private static final SecureRandom RANDOM = new SecureRandom();
 
-    /**
-     * Generate 6-digit verification code
-     */
+    /** A new 10-digit code, leading zeros kept */
     public String generateVerificationCode() {
-        return String.format("%06d", RANDOM.nextInt(1000000));
+        return String.format("%0" + CODE_DIGITS + "d", RANDOM.nextLong(CODE_SPACE));
     }
 
     /** Store a new code (PENDING). The older codes stay live until this one is sent: see markSent */
@@ -110,25 +114,26 @@ public class EmailService {
      * The one place a code is checked. The caller's transaction holds the row locks until it commits.
      *   right code, not expired → VERIFIED (used up), true
      *   right code, expired     → EXPIRED, false (V15)
-     *   wrong code              → every live code of this kind for the address counts one more wrong guess;
-     *                             at MAX_FAILED_ATTEMPTS it is EXPIRED and even the right code fails (V13)
+     *   wrong code              → false, and the live code stays live (Obsidian 70). It used to count the guess and
+     *                             kill the code at the 5th (V13), whoever was guessing: one IP could keep the owner
+     *                             from ever using a code. Guesses are limited by store per IP + email instead.
+     * Spaces are dropped first: a code pasted from the email may bring some. A 6-digit code sent before codes became
+     * 10 digits is compared the same way and still works until it expires.
      */
     private boolean checkCode(String email, String code, String verificationType) {
+        if (code == null) {
+            return false;
+        }
+        String typed = code.replaceAll("\\s", "");
         List<EmailOutbox> live = emailOutboxRepository.lockCodes(email, verificationType, List.of("SENT"));
         for (EmailOutbox row : live) {
-            if (row.getCode().equals(code)) {
+            if (row.getCode().equals(typed)) {
                 if (row.isExpired()) {
                     row.setStatus("EXPIRED");
                     return false;
                 }
                 row.setStatus("VERIFIED");
                 return true;
-            }
-        }
-        for (EmailOutbox row : live) {
-            row.setFailedAttempts(row.getFailedAttempts() + 1);
-            if (row.getFailedAttempts() >= MAX_FAILED_ATTEMPTS) {
-                row.setStatus("EXPIRED");
             }
         }
         return false;

@@ -74,7 +74,7 @@ public class AccountController {
      */
     @PostMapping("/activate")
     public ResponseEntity<?> activateAccount(@RequestBody ActivateAccountRequest request, HttpServletRequest http) {
-        Optional<RateLimiter.Decision> blocked = limits.activate(ClientIp.of(http));
+        Optional<RateLimiter.Decision> blocked = limits.activate(ClientIp.of(http), request.email);
         if (blocked.isPresent()) {
             return tooManyAttempts(blocked.get()); // before email is asked, so a blocked guess does not burn the code
         }
@@ -171,7 +171,7 @@ public class AccountController {
      */
     @PostMapping("/reset-password")
     public ResponseEntity<?> resetPassword(@RequestBody ResetPasswordRequest request, HttpServletRequest http) {
-        Optional<RateLimiter.Decision> blocked = limits.resetPassword(ClientIp.of(http));
+        Optional<RateLimiter.Decision> blocked = limits.resetPassword(ClientIp.of(http), request.email);
         if (blocked.isPresent()) {
             return tooManyAttempts(blocked.get()); // before email is asked, as in activate
         }
@@ -238,7 +238,7 @@ public class AccountController {
 
     public static class ActivateAccountRequest {
         public String email;
-        /** the 6-digit code from the registration email */
+        /** the code from the registration email (10 digits, Obsidian 70) */
         public String code;
     }
 

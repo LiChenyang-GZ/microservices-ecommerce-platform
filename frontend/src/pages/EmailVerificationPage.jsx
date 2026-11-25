@@ -5,6 +5,10 @@ import Button from '../components/Button';
 import { userAPI } from '../services/api';
 import './EmailVerificationPage.css';
 
+// Codes are 10 digits (Obsidian 70). A 6-digit code sent just before the release still works at email, so for now
+// the page takes both (review 71 🟡1); accept only 10 once the release is a few minutes old.
+const ACCEPTED_CODE_LENGTHS = [6, 10];
+
 const EmailVerificationPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -110,8 +114,8 @@ const EmailVerificationPage = () => {
 
   const handleChange = (e) => {
     const { value } = e.target;
-    // Only allow numbers, maximum 6 digits
-    const numericValue = value.replace(/\D/g, '').slice(0, 6);
+    // Digits only (spaces from a pasted code go too), at most 10 (Obsidian 70)
+    const numericValue = value.replace(/\D/g, '').slice(0, 10);
     setVerificationCode(numericValue);
     
     if (error) {
@@ -125,7 +129,7 @@ const EmailVerificationPage = () => {
         <div className="verification-header">
           <h1>Email Verification</h1>
           <p>We have sent a verification code to <strong>{email}</strong></p>
-          <p>Please enter the 6-digit verification code to complete registration</p>
+          <p>Please enter the 10-digit verification code to complete registration</p>
         </div>
 
         <form onSubmit={handleVerify} className="verification-form">
@@ -136,11 +140,12 @@ const EmailVerificationPage = () => {
               label="Verification Code"
               value={verificationCode}
               onChange={handleChange}
-              placeholder="Enter 6-digit verification code"
+              placeholder="Enter 10-digit verification code"
               error={error}
               disabled={isLoading}
               required
-              maxLength={6}
+              inputMode="numeric"
+              autoComplete="one-time-code"
             />
           </div>
 
@@ -154,7 +159,7 @@ const EmailVerificationPage = () => {
             <Button
               type="submit"
               variant="primary"
-              disabled={isLoading || verificationCode.length !== 6}
+              disabled={isLoading || !ACCEPTED_CODE_LENGTHS.includes(verificationCode.length)}
               loading={isLoading}
             >
               {isLoading ? 'Verifying...' : 'Verify Email'}

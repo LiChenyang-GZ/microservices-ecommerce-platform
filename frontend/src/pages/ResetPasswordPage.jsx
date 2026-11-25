@@ -38,7 +38,9 @@ const ResetPasswordPage = () => {
   }, [location]);
 
   const handleChange = (e) => {
-    const { name, value } = e.target;
+    const { name } = e.target;
+    // The code: digits only (spaces from a pasted code go too), at most 10 (Obsidian 70)
+    const value = name === 'code' ? e.target.value.replace(/\D/g, '').slice(0, 10) : e.target.value;
     setFormData(prev => ({
       ...prev,
       [name]: value
@@ -63,8 +65,8 @@ const ResetPasswordPage = () => {
     
     if (!formData.code) {
       newErrors.code = 'Please enter verification code';
-    } else if (!/^\d{6}$/.test(formData.code)) {
-      newErrors.code = 'Verification code must be 6 digits';
+    } else if (!/^(\d{6}|\d{10})$/.test(formData.code)) { // 6 only for codes sent before the release (review 71 🟡1)
+      newErrors.code = 'Verification code must be 10 digits';
     }
     
     if (!formData.newPassword) {
@@ -204,10 +206,12 @@ const ResetPasswordPage = () => {
             label="Verification Code"
             value={formData.code}
             onChange={handleChange}
-            placeholder="Enter 6-digit verification code"
+            placeholder="Enter 10-digit verification code"
             error={errors.code}
             disabled={isLoading}
             required
+            inputMode="numeric"
+            autoComplete="one-time-code"
           />
           
           <Input

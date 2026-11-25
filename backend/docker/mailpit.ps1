@@ -1,4 +1,4 @@
-# Activating a new account in the scripts (A11). Since A11 store's activate needs the 6-digit code from the
+# Activating a new account in the scripts (A11). Since A11 store's activate needs the code (10 digits) from the
 # registration email, so the scripts do what the registration page does: ask store to send a code (store asks
 # email, rate limits, Obsidian 54), read the code from Mailpit (the fake SMTP server compose and kind send mail
 # to), and hand it to store's activate.
@@ -41,7 +41,7 @@ function Confirm-ShopperEmail([string]$Email, [string]$Kind) {
         while (-not $code) {
             try {
                 $text = Get-MailpitText $mailpit $Email
-                if ($text -match 'Code is: (\d{6})') { $code = $Matches[1] }
+                if ($text -match 'Code is: (\d+)') { $code = $Matches[1] }
             } catch {
                 if ((Get-Date) -gt $deadline) { throw } # kind: the port-forward may not be up yet
             }

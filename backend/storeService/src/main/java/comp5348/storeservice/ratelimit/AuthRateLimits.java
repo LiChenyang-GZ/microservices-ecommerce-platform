@@ -15,7 +15,7 @@ import java.util.Optional;
  * The limits on store's public sign-up and log-in endpoints (Obsidian 54, "具体规则").
  *
  *   send-verification, forgot-password: 3 per email per 15 minutes; 20 per IP per hour
- *   activate, reset-password:           20 per IP per 15 minutes
+ *   activate, reset-password:           20 per IP per 15 minutes; 5 per IP + email per 15 minutes (Obsidian 70)
  *   login:                              10 per IP + account per 15 minutes, cleared by a successful login;
  *                                       100 per IP per 15 minutes
  *
@@ -23,7 +23,12 @@ import java.util.Optional;
  * the email's quota (R9). Each returns the blocking decision, or empty when the request may go on.
  * If Redis does not answer, the rest of the checks are skipped and the request goes on (R19).
  *
- * Known gap (54, R29): someone with many addresses can still use up a victim's email quota or burn their code.
+ * The IP + email limit is what stops one caller guessing a code: email no longer kills a code after wrong guesses
+ * (it did, A11 V13, and then anyone could kill the owner's code, Obsidian 58 Q16). Codes are 10 digits, so even
+ * many IPs at 5 guesses each have a tiny chance; if Redis is down (R19) only the code's length is left.
+ *
+ * Known gap (54, R29): someone can still use up a victim's 3 sends per 15 minutes. Every code those sends make
+ * goes to the victim's inbox and nobody else can kill it now, so the owner uses the newest one.
  */
 @Component
 public class AuthRateLimits {
@@ -34,6 +39,7 @@ public class AuthRateLimits {
     static final int SENDS_PER_EMAIL = 3;
     static final int SENDS_PER_IP = 20;
     static final int CODE_CHECKS_PER_IP = 20;
+    static final int CODE_CHECKS_PER_IP_AND_EMAIL = 5;
     static final int LOGINS_PER_IP_AND_ACCOUNT = 10;
     static final int LOGINS_PER_IP = 100;
 
@@ -51,12 +57,12 @@ public class AuthRateLimits {
         return ipThenEmail("forgot-password", ip, email);
     }
 
-    public Optional<Decision> activate(String ip) {
-        return blocking(limiter.hit("rl:activate:ip:" + ip, CODE_CHECKS_PER_IP, FIFTEEN_MINUTES));
+    public Optional<Decision> activate(String ip, String email) {
+        return codeCheck("activate", ip, email);
     }
 
-    public Optional<Decision> resetPassword(String ip) {
-        return blocking(limiter.hit("rl:reset-password:ip:" + ip, CODE_CHECKS_PER_IP, FIFTEEN_MINUTES));
+    public Optional<Decision> resetPassword(String ip, String email) {
+        return codeCheck("reset-password", ip, email);
     }
 
     /**
@@ -83,6 +89,20 @@ public class AuthRateLimits {
             return blocking(byIp);
         }
         return blocking(limiter.hit("rl:" + endpoint + ":email:" + fingerprint(email), SENDS_PER_EMAIL, FIFTEEN_MINUTES));
+    }
+
+    /**
+     * A code check: the IP first (20), then this IP + this email (5). A request blocked by its IP does not count
+     * against the pair, as in ipThenEmail (R9). Every attempt counts, right or wrong: the right code is used up
+     * anyway, so there is nothing to clear.
+     */
+    private Optional<Decision> codeCheck(String endpoint, String ip, String email) {
+        Decision byIp = limiter.hit("rl:" + endpoint + ":ip:" + ip, CODE_CHECKS_PER_IP, FIFTEEN_MINUTES);
+        if (byIp.outcome() != RateLimiter.Outcome.ALLOWED) {
+            return blocking(byIp);
+        }
+        return blocking(limiter.hit("rl:" + endpoint + ":ip-email:" + ip + ":" + fingerprint(email),
+                CODE_CHECKS_PER_IP_AND_EMAIL, FIFTEEN_MINUTES));
     }
 
     private static String loginKey(String ip, String identifier) {

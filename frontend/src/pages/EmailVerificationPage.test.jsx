@@ -38,7 +38,7 @@ function renderPage() {
 }
 
 async function submitCode(code) {
-    fireEvent.change(screen.getByPlaceholderText('Enter 6-digit verification code'), { target: { value: code } });
+    fireEvent.change(screen.getByPlaceholderText('Enter 10-digit verification code'), { target: { value: code } });
     await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: 'Verify Email' }));
     });
@@ -54,9 +54,9 @@ test('submitting the code activates through store with the email and the code, a
     emailAPI.verifyCode.mockResolvedValue({ success: true });
     renderPage();
 
-    await submitCode('123456');
+    await submitCode('1234567890');
 
-    expect(userAPI.activateAccount).toHaveBeenCalledWith(EMAIL, '123456');
+    expect(userAPI.activateAccount).toHaveBeenCalledWith(EMAIL, '1234567890');
     expect(emailAPI.verifyCode).not.toHaveBeenCalled();
     expect(screen.getByText(/Account activated, please login/)).toBeInTheDocument();
 });
@@ -67,10 +67,48 @@ test('a wrong code shows the message store sends back', async () => {
     });
     renderPage();
 
-    await submitCode('000000');
+    await submitCode('0000000000');
 
     expect(screen.getByText('Verification code is invalid or expired')).toBeInTheDocument();
     expect(emailAPI.verifyCode).not.toHaveBeenCalled();
+});
+
+// 别人的错猜（Obsidian 70 号 G9）：码改成 10 位数字。粘贴进来的空格、横杠去掉，最多 10 位；不到 10 位不能提交。
+// 红灯：页面只收 6 位（maxLength 6、slice(0, 6)），提示也写 6 位。
+test('the code box takes 10 digits, drops spaces, and Verify stays off for a length that is neither 6 nor 10', async () => {
+    userAPI.activateAccount.mockResolvedValue({ success: true, message: 'Account activated successfully' });
+    renderPage();
+    const box = screen.getByPlaceholderText('Enter 10-digit verification code');
+    const verify = screen.getByRole('button', { name: 'Verify Email' });
+
+    fireEvent.change(box, { target: { value: '12345678' } }); // 6 位也能交（过渡期，71 号 🟡1），8 位不行
+    expect(verify).toBeDisabled();
+
+    fireEvent.change(box, { target: { value: '12345 67890 99' } });
+    expect(box).toHaveValue('1234567890');
+    expect(verify).toBeEnabled();
+    expect(screen.getByText(/enter the 10-digit verification code/)).toBeInTheDocument();
+});
+
+// 审查 🟡1（Obsidian 71 号）：上线那几分钟里还有 6 位码（email 照样认，G7）。页面过渡期收 6 或 10 位，
+// 这样前端可以先上、email 后上，没人卡住。红灯：6 位时按钮是灰的。
+test('during the switch a 6-digit code can still be submitted', async () => {
+    userAPI.activateAccount.mockResolvedValue({ success: true, message: 'Account activated successfully' });
+    renderPage();
+
+    await submitCode('123456');
+
+    expect(userAPI.activateAccount).toHaveBeenCalledWith(EMAIL, '123456');
+});
+
+// 审查 🟡3（71 号）：B' 选数字，一半理由是手机弹数字键盘；系统还能提示填入邮件里的码。
+// 红灯：Input 组件不转发 inputMode / autoComplete，码框是全键盘。
+test('the code box asks phones for a number pad and offers the emailed code', () => {
+    renderPage();
+    const box = screen.getByPlaceholderText('Enter 10-digit verification code');
+
+    expect(box).toHaveAttribute('inputmode', 'numeric');
+    expect(box).toHaveAttribute('autocomplete', 'one-time-code');
 });
 
 // 限流（Obsidian 54 号 R23）：重发也找 store 要码，不直接调 email（email 没有公开接口了）。
