@@ -207,11 +207,12 @@ class VerificationCodeRulesTest {
     }
 
     /**
-     * 5 个错码和对的码同时到（70 号 G1）：错码不碰码，对的那个成功。以前这里测的是"5 个错码同时到，计数一个不丢、码作废"；
-     * 现在错码不计数了，锁只用来保证对的码只能用一次（上一条）。现在：红（码被猜死，对的码失败）。
+     * 5 个错码同时到之后，对的码照样能用（70 号 G1）。以前这里测的是"5 个错码同时到，计数一个不丢、码作废"；
+     * 现在错码不计数了，锁只用来保证对的码只能用一次（上一条）。红灯时：红（码被猜死，对的码失败）。
+     * 审查 🟡4（71 号）：以前的名字说"错码和对码同时到"，其实对码是之后才验的，改了名。
      */
     @Test
-    void wrongGuessesAtOnceWithTheRightCode_theRightOneSucceeds() throws Exception {
+    void afterConcurrentWrongGuesses_theRightCodeStillWorks() throws Exception {
         String email = newEmail();
         String code = emailService.sendRegistrationVerificationCode(email);
 

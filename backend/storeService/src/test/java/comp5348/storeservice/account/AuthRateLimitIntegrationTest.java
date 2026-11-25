@@ -292,6 +292,40 @@ class AuthRateLimitIntegrationTest extends StoreHttpTest {
         assertTooMany(resetPassword("10.0.70.3", email), 15 * 60);
     }
 
+    /** 审查 🟡4（71 号）：activate 也一样，大小写 / 空格不能绕开（以后有人给 activate 另写键漏了归一，这条会红）。 */
+    @Test
+    void activate_caseAndSpacesDoNotGetAroundTheIpAndEmailLimit() throws Exception {
+        Account account = newAccount(false);
+        emailSaysEveryCodeIsWrong();
+        String email = account.getEmail();
+
+        for (int i = 0; i < 5; i++) {
+            activate("10.0.71.1", i % 2 == 0 ? email : " " + email.toUpperCase() + " ");
+        }
+        assertTooMany(activate("10.0.71.1", email), 15 * 60);
+    }
+
+    /**
+     * 审查 🟡4（71 号），R9：被 IP 挡住的请求不用掉"IP + 邮箱"的 5 次。先用 4 个别的邮箱把这个 IP 的 20 次用完，
+     * 再对邮箱 X 试 3 次（都是 IP 挡的 429）→ Redis 里没有 X 的那一对计数。改成"先记这一对再记 IP"会红。
+     */
+    @Test
+    void activate_blockedByIp_doesNotUseTheIpAndEmailQuota() throws Exception {
+        emailSaysEveryCodeIsWrong();
+        for (int a = 0; a < 4; a++) {
+            Account other = newAccount(false);
+            for (int i = 0; i < 5; i++) {
+                activate("10.0.71.2", other.getEmail());
+            }
+        }
+        Account x = newAccount(false);
+        for (int i = 0; i < 3; i++) {
+            assertTooMany(activate("10.0.71.2", x.getEmail()), 15 * 60);
+        }
+
+        assertThat(redis.keys("rl:activate:ip-email:10.0.71.2:*")).as("这个 IP 的 pair 键只有那 4 个邮箱的").hasSize(4);
+    }
+
     /**
      * G5（Q16 端到端里 store 这一半）：抢注的人从 IP A 把这个邮箱的 5 次用完，主人从 IP B 拿信箱里对的码重置 → 成功。
      * email 那一半（A 的错猜没把码猜死）在 email 的 VerificationCodeRulesTest G1。现在：红在 A 的第 6 次（还是 400）。

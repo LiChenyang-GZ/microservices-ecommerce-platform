@@ -58,11 +58,30 @@ test('a 10-digit code pasted with spaces is sent as 10 digits', async () => {
     expect(screen.getByText('Password Reset Successful!')).toBeInTheDocument();
 });
 
-test('a 6-digit code is not sent and the page asks for 10 digits', async () => {
+// 审查 🟡1（Obsidian 71 号）：过渡期 6 位码（上线前发出的，email 照样认）也能交。红灯：正则只认 10 位。
+test('during the switch a 6-digit code is still sent', async () => {
+    userAPI.resetPassword.mockResolvedValue({ success: true, message: 'Password reset successful' });
     renderPage();
 
     await fillAndSubmit('123456');
 
+    expect(userAPI.resetPassword).toHaveBeenCalledWith(EMAIL, '123456', 'new-password');
+});
+
+test('a code of another length is not sent and the page says how long it is', async () => {
+    renderPage();
+
+    await fillAndSubmit('12345678');
+
     expect(userAPI.resetPassword).not.toHaveBeenCalled();
     expect(screen.getByText('Verification code must be 10 digits')).toBeInTheDocument();
+});
+
+// 审查 🟡3（71 号）：手机弹数字键盘、系统提示填入邮件里的码。红灯：Input 不转发这两个属性。
+test('the code box asks phones for a number pad and offers the emailed code', () => {
+    renderPage();
+    const box = screen.getByPlaceholderText('Enter 10-digit verification code');
+
+    expect(box).toHaveAttribute('inputmode', 'numeric');
+    expect(box).toHaveAttribute('autocomplete', 'one-time-code');
 });
