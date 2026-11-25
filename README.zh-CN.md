@@ -44,7 +44,7 @@
 | 毒消息不能堵住分区，短暂故障不能丢事件 | 失败分两种。解析不了的消息直接进 `<topic>.DLT`；已知的暂时性故障（数据库挂了、锁超时）原地退避重试，直到恢复为止，这期间分区停住等待，保证同一订单的顺序；其他错误重试 5 次后进 DLT 并打 `ALERT` 日志。Go 和 Java 写一样的 DLT 头（ADR-08）。 |
 | 只有 store 能调 bank、delivery 的 `/internal` 和 email 的找回密码 | 每个被调方一把共享密钥（HTTP 头 `X-Service-Token` / gRPC metadata `x-service-token`），常数时间比较，没配就不启动。store 给每个被调方只发它那一把；被拒时原来的结果不变（付款仍是 UNKNOWN，不会变成 REJECTED），另外打 `ALERT *_auth_failed`。Kubernetes 上还有 NetworkPolicy 只让 store 连 bank 的 gRPC 端口（ADR-23，[学习文档 10](docs/learning/10-service-credentials.zh-CN.md)）。 |
 | 用户只能动自己的订单，管理接口要管理员 | store 除了注册、登录、找回密码和商品目录都要登录。订单归属在 service 层查，别人的订单回 404（和不存在一样），订单号没法被试探。JWT 带角色（USER / ADMIN，没有就是 USER）；管理页的数据、库存、价格、退款和 delivery 的 DLQ 要 ADMIN。第一个管理员来自 `ADMIN_EMAIL` / `ADMIN_PASSWORD`（ADR-24，[学习文档 11](docs/learning/11-login-ownership-admin-role.zh-CN.md)）。 |
-| 账号能用之前先证明邮箱 | 激活要注册邮件里的验证码，由 store 自己去问 email；email 的 `verify-code` 只给 store。码一码一用途，猜错 5 次或重发新码就作废，校验时锁行。本地所有邮件发到 Mailpit，脚本从那里读码。没激活的账号不占邮箱：别人先注册了，主人用找回密码认领，密码是主人自己设的（ADR-25，[学习文档 12](docs/learning/12-activation-code.zh-CN.md)）。 |
+| 账号能用之前先证明邮箱 | 激活要注册邮件里的验证码，由 store 自己去问 email；email 的 `verify-code` 只给 store。码是 10 位数字、一码一用途；用过、过期或重发了新码就作废，但猜错不作废，所以别人猜不死你的码；同一地址对同一邮箱 15 分钟只能校验 5 次（ADR-30）。校验时锁行。本地所有邮件发到 Mailpit，脚本从那里读码。没激活的账号不占邮箱：别人先注册了，主人用找回密码认领，密码是主人自己设的（ADR-25，[学习文档 12](docs/learning/12-activation-code.zh-CN.md)）。 |
 | 注册、登录、找回密码不能被刷 | store 的 5 个公开账号接口都限流（规则见下表）。计数存在 Redis，固定窗口：`INCR` 和第一次的 `PEXPIRE` 在同一个 Lua 脚本里执行，不会留下没有过期时间的键。超了回 429 和 `Retry-After`。验证码由浏览器向 store 要，store 只在账号存在且没激活时才让 email 发；email 不再有公开接口。客户端地址取 `X-Forwarded-For` 的最后一个值，也就是入口写的那个（nginx 覆盖这个头，Envoy 往后追加）；Tomcat 不碰这个头（`server.forward-headers-strategy=none`），否则 Spring Boot 在 Kubernetes 上会信客户端伪造的值（在 kind 上发现的）。Redis 挂了 store 照常服务、不限流，打 `ALERT rate_limit_unavailable`（ADR-26，[学习文档 13](docs/learning/13-rate-limits.zh-CN.md)）。 |
 | RabbitMQ 挂着时丢了配送任务 | 场景 05 发现：RabbitMQ 挂着时建的配送单会永远停在 CREATED。现在有扫表任务：非终态、60 秒没动的配送单会被重发任务；先用条件 `UPDATE` 认领，两个实例不会都重发（[学习文档 09](docs/learning/09-stuck-delivery-job-sweeper.zh-CN.md)）。 |
 
@@ -55,7 +55,7 @@
 | 接口（`/api/user/...`） | 按什么数 | 上限 |
 |---|---|---|
 | `send-verification`、`forgot-password` | 先数客户端地址，过了再数邮箱 | 同一地址 1 小时 20 次；同一邮箱 15 分钟 3 次 |
-| `activate`、`reset-password` | 客户端地址 | 15 分钟 20 次 |
+| `activate`、`reset-password` | 先数客户端地址，过了再数地址 + 邮箱 | 同一地址 15 分钟 20 次；同一地址 + 邮箱 15 分钟 5 次 |
 | `login` | 客户端地址 + 账号 | 15 分钟 10 次，登录成功就清零 |
 | `login` | 客户端地址 | 15 分钟 100 次 |
 
@@ -133,15 +133,15 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
 
 - [docs/learning/](docs/learning/)：每次改动一篇，讲问题、复现它的失败测试、修法和取舍（中英文各一份）。
 - 模块说明：[contracts](backend/contracts/README.zh-CN.md)、[delivery](backend/deliveryService/README.zh-CN.md)、[tracking](backend/trackingService/README.zh-CN.md)、[k8s](k8s/README.zh-CN.md)、[场景脚本](backend/docker/scenarios/README.zh-CN.md)。
-- [docs/adr/](docs/adr/README.zh-CN.md)：架构决策记录 ADR-01 到 ADR-29（中英文），以及代码注释引用的 8 条可靠性规则。
+- [docs/adr/](docs/adr/README.zh-CN.md)：架构决策记录 ADR-01 到 ADR-30（中英文），以及代码注释引用的 8 条可靠性规则。
 - [docs/legacy/](docs/legacy/)：原课程项目（只有 RabbitMQ 的版本）留下的笔记。
 
 ## 已知限制和下一步
 
 - **服务间鉴权用共享密钥，不是 mTLS**（ADR-23）：bank、delivery 的 `/internal/...`、email 的找回密码接口只接受带了被调方自己那把凭据的调用；每个服务没配自己的凭据就不启动。没有自动轮换（改 `backend/.env` / Secret 里的值，两边一起重启），`email_queue` 这条路只靠 RabbitMQ 账号挡。
-- **用户和管理员**（鉴权 PR ②、③）：store 除了注册、登录、找回密码和商品目录，都要登录；用户只能查、取消、支付自己的订单。管理接口（全站订单、仓库和库存、商品和价格、退款、delivery 的 DLQ）要 JWT 里带 ADMIN 角色。第一个管理员来自 `ADMIN_EMAIL` / `ADMIN_PASSWORD`。角色写在 JWT 里，在库里改了角色要等用户重新登录才生效（token 有效 24 小时）。激活要注册邮件里的验证码：store 拿去问 email；一个码猜错 5 次、或者重发了新码，就作废。
+- **用户和管理员**（鉴权 PR ②、③）：store 除了注册、登录、找回密码和商品目录，都要登录；用户只能查、取消、支付自己的订单。管理接口（全站订单、仓库和库存、商品和价格、退款、delivery 的 DLQ）要 JWT 里带 ADMIN 角色。第一个管理员来自 `ADMIN_EMAIL` / `ADMIN_PASSWORD`。角色写在 JWT 里，在库里改了角色要等用户重新登录才生效（token 有效 24 小时）。激活要注册邮件里的 10 位验证码：store 拿去问 email；重发了新码旧码就作废，猜错不作废（ADR-30）。
 - **限流**（只在 store；Redis 里的固定窗口）。还挡不住的：
-  - 就算只用一个地址，也还是能把别人的码耗掉（码猜错 5 次就作废，不管是谁猜的），或者用完那个邮箱 15 分钟 3 封信的额度，让对方一段时间内注册 / 找回密码失败（猜错的次数还没有按邮箱数）；
+  - 别人还是能用完你邮箱 15 分钟 3 封信的额度，你自己要码会是 429；但他触发的每封码都进你的信箱、没人能猜死（ADR-30），用最新那封就行。和你共用公网地址的人能用完这个地址对你邮箱的 5 次校验，让你等 15 分钟。Redis 挂着时没有限流，挡猜码的只剩码的长度（10¹⁰）；
   - 很多地址一起猜密码（要验证码或异常检测）；
   - 注册接口本身不限，能批量建垃圾账号（建出来激活不了，每个 15 分钟最多 3 封信）；
   - 固定窗口在边界上能连用两个窗口的额度；
@@ -149,7 +149,7 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
   - 很多人共用一个公网地址（学校 / 公司网、手机运营商的 NAT）时共用按地址的额度，一个人刷，大家一起被挡；
   - IPv6 下一个人通常有一整个 /64，按地址的限制对他不起作用；还没按 /64 归一，Redis 也没设 `maxmemory`（都是上云前要做的）；
   - `send-verification` 对所有邮箱都回 200，但"有账号、没激活"的要等 email 发完，会慢一些，能看出哪些邮箱注册了没激活（注册和登录接口本来就会说，没有多泄露）；
-  - 别人还是能先用你的邮箱注册；你用找回密码认领（密码是你设的，账号随之激活），但用户名还是他起的；而且只要他一直耗掉这个邮箱的码（见第一条），认领也会失败。
+  - 别人还是能先用你的邮箱注册；你用找回密码认领（密码是你设的，账号随之激活），但用户名还是他起的。（ADR-30 以前他还能一直把这个邮箱的码猜死、堵住认领；现在猜错不作废码了。）
 
   Redis 挂着的时候不限流（fail-open，`ALERT rate_limit_unavailable`），每个请求最多多等约 0.5 秒（登录成功约 1 秒：计数一次、清零一次）。上云后 Envoy 前面如果还有负载均衡，`X-Forwarded-For` 的最后一个值就成了负载均衡的地址，到时要再核对客户端地址的规则（写在 `ClientIp` 里）。
 - **因为键冲突停住的扣款 / 退款要等人处理**（ADR-29）：键带着不同的请求回来时 bank 回 `KEY_CONFLICT`；store 把 payment 记成 `PAY_UNKNOWN` / `REFUND_UNKNOWN`，告警一次，每 10 分钟重发同一个请求，直到有人把任务改对（步骤写在 `PaymentService#onPayKeyConflict` / `#onRefundKeyConflict`）。bank 要先于 store 发布：新 store 配老 bank，冲突还是 `REJECTED`。

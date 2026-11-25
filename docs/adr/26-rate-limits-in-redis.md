@@ -2,7 +2,7 @@
 
 **English** | [中文](26-rate-limits-in-redis.zh-CN.md)
 
-**Status:** Accepted, amended by 27 (the squatted-address consequence). Amends ADR-23 (email has no public endpoint left) and ADR-25 (a code is asked from store; the "no rate limit yet" consequence).
+**Status:** Accepted, amended by 27 (the squatted-address consequence) and 30 (`activate` / `reset-password` also count per IP + email; codes can no longer be burned). Amends ADR-23 (email has no public endpoint left) and ADR-25 (a code is asked from store; the "no rate limit yet" consequence).
 
 ## Context
 After ADR-25 an account needed the emailed code, but nothing limited how often anyone could ask:

@@ -2,7 +2,7 @@
 
 [English](25-activation-needs-the-emailed-code.md) | **中文**
 
-**状态：** 已采纳，由 26 补充（验证码改向 store 要；限流），由 27 补充（找回密码能认领没激活的账号）。修订 ADR-23（email 的 `verify-code` 不再公开）和 ADR-24（激活现在能证明邮箱）。
+**状态：** 已采纳，由 26 补充（验证码改向 store 要；限流），由 27 补充（找回密码能认领没激活的账号），由 30 补充（码改 10 位，猜错不再作废）。修订 ADR-23（email 的 `verify-code` 不再公开）和 ADR-24（激活现在能证明邮箱）。
 
 ## 背景
 ADR-24 之后，store 要登录、查订单归属，但"你是谁"的起点还是一个没证明过的邮箱。`POST /api/user/activate` 只收 `{email}`。验证页先拿码去调 email 公开的 `verify-code`，再告诉 store"激活这个地址"；store 看不到第一步有没有发生。所以任何人都能用别人的邮箱注册，再发一个请求就激活（场景 A11）。

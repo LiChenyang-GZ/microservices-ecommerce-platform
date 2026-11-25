@@ -2,7 +2,7 @@
 
 **English** | [中文](25-activation-needs-the-emailed-code.zh-CN.md)
 
-**Status:** Accepted, amended by 26 (a code is asked from store; rate limits) and 27 (a password reset claims an unverified account). Amends ADR-23 (email's `verify-code` is no longer public) and ADR-24 (activation now proves the address).
+**Status:** Accepted, amended by 26 (a code is asked from store; rate limits) and 27 (a password reset claims an unverified account), and by 30 (codes are 10 digits and a wrong guess no longer kills them). Amends ADR-23 (email's `verify-code` is no longer public) and ADR-24 (activation now proves the address).
 
 ## Context
 After ADR-24, store required a login and checked who owned each order, but "who you are" still started with an unproved email address. `POST /api/user/activate` took only `{email}`. The verification page checked the code with email's public `verify-code`, then told store "activate this address"; store could not tell whether the first step had happened. So anyone could register an account under someone else's address and activate it with one request (scenario A11).
