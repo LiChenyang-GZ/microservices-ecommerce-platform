@@ -2,7 +2,7 @@
 
 **English** | [中文](27-password-reset-claims-unverified-account.zh-CN.md)
 
-**Status:** Accepted. Amends ADR-25 ("an unactivated account keeps its email") and ADR-26 (the "someone can still sign up first" consequence).
+**Status:** Accepted, amended by 30 (the claim can no longer be blocked by guessing the reset code dead). Amends ADR-25 ("an unactivated account keeps its email") and ADR-26 (the "someone can still sign up first" consequence).
 
 ## Context
 Sign-up creates an account before the address is proved (ADR-25). So anyone could register someone else's address with a password of their own. They could not activate it, but the row held the address for good:

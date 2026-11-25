@@ -5,6 +5,7 @@
 > Commits. PR #33: red `72d2484` → green `9180c61`; found on kind, red `ef5ecaa` → green `77e7021`; after the review red `d534262` → green `a828678`.
 > How it was found: ADR-25's review (activation code) recorded "no rate limit yet" as the next step.
 > Replay time: **45 minutes**
+> **Changed since** (note 17, ADR-30): `activate` and `reset-password` also count 5 per IP + email, and codes can no longer be burned; the guessing arithmetic below uses the old "5 guesses per code".
 > Before this: [12 · Activation needs the emailed code](12-activation-code.md) (the code's own rules; this note is about how often anyone may ask for or try one).
 
 ---

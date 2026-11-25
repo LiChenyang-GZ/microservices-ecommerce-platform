@@ -5,6 +5,7 @@
 > Commits. PR #31: red `4d6cdef` → green `0cb47b3`, `f762b70`; after the review red `ba883eb` → green `44de260`.
 > How it was found: while writing auth PR 2's failure table (scenario A11), recorded as "not in this PR".
 > Replay time: **40 minutes**
+> **Changed since** (note 17, ADR-30): codes are 10 digits and a wrong guess no longer kills them; "5 wrong guesses and the code is dead" below is how it was. The guess limit is now store's 5 per IP + email.
 > Before this: [11 · Login, ownership and the admin role](11-login-ownership-admin-role.md) (who may touch which order; this note is about proving who you are in the first place).
 
 ---

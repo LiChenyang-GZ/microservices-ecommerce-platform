@@ -32,11 +32,12 @@ ADR-01 to ADR-14 were written before the redesign was built. Code comments refer
 | [22](22-grpc-result-mapping.md) | How a gRPC reply from bank maps to succeeded, rejected or unknown | Accepted, amended by 23 |
 | [23](23-service-credentials.md) | Calls between services carry a shared secret, one per called service | Accepted, amended by 25, 26 |
 | [24](24-login-ownership-admin-role.md) | Store requires a login, users touch only their own orders, admin endpoints need an admin role | Accepted, amended by 25 |
-| [25](25-activation-needs-the-emailed-code.md) | Activation needs the emailed code, and store checks it with email | Accepted, amended by 26, 27 |
-| [26](26-rate-limits-in-redis.md) | Rate limits on store's public account endpoints, counted in Redis | Accepted, amended by 27 |
-| [27](27-password-reset-claims-unverified-account.md) | An unverified account does not hold its address: a password reset claims it | Accepted |
+| [25](25-activation-needs-the-emailed-code.md) | Activation needs the emailed code, and store checks it with email | Accepted, amended by 26, 27, 30 |
+| [26](26-rate-limits-in-redis.md) | Rate limits on store's public account endpoints, counted in Redis | Accepted, amended by 27, 30 |
+| [27](27-password-reset-claims-unverified-account.md) | An unverified account does not hold its address: a password reset claims it | Accepted, amended by 30 |
 | [28](28-a-retry-sends-the-first-request.md) | A retried charge sends exactly the accounts of its first send | Accepted, amended by 29 |
 | [29](29-key-conflict-is-not-a-failure.md) | A key conflict is not a failure: bank says KEY_CONFLICT, store holds it as unknown | Accepted |
+| [30](30-codes-survive-wrong-guesses.md) | Codes are long enough to survive wrong guesses; store limits guesses per IP + email | Accepted |
 
 ## Reliability rules
 
