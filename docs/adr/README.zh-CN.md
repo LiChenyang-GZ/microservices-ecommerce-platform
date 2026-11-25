@@ -23,7 +23,7 @@ ADR-01 到 ADR-14 是动手之前写的，代码注释按编号引用（"ADR-06"
 | [13](13-kubernetes-single-entry.zh-CN.md) | 部署在 Kubernetes 上，只有一个统一入口 | 已采纳，入口由 15 决定 |
 | [14](14-out-of-scope.zh-CN.md) | 这次设计不动的东西 | 已采纳 |
 | [15](15-gateway-api-allowlist-entry.zh-CN.md) | 统一入口用 Gateway API（Envoy Gateway），按白名单转发 | 已采纳，由 23 补充 |
-| [16](16-unguessable-idempotency-keys.zh-CN.md) | 幂等键带随机部分，bank 比对请求内容 | 已采纳，被 28 修订 |
+| [16](16-unguessable-idempotency-keys.zh-CN.md) | 幂等键带随机部分，bank 比对请求内容 | 已采纳，被 28、29 修订 |
 | [17](17-probes-and-replicas.zh-CN.md) | 探针只检查服务自己；store 只跑一个副本 | 已采纳 |
 | [18](18-stuck-delivery-sweeper.zh-CN.md) | 扫表补发：重发卡住不动的配送任务 | 已采纳 |
 | [19](19-shared-event-contract.zh-CN.md) | Java 和 Go 共用一份事件契约 | 已采纳 |
@@ -35,7 +35,8 @@ ADR-01 到 ADR-14 是动手之前写的，代码注释按编号引用（"ADR-06"
 | [25](25-activation-needs-the-emailed-code.zh-CN.md) | 激活要邮件里的验证码，由 store 去问 email | 已采纳，由 26、27 补充 |
 | [26](26-rate-limits-in-redis.zh-CN.md) | store 的公开账号接口限流，计数存在 Redis | 已采纳，由 27 补充 |
 | [27](27-password-reset-claims-unverified-account.zh-CN.md) | 没激活的账号不占邮箱：找回密码就是认领 | 已采纳 |
-| [28](28-a-retry-sends-the-first-request.zh-CN.md) | 扣款重试只发第一次发送时的账号 | 已采纳 |
+| [28](28-a-retry-sends-the-first-request.zh-CN.md) | 扣款重试只发第一次发送时的账号 | 已采纳，被 29 修订 |
+| [29](29-key-conflict-is-not-a-failure.zh-CN.md) | 键冲突不是失败：bank 回 KEY_CONFLICT，store 当成"未知" | 已采纳 |
 
 ## 可靠性规则
 

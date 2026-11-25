@@ -2,7 +2,7 @@
 
 [English](16-unguessable-idempotency-keys.md) | **中文**
 
-**状态：** 已采纳（修订 ADR-04）。被 ADR-28 修订：因为 bank 比对内容，重试必须发第一次发送时的账号。
+**状态：** 已采纳（修订 ADR-04）。被 ADR-28 修订：因为 bank 比对内容，重试必须发第一次发送时的账号。被 ADR-29 修订：用过的键带来不同请求，现在回 `KEY_CONFLICT`，store 当成"未知"，不是拒绝。
 
 ## 背景
 最初的键是 `PAY-{paymentId}-{attempt}` 和 `REFUND-{paymentId}`，bank 只按键去重。审查发现这两点合在一起是个漏洞：键可以预测（paymentId 在界面上看得到），而 bank 对重复的键直接返回"第一次的结果"，不看内容。攻击者可以用受害者的下一个键，给自己转 0.01；store 真正扣款时拿到"已经成功"，订单变成 PAID，用户却一分钱没付。
