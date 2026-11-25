@@ -23,8 +23,8 @@ public interface EmailOutboxRepository extends JpaRepository<EmailOutbox, Long> 
     
     /**
      * The live codes of one kind for one address, locked (SELECT ... FOR UPDATE) until the transaction ends.
-     * Two guesses arriving together then take turns: the attempt counter cannot lose an update, and a right code
-     * cannot be used twice (A11, V13).
+     * Two checks arriving together then take turns, so a right code cannot be used twice (A11). Wrong guesses are
+     * no longer counted here (Obsidian 70): the only limit on guessing is store's per IP + email count.
      */
     @Lock(LockModeType.PESSIMISTIC_WRITE)
     // order by id: every transaction locks the rows in the same order, so two of them cannot deadlock (review 51 🟡6)

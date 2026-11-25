@@ -10,7 +10,9 @@ const Input = ({
   label, 
   error, 
   disabled = false,
-  required = false
+  required = false,
+  inputMode,    // e.g. "numeric": phones show a number pad (Obsidian 71)
+  autoComplete  // e.g. "one-time-code": phones offer the code from the email
 }) => {
   return (
     <div className="input-group">
@@ -30,6 +32,8 @@ const Input = ({
         className={`input-field ${error ? 'error' : ''}`}
         disabled={disabled}
         required={required}
+        inputMode={inputMode}
+        autoComplete={autoComplete}
       />
       {error && <span className="input-error">{error}</span>}
     </div>

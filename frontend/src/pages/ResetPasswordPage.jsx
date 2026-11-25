@@ -65,7 +65,7 @@ const ResetPasswordPage = () => {
     
     if (!formData.code) {
       newErrors.code = 'Please enter verification code';
-    } else if (!/^\d{10}$/.test(formData.code)) {
+    } else if (!/^(\d{6}|\d{10})$/.test(formData.code)) { // 6 only for codes sent before the release (review 71 🟡1)
       newErrors.code = 'Verification code must be 10 digits';
     }
     
@@ -210,6 +210,8 @@ const ResetPasswordPage = () => {
             error={errors.code}
             disabled={isLoading}
             required
+            inputMode="numeric"
+            autoComplete="one-time-code"
           />
           
           <Input

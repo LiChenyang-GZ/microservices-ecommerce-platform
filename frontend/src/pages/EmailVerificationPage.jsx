@@ -5,6 +5,10 @@ import Button from '../components/Button';
 import { userAPI } from '../services/api';
 import './EmailVerificationPage.css';
 
+// Codes are 10 digits (Obsidian 70). A 6-digit code sent just before the release still works at email, so for now
+// the page takes both (review 71 🟡1); accept only 10 once the release is a few minutes old.
+const ACCEPTED_CODE_LENGTHS = [6, 10];
+
 const EmailVerificationPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -140,6 +144,8 @@ const EmailVerificationPage = () => {
               error={error}
               disabled={isLoading}
               required
+              inputMode="numeric"
+              autoComplete="one-time-code"
             />
           </div>
 
@@ -153,7 +159,7 @@ const EmailVerificationPage = () => {
             <Button
               type="submit"
               variant="primary"
-              disabled={isLoading || verificationCode.length !== 10}
+              disabled={isLoading || !ACCEPTED_CODE_LENGTHS.includes(verificationCode.length)}
               loading={isLoading}
             >
               {isLoading ? 'Verifying...' : 'Verify Email'}
