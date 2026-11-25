@@ -52,8 +52,9 @@ public class EmailOutbox {
     private String verificationType; // REGISTRATION, PASSWORD_RESET, etc.
 
     /**
-     * Wrong guesses against this code (A11, V13). At MAX_FAILED_ATTEMPTS the code is marked EXPIRED.
-     * The column definition carries a default so ddl-auto=update can add it to a table that already has rows.
+     * No longer counted (Obsidian 70): a wrong guess does not kill a code any more, store limits guesses per
+     * IP + email instead. A11 (V13) counted them here. The column stays so tables that already have it keep
+     * working; its default lets ddl-auto=update add it to a table that already has rows.
      */
     @Getter
     @Setter

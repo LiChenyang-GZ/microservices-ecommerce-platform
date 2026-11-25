@@ -110,8 +110,8 @@ const EmailVerificationPage = () => {
 
   const handleChange = (e) => {
     const { value } = e.target;
-    // Only allow numbers, maximum 6 digits
-    const numericValue = value.replace(/\D/g, '').slice(0, 6);
+    // Digits only (spaces from a pasted code go too), at most 10 (Obsidian 70)
+    const numericValue = value.replace(/\D/g, '').slice(0, 10);
     setVerificationCode(numericValue);
     
     if (error) {
@@ -125,7 +125,7 @@ const EmailVerificationPage = () => {
         <div className="verification-header">
           <h1>Email Verification</h1>
           <p>We have sent a verification code to <strong>{email}</strong></p>
-          <p>Please enter the 6-digit verification code to complete registration</p>
+          <p>Please enter the 10-digit verification code to complete registration</p>
         </div>
 
         <form onSubmit={handleVerify} className="verification-form">
@@ -136,11 +136,10 @@ const EmailVerificationPage = () => {
               label="Verification Code"
               value={verificationCode}
               onChange={handleChange}
-              placeholder="Enter 6-digit verification code"
+              placeholder="Enter 10-digit verification code"
               error={error}
               disabled={isLoading}
               required
-              maxLength={6}
             />
           </div>
 
@@ -154,7 +153,7 @@ const EmailVerificationPage = () => {
             <Button
               type="submit"
               variant="primary"
-              disabled={isLoading || verificationCode.length !== 6}
+              disabled={isLoading || verificationCode.length !== 10}
               loading={isLoading}
             >
               {isLoading ? 'Verifying...' : 'Verify Email'}
