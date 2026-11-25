@@ -24,7 +24,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * 规则（54 号"具体规则"）：
  *   send-verification、forgot-password：同一邮箱 15 分钟 3 次；同一 IP 1 小时 20 次
- *   activate、reset-password：同一 IP 15 分钟 20 次
+ *   activate、reset-password：同一 IP 15 分钟 20 次；同一 IP + 同一邮箱 15 分钟 5 次（Obsidian 70 号 G4–G6）
  *   login：同一 IP + 账号 15 分钟 10 次（登录成功清零）；同一 IP 15 分钟 100 次
  *   超了：429 + Retry-After（秒）+ {"success":false,"message":"Too many attempts, ..."}
  *
@@ -211,32 +211,118 @@ class AuthRateLimitIntegrationTest extends StoreHttpTest {
 
     // ---------- activate、reset-password ----------
 
-    /** R11：同一 IP 15 分钟第 21 次激活 → 429，而且不去调 email（不耗码）。现在：照样 400，email 被调 21 次。 */
+    /**
+     * R11：同一 IP 15 分钟第 21 次激活 → 429，而且不去调 email（不耗码）。现在：照样 400，email 被调 21 次。
+     * 70 号以后同一 IP + 同一邮箱只有 5 次，所以 20 次分给 4 个账号，第 21 次换第 5 个账号也挡（挡它的是 IP）。
+     */
     @Test
     void activate_twentyFirstFromSameIp_is429_andEmailIsNotAsked() throws Exception {
-        Account account = newAccount(false);
         emailSaysEveryCodeIsWrong();
 
-        for (int i = 0; i < 20; i++) {
-            activate("10.0.11.1", account.getEmail()).andExpect(status().isBadRequest());
+        for (int a = 0; a < 4; a++) {
+            Account account = newAccount(false);
+            for (int i = 0; i < 5; i++) {
+                activate("10.0.11.1", account.getEmail()).andExpect(status().isBadRequest());
+            }
         }
-        assertTooMany(activate("10.0.11.1", account.getEmail()), 15 * 60);
+        assertTooMany(activate("10.0.11.1", newAccount(false).getEmail()), 15 * 60);
 
         FAKE_BANK.verify(20, postRequestedFor(urlEqualTo(EMAIL_VERIFY)));
     }
 
-    /** R12：同一 IP 15 分钟第 21 次重置 → 429，不调 email。现在：照样 400。 */
+    /** R12：同一 IP 15 分钟第 21 次重置 → 429，不调 email。现在：照样 400。（同 R11，分给 4 个账号） */
     @Test
     void resetPassword_twentyFirstFromSameIp_is429_andEmailIsNotAsked() throws Exception {
+        emailSaysEveryCodeIsWrong();
+
+        for (int a = 0; a < 4; a++) {
+            Account account = newAccount(true);
+            for (int i = 0; i < 5; i++) {
+                resetPassword("10.0.12.1", account.getEmail()).andExpect(status().isBadRequest());
+            }
+        }
+        assertTooMany(resetPassword("10.0.12.1", newAccount(true).getEmail()), 15 * 60);
+
+        FAKE_BANK.verify(20, postRequestedFor(urlEqualTo(EMAIL_VERIFY_RESET)));
+    }
+
+    // ---------- 70 号 G4–G6：同一 IP + 同一邮箱 15 分钟 5 次 ----------
+
+    /**
+     * G4：同一 IP 对同一邮箱第 6 次激活 → 429，不去问 email。email 那边猜错不再作废码（G1），所以一个 IP 对一个码
+     * 能猜几次就靠这一条。现在：第 6 次照样 400，email 被问 6 次。
+     */
+    @Test
+    void activate_sixthForSameIpAndEmail_is429_andEmailIsNotAsked() throws Exception {
+        Account account = newAccount(false);
+        emailSaysEveryCodeIsWrong();
+
+        for (int i = 0; i < 5; i++) {
+            activate("10.0.70.1", account.getEmail()).andExpect(status().isBadRequest());
+        }
+        assertTooMany(activate("10.0.70.1", account.getEmail()), 15 * 60);
+
+        FAKE_BANK.verify(5, postRequestedFor(urlEqualTo(EMAIL_VERIFY)));
+    }
+
+    /** G4：重置也一样。现在：第 6 次照样 400。 */
+    @Test
+    void resetPassword_sixthForSameIpAndEmail_is429_andEmailIsNotAsked() throws Exception {
         Account account = newAccount(true);
         emailSaysEveryCodeIsWrong();
 
-        for (int i = 0; i < 20; i++) {
-            resetPassword("10.0.12.1", account.getEmail()).andExpect(status().isBadRequest());
+        for (int i = 0; i < 5; i++) {
+            resetPassword("10.0.70.2", account.getEmail()).andExpect(status().isBadRequest());
         }
-        assertTooMany(resetPassword("10.0.12.1", account.getEmail()), 15 * 60);
+        assertTooMany(resetPassword("10.0.70.2", account.getEmail()), 15 * 60);
 
-        FAKE_BANK.verify(20, postRequestedFor(urlEqualTo(EMAIL_VERIFY_RESET)));
+        FAKE_BANK.verify(5, postRequestedFor(urlEqualTo(EMAIL_VERIFY_RESET)));
+    }
+
+    /** G4：邮箱换大小写、加空格不能绕开（和发码的额度一样按归一后的邮箱数，R7）。现在：照样 400。 */
+    @Test
+    void resetPassword_caseAndSpacesDoNotGetAroundTheIpAndEmailLimit() throws Exception {
+        Account account = newAccount(true);
+        emailSaysEveryCodeIsWrong();
+        String email = account.getEmail();
+
+        for (int i = 0; i < 5; i++) {
+            resetPassword("10.0.70.3", i % 2 == 0 ? email : " " + email.toUpperCase() + " ");
+        }
+        assertTooMany(resetPassword("10.0.70.3", email), 15 * 60);
+    }
+
+    /**
+     * G5（Q16 端到端里 store 这一半）：抢注的人从 IP A 把这个邮箱的 5 次用完，主人从 IP B 拿信箱里对的码重置 → 成功。
+     * email 那一半（A 的错猜没把码猜死）在 email 的 VerificationCodeRulesTest G1。现在：红在 A 的第 6 次（还是 400）。
+     */
+    @Test
+    void resetPassword_anotherIpCanStillUseTheRightCode() throws Exception {
+        Account account = newAccount(false); // 抢注的、没激活的账号：主人靠重置认领（58 号）
+        emailSaysEveryCodeIsWrong();
+        for (int i = 0; i < 5; i++) {
+            resetPassword("10.0.70.4", account.getEmail()).andExpect(status().isBadRequest());
+        }
+        assertTooMany(resetPassword("10.0.70.4", account.getEmail()), 15 * 60);
+
+        FAKE_BANK.stubFor(WireMock.post(urlEqualTo(EMAIL_VERIFY_RESET))
+                .willReturn(okJson("{\"success\":true,\"message\":\"Verification successful\"}")));
+        resetPassword("10.0.70.5", account.getEmail()).andExpect(status().isOk());
+    }
+
+    /** G6：IP A 用完了邮箱 X 的 5 次，对邮箱 Y 还能试（直到这个 IP 的 20 次）。现在：红在 X 的第 6 次（还是 400）。 */
+    @Test
+    void activate_ipThatUsedUpOneEmail_canStillTryAnother() throws Exception {
+        Account x = newAccount(false);
+        Account y = newAccount(false);
+        emailSaysEveryCodeIsWrong();
+
+        for (int i = 0; i < 5; i++) {
+            activate("10.0.70.6", x.getEmail());
+        }
+        assertTooMany(activate("10.0.70.6", x.getEmail()), 15 * 60);
+
+        activate("10.0.70.6", y.getEmail()).andExpect(status().isBadRequest());
     }
 
     // ---------- login ----------
