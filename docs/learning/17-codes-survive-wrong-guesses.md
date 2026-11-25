@@ -2,7 +2,7 @@
 
 **English** | [中文](17-codes-survive-wrong-guesses.zh-CN.md)
 
-> Commits (branch `fix/code-guess-per-ip-email`): red `e59f8f8` → green `ac371f5`.
+> Commits (branch `fix/code-guess-per-ip-email`): red `e59f8f8` → green `ac371f5`; after the review red `329ee9b` → green `2c3a050`.
 > How it was found: the squatting review (Obsidian 59, finding 🟠2), written down then as a known limit (rate limits R29).
 > Replay time: **25 minutes**
 > Before this: [12 · Activation code](12-activation-code.md), [13 · Rate limits](13-rate-limits.md), [14 · Claiming a squatted address](14-claim-by-password-reset.md).
@@ -54,10 +54,13 @@ Rate limits fail open when Redis is down (note 13). Before, the 5-guess cap in e
 The recommendation was 8 characters from a 32-letter alphabet (about 10¹²). Christy chose 10 digits: a number pad on phones and almost no page change, still 100 times better than before even against 1000 addresses.
 
 ### 4.2 What the red showed 🤖
-Two store tests I expected to be green already (another IP can still use the code; one IP can try another email) were red at their middle step: the 6th attempt was 400, not 429. And R11 / R12 (20 per IP) had to spread over 4 accounts, or they would have hit the new 5 first. The script that reads codes from Mailpit matched `\d{6}`, which would have taken the first 6 of 10 digits.
+Two store tests I expected to be green already (another IP can still use the code; one IP can try another email) were red at their middle step: the 6th attempt was 400, not 429. And R11 / R12 (20 per IP) had to spread over 4 accounts, or they would have hit the new 5 first. The script that reads codes from Mailpit matched `\d{6}`, which would have taken the first 6 of 10 digits. I also removed `maxLength={6}` thinking the browser would cut a pasted code; the review showed `Input` never passed it to the page, so it did nothing either way.
 
 ### 4.3 What the review found
-(Filled in after the review.)
+0 must-fix, 1 should-fix, 5 could-fix. No way around the IP + email key: the count normalises the email more coarsely than the database matches it, so any input that can reach a code lands on one key; and only store calls email's verify endpoints.
+- **Should-fix (written down, not code)**: the guess limit now rests on telling clients apart by address. With IPv6 (a new address per request) or behind a cloud load balancer (everyone looks like the balancer) it is gone, or turns into "5 per email for the whole site". So grouping by /64 and checking the client-address rule became preconditions for a cloud deployment.
+- **Fixed** (red `329ee9b` → green `2c3a050`): during the switch the pages take 6 or 10 digits, so the frontend can ship first; `Input` passes `inputMode` / `autoComplete`, so phones show a number pad, which was half the reason for choosing digits; two regression tests for the pair key (activate ignores case; a request blocked by its IP leaves no pair key); a test renamed to say what it checks; the `lockCodes` comment no longer mentions a counter.
+- **Written down**: the owner's own typos and 503s count too (15 minutes' wait); pages opened before the release must be reloaded; ADR-27 and notes 12 / 13 point here.
 
 ---
 

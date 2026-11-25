@@ -252,7 +252,8 @@ docs/
   - a fixed window lets a client use two windows' worth across a boundary;
   - an email outage still uses up the quota: three resends that got 503 leave the fourth waiting about 15 minutes;
   - many people behind one public address (campus or office network, a mobile carrier's NAT) share the per-address limits, so one heavy user blocks the rest;
-  - with IPv6 one person usually has a whole /64, so the per-address limits do not hold; addresses are not grouped by /64 yet, and Redis has no `maxmemory` (both to do before a cloud deployment);
+  - with IPv6 one person usually has a whole /64, so the per-address limits do not hold; addresses are not grouped by /64 yet, and Redis has no `maxmemory`. Both must be done before a cloud deployment: the per-address count is now the only limit on guessing a code (ADR-30);
+  - five code checks from one address for one email, right or wrong (typos, a 503 while email is down), mean 15 minutes' wait;
   - `send-verification` answers 200 for every address, but for an account that exists and is not active yet it waits for email to send, so it is slower; that tells which addresses signed up without activating (sign-up and log-in already say so, so nothing more is revealed);
   - someone can still register another person's address first; the owner claims it with a password reset (their own password, and the account is activated), but keeps the username the other person chose. (Until ADR-30 that person could also keep killing the address's codes and block the claim; a wrong guess no longer kills a code.)
 
