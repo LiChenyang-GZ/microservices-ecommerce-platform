@@ -115,7 +115,7 @@ Design: store calls bank over gRPC (ADR-10); idempotency keys in ADR-04; timeout
 
 **Keys are opaque to bank, and must not be guessable** (changed 2026-10-19 after the step-2 review, findings 1 and 2):
 - `{random}` is 16 hex characters from `SecureRandom`, stored on store's payment and never returned by any API. A new one for each charge attempt; retries of the same attempt reuse the same key.
-- bank compares a reused key with what it was first used for: transfer = type, from, to, amount; refund = type, original transaction. Same request → the first result. **Different request → `REJECTED` ("idempotency key conflict"), never `SUCCEEDED`**, and no money moves.
+- bank compares a reused key with what it was first used for: transfer = type, from, to, amount; refund = type, original transaction. Same request → the first result. **Different request → `KEY_CONFLICT`, never `SUCCEEDED`**, and no money moves for that call (until ADR-29 it was `REJECTED`).
 - Why: with `PAY-{paymentId}-{attempt}` anyone who could see a paymentId could use the next key first (for example a 0.01 transfer to themselves), and store's real charge would then get "already succeeded".
 
 **How to read the result** (the most important rule here):
@@ -124,9 +124,10 @@ Design: store calls bank over gRPC (ADR-10); idempotency keys in ADR-04; timeout
 |---|---|---|
 | `outcome = SUCCEEDED` | success | continue the success path |
 | `outcome = REJECTED` | definite failure (e.g. insufficient funds) | charge: mark FAILED; refund: stop + alert |
+| `outcome = KEY_CONFLICT` | the key was already used for a different request; nothing moved for this call, but the key's first request may have | **not a failure**: `PAY_UNKNOWN` / `REFUND_UNKNOWN`, one alert, the same key again every 10 minutes (ADR-29) |
 | gRPC error (`DEADLINE_EXCEEDED`, `UNAVAILABLE`, …) | **result unknown** | retry with the **same key**; after 5 tries mark `PAY_UNKNOWN` / `REFUND_UNKNOWN`. **Never treat it as a failure** |
 
-🤖: only two outcomes, SUCCEEDED / REJECTED; "unknown" is signalled by gRPC's own status codes, not by an extra field.
+🤖: bank's answers are outcomes (SUCCEEDED / REJECTED, and KEY_CONFLICT since ADR-29); "unknown" is signalled by gRPC's own status codes, not by an extra field. A store that does not know an outcome value treats it as unknown, so a new value is safe when bank ships first. **Ship bank before store** (or both in one rollout): a new store talking to an old bank still gets `REJECTED` for a conflict.
 🤖: refunds are always full refunds, so `Refund` has no amount.
 
 **Step 2 still uses HTTP** (gRPC comes in step 6). When step 2 changes bank's REST API, name request and response fields **after this proto** (camelCase in JSON: `idempotencyKey`, `fromAccount`, …). Then step 6 only swaps the protocol; no field changes.
@@ -172,6 +173,6 @@ When you add or change an event, update its example too, or `examples_coverEvery
 1. `orderId` and money amounts are strings.
 2. Java event types live in this shared module and every service uses the same copy; Go stays in sync through the example JSON. Cost: changing the contract recompiles every service, which is why only formats live here, never business logic.
 3. The exact payload fields and the `reason` values (the design only names the events).
-4. gRPC has two outcomes, SUCCEEDED / REJECTED; refunds carry no amount.
+4. gRPC had two outcomes, SUCCEEDED / REJECTED (KEY_CONFLICT added later, ADR-29); refunds carry no amount.
 5. No version field. Format changes only **add** fields and never rename or remove existing ones, so older consumers keep working. To make that true, `EventCodec` **skips fields it doesn't know**; `newFieldAddedByProducer_isIgnoredByOlderConsumer` guards this.
    - Background: `EventCodec` reads and writes JSON with **Jackson**, Spring Boot's default JSON library, which turns JSON text into Java objects and back. Its default rule is "a field that is in the JSON but not in the Java class is an error", so before the fix, one extra field made the whole message count as broken and go to the DLT. The agent writing the Go tracking service found this by checking its parser against this README.

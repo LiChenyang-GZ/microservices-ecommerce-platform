@@ -147,7 +147,8 @@ public class BankAdapter {
     }
 
     /**
-     * Status OK: only an explicit SUCCEEDED or REJECTED is bank's answer.
+     * Status OK: only an explicit SUCCEEDED, REJECTED or KEY_CONFLICT is bank's answer (KEY_CONFLICT is held as
+     * unknown by its caller, ADR-29).
      * OUTCOME_UNSPECIFIED (bank left the field out) or a value this store does not know → UNKNOWN, never REJECTED
      * (failure table row 11): REJECTED would mark the payment FAILED and let Pay Now charge again with a new key.
      */
@@ -156,6 +157,8 @@ public class BankAdapter {
             // proto3 has no null: "" means "no transaction id". Keep it null, as the HTTP version did (row 12)
             case SUCCEEDED -> BankCallResult.succeeded(transactionId.isEmpty() ? null : transactionId, null);
             case REJECTED -> BankCallResult.rejected(reason);
+            // Not REJECTED: the key's first request may have moved money (ADR-29)
+            case KEY_CONFLICT -> BankCallResult.keyConflict(reason);
             default -> BankCallResult.unknown("bank answered OK without an outcome (" + outcome + ")");
         };
     }

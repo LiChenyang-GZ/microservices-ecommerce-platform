@@ -167,6 +167,25 @@ class BankGrpcIntegrationTest {
         assertThat(balanceOf(store)).isEqualByComparingTo("0.00");
     }
 
+    /** 66 号 K2：退款键用过、原交易号不同 → KEY_CONFLICT，钱不动 */
+    @Test
+    void grpcRefund_reusedKeyDifferentOriginal_keyConflict() {
+        String buyer = newAccount("1000.00");
+        String store = newAccount("0.00");
+        TransferResponse first = bank().transfer(transfer(payKey(), buyer, store, "100.00"));
+        TransferResponse second = bank().transfer(transfer(payKey(), buyer, store, "100.00"));
+        String key = "REFUND-" + UUID.randomUUID();
+        bank().refund(RefundRequest.newBuilder().setIdempotencyKey(key)
+                .setOriginalTransactionId(first.getTransactionId()).setReason("ORDER_CANCELLED").build());
+
+        RefundResponse conflict = bank().refund(RefundRequest.newBuilder().setIdempotencyKey(key)
+                .setOriginalTransactionId(second.getTransactionId()).setReason("ORDER_CANCELLED").build());
+
+        assertThat(conflict.getOutcome()).isEqualTo(Outcome.KEY_CONFLICT);
+        assertThat(conflict.getRefundTransactionId()).isEmpty();
+        assertThat(balanceOf(buyer)).as("只退了第一笔").isEqualByComparingTo("900.00");
+    }
+
     /** 第 24 行：余额不足 → 状态 OK + REJECTED，reason 写原因。不是 gRPC 错误码。 */
     @Test
     void grpcTransfer_insufficientFunds_rejected() {
@@ -180,9 +199,12 @@ class BankGrpcIntegrationTest {
         assertThat(balanceOf(buyer)).as("钱没动").isEqualByComparingTo("50.00");
     }
 
-    /** 第 25 行：同一个键、不同内容（键被别人先用了）→ REJECTED，绝不 SUCCEEDED。 */
+    /**
+     * 第 25 行：同一个键、不同内容 → KEY_CONFLICT，绝不 SUCCEEDED，钱不动。
+     * 66 号 K1：以前回 REJECTED，store 当成"确定失败"→ Pay Now 换新键；但这个键第一次的请求可能已经扣了钱（ADR-29）。
+     */
     @Test
-    void grpcTransfer_reusedKeyDifferentContent_rejected() {
+    void grpcTransfer_reusedKeyDifferentContent_keyConflict() {
         String attacker = newAccount("10.00");
         String buyer = newAccount("1000.00");
         String store = newAccount("0.00");
@@ -191,8 +213,10 @@ class BankGrpcIntegrationTest {
 
         TransferResponse real = bank().transfer(transfer(key, buyer, store, "100.00"));
 
-        assertThat(real.getOutcome()).as("回成功的话，store 会以为收到钱了").isEqualTo(Outcome.REJECTED);
+        assertThat(real.getOutcome()).as("不能回成功（store 会以为收到钱了），也不能回拒绝（store 会换新键再扣）")
+                .isEqualTo(Outcome.KEY_CONFLICT);
         assertThat(real.getReason()).contains("Idempotency key conflict");
+        assertThat(real.getTransactionId()).isEmpty();
         assertThat(balanceOf(buyer)).isEqualByComparingTo("1000.00");
     }
 

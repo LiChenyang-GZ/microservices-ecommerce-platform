@@ -115,7 +115,7 @@ try {
 
 **键对 bank 来说是不透明的字符串，而且不能被猜到**（2026-10-19 第 2 步审查发现 1、2 之后改的）：
 - `{随机段}` 是 `SecureRandom` 生成的 16 个十六进制字符，存在 store 的 Payment 上，任何接口都不返回它。每次新的扣款尝试换一个；同一次尝试的重试用同一个键。
-- bank 见到用过的键，会和第一次的内容比对：转账比类型、付款人、收款人、金额；退款比类型、原交易。内容一样 → 返回第一次的结果；**内容不一样 → `REJECTED`（"键冲突"），绝不回 `SUCCEEDED`**，钱不动。
+- bank 见到用过的键，会和第一次的内容比对：转账比类型、付款人、收款人、金额；退款比类型、原交易。内容一样 → 返回第一次的结果；**内容不一样 → `KEY_CONFLICT`，绝不回 `SUCCEEDED`**，这一次钱不动（ADR-29 之前回的是 `REJECTED`）。
 - 为什么：键是 `PAY-{paymentId}-{attempt}` 时，看得到 paymentId 的人就能抢先用下一个键（比如给自己转 0.01），store 真正的扣款就会拿到"已经成功"。
 
 **怎么读结果**（这是最重要的一条）：
@@ -124,9 +124,10 @@ try {
 |---|---|---|
 | `outcome = SUCCEEDED` | 成功 | 走成功流程 |
 | `outcome = REJECTED` | 确定失败（比如余额不足） | 扣款：标 FAILED；退款：停下来 + 告警 |
+| `outcome = KEY_CONFLICT` | 这个键已经用于另一个请求；这一次钱没动，但这个键第一次的请求可能动过 | **不是失败**：`PAY_UNKNOWN` / `REFUND_UNKNOWN`，告警一次，每 10 分钟用同一个键再试（ADR-29） |
 | gRPC 报错（`DEADLINE_EXCEEDED`、`UNAVAILABLE` 等） | **不知道结果** | 用**同一个键**重试；5 次后标 `PAY_UNKNOWN` / `REFUND_UNKNOWN`，**绝不能当成失败** |
 
-🤖：结果只分 SUCCEEDED / REJECTED 两种，"不知道"靠 gRPC 自己的错误码表示，不再另加一个字段。
+🤖：bank 的回答用 outcome 表示（SUCCEEDED / REJECTED，ADR-29 起多了 KEY_CONFLICT），"不知道"靠 gRPC 自己的错误码表示，不再另加一个字段。store 不认识的 outcome 一律当"未知"，所以新加的值在 bank 先上线时是安全的。**bank 要先于 store 发布**（或者一次一起换）：新 store 碰上老 bank，冲突还是 `REJECTED`。
 🤖：退款总是全额退，所以 `Refund` 不带金额。
 
 **第 2 步还是 HTTP**（第 6 步才换成 gRPC）。第 2 步改 bank 的 REST 接口时，请求和返回的字段**照这个 proto 起名**（JSON 里用驼峰：`idempotencyKey`、`fromAccount`……）。这样第 6 步换 gRPC 时只换协议，字段不用动。
@@ -172,6 +173,6 @@ try {
 1. `orderId`、金额都用字符串。
 2. Java 的事件类放在共享模块里，各服务引用同一份；Go 靠示例 JSON 对齐。代价：改契约时所有服务都要重新编译。所以这里只放格式，不放业务逻辑。
 3. 各个 payload 的具体字段，以及 `reason` 的取值（设计只写了事件名）。
-4. gRPC 只有 SUCCEEDED / REJECTED 两种结果；退款不带金额。
+4. gRPC 原来只有 SUCCEEDED / REJECTED 两种结果（后来加了 KEY_CONFLICT，ADR-29）；退款不带金额。
 5. 没有加版本号字段。以后改格式只**加字段**，不改、不删已有字段，旧的消费者照样能读。为了做到这一点，`EventCodec` 会**跳过不认识的字段**，由测试 `newFieldAddedByProducer_isIgnoredByOlderConsumer` 保证。
    - 背景：`EventCodec` 用 **Jackson** 读写 JSON。Jackson 是 Spring Boot 默认的 JSON 库，负责把 JSON 文字转成 Java 对象、再转回去。它的默认规则是"JSON 里有、Java 类里没有的字段就报错"，所以修复前，消息里只要多一个字段，整条消息就会被当成坏消息送进 DLT。这个问题是写 Go tracking 的 agent 拿 README 对照它的解析代码时发现的。

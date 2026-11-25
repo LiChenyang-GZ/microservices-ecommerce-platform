@@ -20,7 +20,8 @@ import java.math.BigDecimal;
  * Both call the same BankService, so idempotency and locking are identical.
  *
  * How answers are encoded (contracts/bank.proto):
- * - bank's own answer, yes or no → status OK + outcome SUCCEEDED / REJECTED.
+ * - bank's own answer → status OK + outcome SUCCEEDED / REJECTED, or KEY_CONFLICT when the key was already used for
+ *   a different request (not a "no": the key's first request may have moved money, ADR-29).
  * - anything else (an exception) → a gRPC error status. Store reads every error status as "unknown" and retries
  *   with the same key. A business "no" must never be an error status (store would retry it forever), and an
  *   exception must never be REJECTED (store would mark the payment FAILED and Pay Now would charge with a new key).
@@ -56,7 +57,7 @@ public class BankGrpcService extends BankServiceGrpc.BankServiceImplBase {
             return;
         }
         reply(responseObserver, com.comp5348.contracts.bank.v1.TransferResponse.newBuilder()
-                .setOutcome(result.isSuccess() ? Outcome.SUCCEEDED : Outcome.REJECTED)
+                .setOutcome(outcome(result.isSuccess(), result.isKeyConflict()))
                 .setTransactionId(result.isSuccess() ? nullToEmpty(result.getTransactionId()) : "")
                 .setReason(result.isSuccess() ? "" : nullToEmpty(result.getMessage()))
                 .build());
@@ -74,10 +75,18 @@ public class BankGrpcService extends BankServiceGrpc.BankServiceImplBase {
             return;
         }
         reply(responseObserver, com.comp5348.contracts.bank.v1.RefundResponse.newBuilder()
-                .setOutcome(result.isSuccess() ? Outcome.SUCCEEDED : Outcome.REJECTED)
+                .setOutcome(outcome(result.isSuccess(), result.isKeyConflict()))
                 .setRefundTransactionId(result.isSuccess() ? nullToEmpty(result.getRefundTransactionId()) : "")
                 .setReason(result.isSuccess() ? "" : nullToEmpty(result.getMessage()))
                 .build());
+    }
+
+    /**
+     * A key conflict is its own outcome, not REJECTED: store treats REJECTED as "no money moved" and lets the buyer
+     * pay again with a new key, but the conflicting key's first request may have moved money (ADR-29).
+     */
+    private static Outcome outcome(boolean success, boolean keyConflict) {
+        return success ? Outcome.SUCCEEDED : keyConflict ? Outcome.KEY_CONFLICT : Outcome.REJECTED;
     }
 
     private static com.comp5348.contracts.bank.v1.TransferResponse rejectedTransfer(String reason) {

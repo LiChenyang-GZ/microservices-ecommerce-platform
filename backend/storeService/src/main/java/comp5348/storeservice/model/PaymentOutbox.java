@@ -45,7 +45,7 @@ public class PaymentOutbox {
     private LocalDateTime nextAttemptAt;
 
     // PAY only: the accounts this task's key was first sent with. Every retry sends exactly these, because bank
-    // treats the same key with different accounts as a key conflict (a "no"), and the first send may have charged.
+    // answers the same key with different accounts with KEY_CONFLICT, and the first send may have charged (ADR-28).
     // Null until the first send, and on tasks written before these columns existed.
     private String fromAccount;
     private String toAccount;
