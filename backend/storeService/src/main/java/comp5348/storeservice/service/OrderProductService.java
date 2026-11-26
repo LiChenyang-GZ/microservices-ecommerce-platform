@@ -203,7 +203,9 @@ public class OrderProductService {
 
         // OutboxProcessor charges the bank account stored here; look it up once if it is missing (no money moves)
         if (userAcc.getBankAccountNumber() == null || userAcc.getBankAccountNumber().isEmpty()) {
-            String bankAccountNumber = bankAdapter.getAccountByOwnerEmail(userEmail);
+            // The stored spelling, not the token's: a token signed before ADR-31's migration may carry other capitals,
+            // and bank (exact match, opens an empty account when none is found) would give this user a new one (review 75 🟡2)
+            String bankAccountNumber = bankAdapter.getAccountByOwnerEmail(userAcc.getEmail());
             if (bankAccountNumber == null || bankAccountNumber.isEmpty()) {
                 throw new IllegalStateException("User has no linked bank account. It is opened when the account is activated.");
             }
