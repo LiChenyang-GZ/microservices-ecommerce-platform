@@ -2,7 +2,7 @@
 
 **English** | [中文](30-codes-survive-wrong-guesses.zh-CN.md)
 
-**Status:** Accepted. Amends ADR-25 (a code died after 5 wrong guesses) and ADR-26 (`activate` / `reset-password` were limited per IP only; the "someone can burn your code" consequence).
+**Status:** Accepted, amended by 31 (an email typed with other capitals now finds the account). Amends ADR-25 (a code died after 5 wrong guesses) and ADR-26 (`activate` / `reset-password` were limited per IP only; the "someone can burn your code" consequence).
 
 ## Context
 A code was 6 digits (10⁶). With so few codes, ADR-25 had to cap how often one code could be guessed: five wrong guesses for an address and its live code was dead, **whoever made them**. ADR-26 then limited `activate` and `reset-password` per IP (20 per 15 minutes), which does not help: five guesses from one address are enough.
@@ -31,7 +31,7 @@ Counting wrong guesses per (email, IP) instead does not work on its own. The cap
 - **Brute force is bounded by the code's length.** With Redis down the limits are skipped (ADR-26, fail-open); a client guessing 1000 times a second for a whole day would have about 0.86%. That is the price of failing open, and why the outage alerts.
 - **The guess limit now rests on telling clients apart by address.** With IPv6 each client usually has a whole /64, and a new address per request gets a new count; behind a cloud load balancer the last `X-Forwarded-For` value is the balancer, so everyone shares one address ("5 per IP + email" becomes "5 per email" for the whole site, and Q16 comes back as 429). Locally (compose, kind: IPv4, no extra hop) neither happens. **Grouping addresses by /64 and checking the client-address rule behind the balancer are now preconditions for a cloud deployment**, not nice-to-haves: they are the only limit on guessing a code. Before this change a code took 5 guesses in total whoever made them, which held even with IPv6.
 - **People behind one NAT share the pair's count**: someone on the same public address can make you wait 15 minutes for that email.
-- **Every attempt counts, right or wrong, including the owner's**: five tries from one address for one email (typos, a 503 while email is down, or the email typed with other capitals, which the database does not match) mean 15 minutes' wait; the code only lives 5 minutes, so then a new one. Before, five wrong guesses killed the code and the owner could ask for a new one at once.
+- **Every attempt counts, right or wrong, including the owner's**: five tries from one address for one email (typos, a 503 while email is down; until ADR-31 also the email typed with other capitals, which the database did not match) mean 15 minutes' wait; the code only lives 5 minutes, so then a new one. Before, five wrong guesses killed the code and the owner could ask for a new one at once.
 - **Release order: frontend first, then email.** The pages take 6 or 10 digits, so a new frontend works with the old email and with codes sent before the release. A page opened before the release keeps its old code (an SPA does not reload by itself) and cuts a 10-digit code to 6, which fails and uses up the 5 tries: such users must reload. Accept only 10 digits a release later.
 - Codes are longer to type. Wrong guesses are no longer recorded anywhere except the rate-limit counters.
 

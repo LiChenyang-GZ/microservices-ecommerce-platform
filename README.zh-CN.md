@@ -45,6 +45,7 @@
 | 只有 store 能调 bank、delivery 的 `/internal` 和 email 的找回密码 | 每个被调方一把共享密钥（HTTP 头 `X-Service-Token` / gRPC metadata `x-service-token`），常数时间比较，没配就不启动。store 给每个被调方只发它那一把；被拒时原来的结果不变（付款仍是 UNKNOWN，不会变成 REJECTED），另外打 `ALERT *_auth_failed`。Kubernetes 上还有 NetworkPolicy 只让 store 连 bank 的 gRPC 端口（ADR-23，[学习文档 10](docs/learning/10-service-credentials.zh-CN.md)）。 |
 | 用户只能动自己的订单，管理接口要管理员 | store 除了注册、登录、找回密码和商品目录都要登录。订单归属在 service 层查，别人的订单回 404（和不存在一样），订单号没法被试探。JWT 带角色（USER / ADMIN，没有就是 USER）；管理页的数据、库存、价格、退款和 delivery 的 DLQ 要 ADMIN。第一个管理员来自 `ADMIN_EMAIL` / `ADMIN_PASSWORD`（ADR-24，[学习文档 11](docs/learning/11-login-ownership-admin-role.zh-CN.md)）。 |
 | 账号能用之前先证明邮箱 | 激活要注册邮件里的验证码，由 store 自己去问 email；email 的 `verify-code` 只给 store。码是 10 位数字、一码一用途；用过、过期或重发了新码就作废，但猜错不作废，所以别人猜不死你的码；同一地址对同一邮箱 15 分钟只能校验 5 次（ADR-30）。校验时锁行。本地所有邮件发到 Mailpit，脚本从那里读码。没激活的账号不占邮箱：别人先注册了，主人用找回密码认领，密码是主人自己设的（ADR-25，[学习文档 12](docs/learning/12-activation-code.zh-CN.md)）。 |
+| 一个信箱一个账号 | `Victim@x.com`、`victim@x.com` 和 ` victim@x.com ` 是同一个账号：store 存账号（`Account#setEmail`）、查账号（`AccountRepository#findByEmail`）时都先去空格、转小写，传给 email 和 bank 的也是这种写法。手机把首字母自动大写，也不会再登录不上、找回不了密码（ADR-31，[学习文档 18](docs/learning/18-one-spelling-per-email.zh-CN.md)）。 |
 | 注册、登录、找回密码不能被刷 | store 的 5 个公开账号接口都限流（规则见下表）。计数存在 Redis，固定窗口：`INCR` 和第一次的 `PEXPIRE` 在同一个 Lua 脚本里执行，不会留下没有过期时间的键。超了回 429 和 `Retry-After`。验证码由浏览器向 store 要，store 只在账号存在且没激活时才让 email 发；email 不再有公开接口。客户端地址取 `X-Forwarded-For` 的最后一个值，也就是入口写的那个（nginx 覆盖这个头，Envoy 往后追加）；Tomcat 不碰这个头（`server.forward-headers-strategy=none`），否则 Spring Boot 在 Kubernetes 上会信客户端伪造的值（在 kind 上发现的）。Redis 挂了 store 照常服务、不限流，打 `ALERT rate_limit_unavailable`（ADR-26，[学习文档 13](docs/learning/13-rate-limits.zh-CN.md)）。 |
 | RabbitMQ 挂着时丢了配送任务 | 场景 05 发现：RabbitMQ 挂着时建的配送单会永远停在 CREATED。现在有扫表任务：非终态、60 秒没动的配送单会被重发任务；先用条件 `UPDATE` 认领，两个实例不会都重发（[学习文档 09](docs/learning/09-stuck-delivery-job-sweeper.zh-CN.md)）。 |
 
@@ -133,7 +134,7 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
 
 - [docs/learning/](docs/learning/)：每次改动一篇，讲问题、复现它的失败测试、修法和取舍（中英文各一份）。
 - 模块说明：[contracts](backend/contracts/README.zh-CN.md)、[delivery](backend/deliveryService/README.zh-CN.md)、[tracking](backend/trackingService/README.zh-CN.md)、[k8s](k8s/README.zh-CN.md)、[场景脚本](backend/docker/scenarios/README.zh-CN.md)。
-- [docs/adr/](docs/adr/README.zh-CN.md)：架构决策记录 ADR-01 到 ADR-30（中英文），以及代码注释引用的 8 条可靠性规则。
+- [docs/adr/](docs/adr/README.zh-CN.md)：架构决策记录 ADR-01 到 ADR-31（中英文），以及代码注释引用的 8 条可靠性规则。
 - [docs/legacy/](docs/legacy/)：原课程项目（只有 RabbitMQ 的版本）留下的笔记。
 
 ## 已知限制和下一步
@@ -154,6 +155,7 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
 
   Redis 挂着的时候不限流（fail-open，`ALERT rate_limit_unavailable`），每个请求最多多等约 0.5 秒（登录成功约 1 秒：计数一次、清零一次）。上云后 Envoy 前面如果还有负载均衡，`X-Forwarded-For` 的最后一个值就成了负载均衡的地址，到时要再核对客户端地址的规则（写在 `ClientIp` 里）。
 - **因为键冲突停住的扣款 / 退款要等人处理**（ADR-29）：键带着不同的请求回来时 bank 回 `KEY_CONFLICT`；store 把 payment 记成 `PAY_UNKNOWN` / `REFUND_UNKNOWN`，告警一次，每 10 分钟重发同一个请求，直到有人把任务改对（步骤写在 `PaymentService#onPayKeyConflict` / `#onRefundKeyConflict`）。bank 要先于 store 发布：新 store 配老 bank，冲突还是 `REJECTED`。
+- **邮箱只有一种写法，用户名没有**（ADR-31）：用户名仍然区分大小写、可以带 `@`，登录先按邮箱找。用户名是 `Bob@X.com`、而另一个账号的邮箱是 `bob@x.com` 时，这个人只能用自己的邮箱登录。有大小写混杂老数据的环境，上线前要先迁移（检查和更新的 SQL 在 ADR-31）；本机库是干净的。
 - **单副本**：所有有状态组件都只有一个（Redis 也是）；store 只能一个副本，因为 `OutboxProcessor` 没有跨实例的锁。
 - **kind 入口偶发 503**（发现 I2）：一次读请求经过 Envoy Gateway 时在到达 store 之前被重置，重试就过了，原因还没查清。
 - **场景脚本 01–03 只能跑 compose**；04–08 两边都能跑。
