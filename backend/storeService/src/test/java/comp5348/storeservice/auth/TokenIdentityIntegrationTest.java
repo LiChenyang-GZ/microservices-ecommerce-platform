@@ -45,16 +45,12 @@ class TokenIdentityIntegrationTest extends StoreHttpTest {
         return "Bearer " + builder.signWith(Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8))).compact();
     }
 
-    private Long buyerId(PlacedOrder order) {
-        return ownerOf(order).getId();
-    }
-
     /** I1：userId = A、subject = B 的邮箱 → 按 A 认人：A 的单能看，B 的单 404。现在：反过来。 */
     @Test
     void theUserIdDecides_notTheEmailInTheToken() throws Exception {
         PlacedOrder a = placeOrder();
         PlacedOrder b = placeOrder();
-        String mixed = token(buyerId(a), b.buyerEmail());
+        String mixed = token(buyerIdOf(a), b.buyerEmail());
 
         mvc.perform(get("/api/store/orders/{id}/with-payment", a.orderId()).header("Authorization", mixed))
                 .andExpect(status().isOk());
@@ -70,10 +66,10 @@ class TokenIdentityIntegrationTest extends StoreHttpTest {
         String body = "{\"orderItems\":[{\"productId\":" + productIdOf(a) + ",\"quantity\":1}]}";
 
         mvc.perform(post("/api/store/orders/create-with-payment")
-                        .header("Authorization", token(buyerId(a), b.buyerEmail()))
+                        .header("Authorization", token(buyerIdOf(a), b.buyerEmail()))
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.order.userId").value(buyerId(a)));
+                .andExpect(jsonPath("$.order.userId").value(buyerIdOf(a)));
     }
 
     /** I2：subject 是库里已经没有的邮箱（老写法、快照过时），userId 对 → 照样能看自己的单。现在：找不到人，404。 */
@@ -82,7 +78,7 @@ class TokenIdentityIntegrationTest extends StoreHttpTest {
         PlacedOrder a = placeOrder();
 
         mvc.perform(get("/api/store/orders/{id}/with-payment", a.orderId())
-                        .header("Authorization", token(buyerId(a), "Gone-Spelling@Test.Local")))
+                        .header("Authorization", token(buyerIdOf(a), "Gone-Spelling@Test.Local")))
                 .andExpect(status().isOk());
     }
 
@@ -96,12 +92,12 @@ class TokenIdentityIntegrationTest extends StoreHttpTest {
                 .andExpect(status().isUnauthorized());
     }
 
-    /** I4：userId 是字符串或小数 → 401。现在：200。 */
+    /** I4：userId 是字符串、小数，或者 5.0（值是整数，但 JSON 里是小数，Jackson 读成 Double：审查 83 号 🟡4）→ 401。现在：200。 */
     @Test
     void aUserIdThatIsNotAWholeNumber_isRejected() throws Exception {
         PlacedOrder a = placeOrder();
 
-        for (Object bad : new Object[]{String.valueOf(buyerId(a)), buyerId(a) + 0.5}) {
+        for (Object bad : new Object[]{String.valueOf(buyerIdOf(a)), buyerIdOf(a) + 0.5, buyerIdOf(a).doubleValue()}) {
             mvc.perform(get("/api/store/orders/{id}/with-payment", a.orderId())
                             .header("Authorization", token(bad, a.buyerEmail())))
                     .andExpect(status().isUnauthorized());
@@ -120,6 +116,42 @@ class TokenIdentityIntegrationTest extends StoreHttpTest {
         mvc.perform(get("/api/store/orders/{id}/with-payment", a.orderId())
                         .header("Authorization", token(missing, a.buyerEmail())))
                 .andExpect(status().isNotFound());
-        assertThat(missing).isNotNull();
+    }
+
+    /**
+     * I3 的另一个入口（审查 83 号 🟡1）：delivery、tracking 用的 validate-token 对"没有 userId 的令牌"和 store 自己一样，
+     * 401、valid = false。现在：200、valid = true、userId = null（tracking 的 Go 端读成 0）。
+     */
+    @Test
+    void validateToken_aTokenWithoutAUserId_isInvalidThereToo() throws Exception {
+        PlacedOrder a = placeOrder();
+        String raw = token(null, a.buyerEmail()).substring("Bearer ".length());
+
+        mvc.perform(post("/api/user/validate-token").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"" + raw + "\"}"))
+                .andExpect(status().isUnauthorized())
+                .andExpect(jsonPath("$.valid").value(false));
+    }
+
+    /**
+     * I1 打到另外三条路（审查 83 号 🟡2）：同一个混合令牌（userId = A、subject = B），我的订单、Pay Now、取消都按 A 认人。
+     * 回归保护，现在就该绿：老测试的令牌 id 和邮箱是同一个账号，某一条路改回按邮箱认人时它们不会红。
+     */
+    @Test
+    void theUserIdDecides_forMyOrdersPayNowAndCancel() throws Exception {
+        PlacedOrder a = placeOrder();
+        PlacedOrder b = placeOrder();
+        String mixed = token(buyerIdOf(a), b.buyerEmail());
+
+        mvc.perform(get("/api/store/orders/user/{id}/with-payment", buyerIdOf(a)).header("Authorization", mixed))
+                .andExpect(status().isOk());
+        mvc.perform(get("/api/store/orders/user/{id}/with-payment", buyerIdOf(b)).header("Authorization", mixed))
+                .andExpect(status().isForbidden());
+        mvc.perform(post("/api/store/orders/{id}/retry-payment", b.orderId()).header("Authorization", mixed))
+                .andExpect(status().isNotFound());
+        mvc.perform(post("/api/store/orders/{id}/cancel", b.orderId()).header("Authorization", mixed))
+                .andExpect(status().isNotFound());
+
+        assertThat(orderOf(b).getStatus()).as("B 的订单没被取消").isNotEqualTo(comp5348.storeservice.model.OrderStatus.CANCELLED);
     }
 }
