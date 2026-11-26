@@ -2,7 +2,7 @@
 
 **English** | [中文](27-password-reset-claims-unverified-account.zh-CN.md)
 
-**Status:** Accepted, amended by 30 (the claim can no longer be blocked by guessing the reset code dead). Amends ADR-25 ("an unactivated account keeps its email") and ADR-26 (the "someone can still sign up first" consequence).
+**Status:** Accepted, amended by 30 (the claim can no longer be blocked by guessing the reset code dead) and 31 (email case is normalised). Amends ADR-25 ("an unactivated account keeps its email") and ADR-26 (the "someone can still sign up first" consequence).
 
 ## Context
 Sign-up creates an account before the address is proved (ADR-25). So anyone could register someone else's address with a password of their own. They could not activate it, but the row held the address for good:
@@ -40,7 +40,7 @@ A 429 from `forgot-password` (codes were sent recently, perhaps asked for by the
 - **The squatter's username stays.** Changing a username is another feature.
 - **The claim can still be held off.** Someone, even from one address, can use up the address's 3 emails per 15 minutes and then guess the one live code dead (5 wrong guesses, whoever makes them; ADR-25). The owner's codes are then all dead. Counting wrong guesses per email + client address (so that someone else's guesses do not kill your code) is the follow-up.
 - **Sign-up is still unlimited**, and unverified accounts are never cleaned up.
-- **Email case is not normalised**: `Victim@x.com` and `victim@x.com` are two accounts. A separate item.
+- ~~**Email case is not normalised**: `Victim@x.com` and `victim@x.com` are two accounts. A separate item.~~ Fixed by ADR-31: they are one account, so a squatter using other capitals holds the same row and the owner claims it.
 - The claim runs inside `resetPassword`'s transaction, so when it has to open a bank account a slow bank holds a database connection meanwhile. Only when sign-up could not reach bank; rare.
 - `activateAccount` reads the account, waits for email and saves the whole row; a claim committed in between would be overwritten with the old password. It needs a registration code and a reset code used at the same moment, which a squatter cannot arrange. Written in the comment.
 
