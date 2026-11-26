@@ -166,6 +166,37 @@ class ClaimByPasswordResetIntegrationTest extends StoreHttpTest {
                 .andExpect(jsonPath("$.message").value(containsString("reset the password")));
     }
 
+    /**
+     * 74 号 E6：抢注的人用 VICTIM-...@Test.Local 注册（没激活），主人再用小写注册 → 是同一个信箱：
+     * 告诉主人去认领，不建第二个账号；主人用小写重置密码就认领了，抢注的人的密码作废。
+     * 现在：大小写不同算两个邮箱，主人注册 200，抢注的账号一直留着。
+     */
+    @Test
+    void squatterUsedCapitals_ownerRegistersInLowercase_isToldToClaim_andResetClaimsIt() throws Exception {
+        String lower = "victim-" + UUID.randomUUID().toString().substring(0, 8) + "@test.local";
+        FAKE_BANK.stubFor(WireMock.post(urlEqualTo("/api/bank/account")).willReturn(okJson("{\"accountNumber\":\"ACC-SQ-1\"}")));
+        json("/api/user", "{\"username\":\"squatter-" + UUID.randomUUID().toString().substring(0, 8)
+                + "\",\"email\":\"" + lower.toUpperCase() + "\",\"password\":\"" + SQUATTER_PASSWORD + "\"}")
+                .andExpect(status().isOk());
+        // 只给抢注的人开户：红灯时主人的注册会建第二个账号，再拿到同一个账号号码就撞银行账号的唯一约束，红错地方
+        FAKE_BANK.resetMappings();
+
+        register("owner-" + UUID.randomUUID().toString().substring(0, 8), lower)
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.emailNotVerified").value(true));
+        assertThat(jdbcCount("SELECT count(*) FROM account WHERE lower(email) = ?", lower)).as("只有一个账号").isEqualTo(1);
+
+        emailSaysResetCodeIsRight();
+        resetPassword(lower, OWNER_PASSWORD).andExpect(status().isOk());
+        login(lower, OWNER_PASSWORD).andExpect(status().isOk());
+        login(lower, SQUATTER_PASSWORD).andExpect(status().isUnauthorized());
+    }
+
+    private int jdbcCount(String sql, Object... args) {
+        Integer n = jdbc.queryForObject(sql, Integer.class, args);
+        return n == null ? 0 : n;
+    }
+
     /** Q8：邮箱已存在且已激活 → 还是 "Email already exists!"，不提认领（防改坏） */
     @Test
     void register_withAnActiveEmail_stillSaysItExists() throws Exception {

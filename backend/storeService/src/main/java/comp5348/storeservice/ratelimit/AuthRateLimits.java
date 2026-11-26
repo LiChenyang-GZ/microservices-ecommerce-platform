@@ -1,6 +1,7 @@
 package comp5348.storeservice.ratelimit;
 
 import comp5348.storeservice.ratelimit.RateLimiter.Decision;
+import comp5348.storeservice.utils.EmailAddress;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -8,7 +9,6 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.HexFormat;
-import java.util.Locale;
 import java.util.Optional;
 
 /**
@@ -118,7 +118,7 @@ public class AuthRateLimits {
      * Hashed, so Redis holds no email addresses; the IPs stay readable for debugging.
      */
     static String fingerprint(String identifier) {
-        String normalised = identifier == null ? "" : identifier.trim().toLowerCase(Locale.ROOT);
+        String normalised = identifier == null ? "" : EmailAddress.normalize(identifier); // the spelling accounts are stored under
         try {
             byte[] hash = MessageDigest.getInstance("SHA-256").digest(normalised.getBytes(StandardCharsets.UTF_8));
             return HexFormat.of().formatHex(hash, 0, 16);

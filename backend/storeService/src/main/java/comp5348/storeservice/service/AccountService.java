@@ -4,6 +4,7 @@ package comp5348.storeservice.service;
 import comp5348.storeservice.config.ServiceTokens;
 import comp5348.storeservice.model.Account;
 import comp5348.storeservice.repository.AccountRepository;
+import comp5348.storeservice.utils.EmailAddress;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -68,6 +69,7 @@ public class AccountService {
      */
     @Transactional
     public AccountDTO createAccount(String username, String email, String password) {
+        email = EmailAddress.normalize(email); // first, so " Victim@x.com" passes the format check and meets victim@x.com (Obsidian 74)
         // Stricter than RFC 5321 on purpose: no "/", spaces or quotes, so the email is safe wherever it ends up
         // (a URL path to bank, a log line). Scenario A9.
         if (email == null || !EMAIL_FORMAT.matcher(email).matches()) {
@@ -178,6 +180,7 @@ public class AccountService {
      * Only reachable by using a registration code and a reset code at once, which a squatter cannot arrange (review 59 🟡4).
      */
     public ActivationResult activateAccount(String email, String code) {
+        email = EmailAddress.normalize(email); // email keeps the code under the spelling it was sent to (Obsidian 74)
         if (code == null || code.isBlank()) {
             return ActivationResult.INVALID_CODE;
         }
@@ -242,6 +245,7 @@ public class AccountService {
      * looks first and only asks email for an account that exists and is not active yet, with its service token.
      */
     public SendCodeResult sendVerificationCode(String email) {
+        email = EmailAddress.normalize(email);
         Optional<Account> accountOpt = accountRepository.findByEmail(email);
         if (accountOpt.isEmpty()) {
             return SendCodeResult.NOTHING_TO_SEND;
@@ -330,6 +334,7 @@ public class AccountService {
      * Send password reset email
      */
     public boolean sendPasswordResetEmail(String email) {
+        email = EmailAddress.normalize(email);
         // Check if email exists
         if (!emailExists(email)) {
             return false;
@@ -358,6 +363,7 @@ public class AccountService {
      */
     @Transactional
     public boolean resetPassword(String email, String code, String newPassword) {
+        email = EmailAddress.normalize(email);
         // Check if email exists
         if (!emailExists(email)) {
             return false;

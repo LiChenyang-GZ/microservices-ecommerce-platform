@@ -1,5 +1,7 @@
 package comp5348.storeservice.model;
 
+import comp5348.storeservice.utils.EmailAddress;
+
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -23,9 +25,8 @@ public class Account {
     private String password;
 
     @Getter
-    @Setter
     @Column(unique = true)
-    private String email; // Real unique login identifier
+    private String email; // Real unique login identifier, one spelling per mailbox (setEmail)
 
     @Getter
     @Setter
@@ -59,6 +60,14 @@ public class Account {
 
     public boolean isAdmin() {
         return getRole() == Role.ADMIN;
+    }
+
+    /**
+     * The write choke point (Obsidian 74): whichever path saves an account, the column holds the normalised spelling,
+     * so the case-sensitive unique constraint keeps one account per mailbox. Hibernate loads the field directly.
+     */
+    public void setEmail(String email) {
+        this.email = EmailAddress.normalize(email);
     }
 }
 
