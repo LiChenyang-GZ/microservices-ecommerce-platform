@@ -155,3 +155,26 @@ test('a username with surrounding spaces is accepted on the page', async () => {
     expect(screen.queryByText(USERNAME_RULE)).not.toBeInTheDocument();
     expect(userAPI.createAccount).toHaveBeenCalled();
 });
+
+// 审查 79 号 🟡2：页面和 store 去的空白要一样。JS 的 trim() 还会去全角空格（U+3000）、NBSP，Java 的 trim() 只去 ≤ U+0020；
+// 页面放行、store 拒，用户看着框里是合规的名字却被说"不合规则"。现在页面只去 ≤ U+0020，这种名字在页面就提示。
+// 红灯：页面用 trim()，全角空格结尾的名字放行了。
+test('a username ending in a full-width space is refused on the page, as store would refuse it', async () => {
+    renderPage();
+
+    await fillAndSubmit('newuser　');
+
+    expect(screen.getByText(USERNAME_RULE)).toBeInTheDocument();
+    expect(userAPI.createAccount).not.toHaveBeenCalled();
+});
+
+// 同上：页面校验的是去过空白的名字，发出去的也是它（store 会再去一次，结果一样）。红灯：发的是原文 "  newuser "。
+test('the username is sent without its surrounding spaces', async () => {
+    userAPI.createAccount.mockResolvedValue({ success: true, message: 'created' });
+    userAPI.sendVerificationCode.mockResolvedValue({ success: true, message: 'sent' });
+    renderPage();
+
+    await fillAndSubmit('  newuser ');
+
+    expect(userAPI.createAccount).toHaveBeenCalledWith(expect.objectContaining({ username: 'newuser' }));
+});

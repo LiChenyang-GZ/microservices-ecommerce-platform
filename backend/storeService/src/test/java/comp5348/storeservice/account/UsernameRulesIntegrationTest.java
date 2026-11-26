@@ -70,7 +70,10 @@ class UsernameRulesIntegrationTest extends StoreHttpTest {
         assertRefused("Bob@X.com");
     }
 
-    /** U2：用户名 = 别人的邮箱换个大小写（75 🟡1 的起点：登录时会先按邮箱找到别人）。现在：200。 */
+    /**
+     * U2：用户名 = 别人的邮箱换个大小写（75 🟡1 的起点：登录时会先按邮箱找到别人）。现在：200。
+     * 只测注册这一侧：新用户名没有 @、能注册的邮箱都有 @，登录那一侧已经不会再认错人（审查 79 号 ⚪5、🟡3）。
+     */
     @Test
     void usernameThatIsSomeoneElsesEmail_isRefused() throws Exception {
         String other = "other-" + tag() + "@test.local";
@@ -117,6 +120,27 @@ class UsernameRulesIntegrationTest extends StoreHttpTest {
         register(" " + username + " ", "second-" + tag() + "@test.local")
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("Username already exists!"));
+    }
+
+    /**
+     * U4 的另一半（审查 79 号 🟡1）：带空格注册（页面放行，store 存成 bob-xxxx），登录时同样带空格输（或者浏览器存的就是原文）
+     * → 能登录。现在：登录按原样查用户名，401。
+     */
+    @Test
+    void registeredWithSpaces_logsInWithOrWithoutThem() throws Exception {
+        String username = "bob-" + tag();
+        String email = "login-" + tag() + "@test.local";
+        bankOpensAccounts();
+        register("  " + username + " ", email).andExpect(status().isOk());
+        jdbc.update("UPDATE account SET active = true, email_verified = true WHERE email = ?", email);
+
+        login("  " + username + " ").andExpect(status().isOk());
+        login(username).andExpect(status().isOk());
+    }
+
+    private ResultActions login(String identifier) throws Exception {
+        String body = "{\"email\":\"" + identifier + "\",\"password\":\"Passw0rd-123\"}";
+        return mvc.perform(post("/api/user/login").contentType(MediaType.APPLICATION_JSON).content(body));
     }
 
     /** U5：规则内的用户名照样能注册（回归，现在就该绿） */
