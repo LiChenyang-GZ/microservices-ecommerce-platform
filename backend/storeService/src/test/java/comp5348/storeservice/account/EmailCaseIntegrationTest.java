@@ -2,6 +2,8 @@ package comp5348.storeservice.account;
 
 import comp5348.storeservice.model.Account;
 import comp5348.storeservice.support.StoreHttpTest;
+import comp5348.storeservice.utils.JwtUtil;
+import org.springframework.beans.factory.annotation.Autowired;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -190,6 +192,31 @@ class EmailCaseIntegrationTest extends StoreHttpTest {
         accountRepository.save(account);
 
         login(" " + email + "  ", PASSWORD).andExpect(status().isOk());
+    }
+
+    // ---------- 审查 75 号 🟡2：Pay Now 按库里的写法查银行账户 ----------
+
+    @Autowired private JwtUtil jwtUtil;
+
+    /**
+     * 有大小写混杂老数据的环境迁移以后（ADR-31），用户手里还拿着迁移前签的令牌，里面是 BUYER-...@TEST.LOCAL；
+     * 账号上没存银行号码。Pay Now 要按**库里的**写法（小写）去 bank 查户主，不能按令牌里的。
+     * 现在：把令牌里的大写发给 bank，bank 查不到（真 bank 这时会新开一个余额 0 的户），store 回 400。
+     */
+    @Test
+    void payNow_withATokenInAnOldSpelling_looksUpTheBankAccountByTheStoredEmail() throws Exception {
+        PlacedOrder order = placeOrder();
+        Account buyer = accountRepository.findByEmail(order.buyerEmail()).orElseThrow();
+        jdbc.update("UPDATE account SET bank_account_number = NULL WHERE id = ?", buyer.getId());
+        String lowerPath = "/api/bank/account/by-owner/" + order.buyerEmail().replace("@", "%40");
+        FAKE_BANK.stubFor(get(urlEqualTo(lowerPath)).willReturn(okJson("{\"accountNumber\":\"ACC-FOUND-" + tag() + "\"}")));
+        String oldToken = "Bearer " + jwtUtil.generateToken(buyer.getId(), order.buyerEmail().toUpperCase(), buyer.getRole());
+
+        mvc.perform(post("/api/store/orders/{id}/retry-payment", order.orderId()).header("Authorization", oldToken))
+                .andExpect(status().isOk());
+
+        FAKE_BANK.verify(1, getRequestedFor(urlEqualTo(lowerPath)));
+        assertThat(accountRepository.findById(buyer.getId()).orElseThrow().getBankAccountNumber()).startsWith("ACC-FOUND-");
     }
 
     // ---------- E9：两个卡口 ----------
