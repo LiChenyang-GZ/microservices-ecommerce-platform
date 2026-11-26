@@ -47,8 +47,9 @@ public class AdminBootstrap implements CommandLineRunner {
     }
 
     /**
-     * The email as username if nobody has it, otherwise admin-xxxxxxxx. Anyone can register any username, including
-     * this email, and a clash on the unique column would stop store from starting (review 47 🟠2).
+     * The email as username if nobody has it, otherwise admin-xxxxxxxx. Sign-up no longer takes a username with an "@"
+     * (Obsidian 78), so only an older row can hold this email as its username; a clash on the unique column would stop
+     * store from starting (review 47 🟠2).
      * Admins log in with the email anyway: login looks the identifier up by email first.
      */
     private String freeUsername() {

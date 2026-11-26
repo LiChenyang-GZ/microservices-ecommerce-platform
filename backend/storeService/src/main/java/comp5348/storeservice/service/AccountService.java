@@ -66,7 +66,8 @@ public class AccountService {
 
     /**
      * 3-32 ASCII letters, digits, ".", "_" or "-" (Obsidian 78). No "@": log-in looks an identifier up by email first,
-     * so a username shaped like someone's email reached that account (review 75 🟡1), and could pose as it on admin pages.
+     * so a username shaped like someone's email reached that account (review 75 🟡1), and could pose as it wherever
+     * the username is shown (the delivery's customer name).
      * No spaces, look-alike letters (Cyrillic "а" in "аdmin") or control characters, for the same reason. Sign-up only:
      * older accounts keep their usernames (locally only the bootstrapped admins have an "@": their own email).
      */
@@ -129,6 +130,15 @@ public class AccountService {
                 savedAccount.getEmail(),
                 "********" // Do not return real password
         );
+    }
+
+    /**
+     * The username half of an identifier lookup, trimmed as createAccount trims it: someone who signed up as
+     * "  bob " (stored "bob") can type it the same way at log-in (review 79 🟡1). The email half is normalised by
+     * AccountRepository#findByEmail.
+     */
+    private Optional<Account> byUsername(String identifier) {
+        return accountRepository.findByUsername(identifier == null ? null : identifier.trim());
     }
 
     /** Sign-up found the address registered but not verified: AccountController tells the user how to claim it */
@@ -293,7 +303,7 @@ public class AccountService {
     public boolean verifyLogin(String identifier, String password) {
         Optional<Account> userOpt = accountRepository.findByEmail(identifier);
         if (!userOpt.isPresent()) {
-            userOpt = accountRepository.findByUsername(identifier);
+            userOpt = byUsername(identifier);
         }
         if (userOpt.isPresent()) {
             Account user = userOpt.get();
@@ -315,7 +325,7 @@ public class AccountService {
 
     public Optional<Account> getAccountByIdentifier(String identifier) {
         Optional<Account> opt = accountRepository.findByEmail(identifier);
-        if (!opt.isPresent()) opt = accountRepository.findByUsername(identifier);
+        if (!opt.isPresent()) opt = byUsername(identifier);
         return opt;
     }
 
@@ -331,7 +341,7 @@ public class AccountService {
      */
     public boolean isEmailVerified(String identifier) {
         Optional<Account> accountOpt = accountRepository.findByEmail(identifier);
-        if (!accountOpt.isPresent()) accountOpt = accountRepository.findByUsername(identifier);
+        if (!accountOpt.isPresent()) accountOpt = byUsername(identifier);
         return accountOpt.isPresent() && Boolean.TRUE.equals(accountOpt.get().getEmailVerified());
     }
 
@@ -340,7 +350,7 @@ public class AccountService {
      */
     public boolean isAccountActive(String identifier) {
         Optional<Account> accountOpt = accountRepository.findByEmail(identifier);
-        if (!accountOpt.isPresent()) accountOpt = accountRepository.findByUsername(identifier);
+        if (!accountOpt.isPresent()) accountOpt = byUsername(identifier);
         return accountOpt.isPresent() && Boolean.TRUE.equals(accountOpt.get().getActive());
     }
 
