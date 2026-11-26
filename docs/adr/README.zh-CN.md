@@ -31,15 +31,16 @@ ADR-01 到 ADR-14 是动手之前写的，代码注释按编号引用（"ADR-06"
 | [21](21-schema-changes-at-startup.zh-CN.md) | 表结构改动在启动时跑幂等 SQL，不用 Flyway | 已采纳 |
 | [22](22-grpc-result-mapping.zh-CN.md) | bank 的 gRPC 回复怎么对应到 成功 / 拒绝 / 未知 | 已采纳，由 23 补充 |
 | [23](23-service-credentials.zh-CN.md) | 服务之间的调用带共享密钥，每个被调方一把 | 已采纳，由 25、26 补充 |
-| [24](24-login-ownership-admin-role.zh-CN.md) | store 要登录，用户只能动自己的订单，管理接口要管理员角色 | 已采纳，由 25 补充 |
+| [24](24-login-ownership-admin-role.zh-CN.md) | store 要登录，用户只能动自己的订单，管理接口要管理员角色 | 已采纳，由 25、33 补充 |
 | [25](25-activation-needs-the-emailed-code.zh-CN.md) | 激活要邮件里的验证码，由 store 去问 email | 已采纳，由 26、27、30 补充 |
 | [26](26-rate-limits-in-redis.zh-CN.md) | store 的公开账号接口限流，计数存在 Redis | 已采纳，由 27、30 补充 |
 | [27](27-password-reset-claims-unverified-account.zh-CN.md) | 没激活的账号不占邮箱：找回密码就是认领 | 已采纳，由 30、31 补充 |
 | [28](28-a-retry-sends-the-first-request.zh-CN.md) | 扣款重试只发第一次发送时的账号 | 已采纳，被 29 修订 |
 | [29](29-key-conflict-is-not-a-failure.zh-CN.md) | 键冲突不是失败：bank 回 KEY_CONFLICT，store 当成"未知" | 已采纳 |
 | [30](30-codes-survive-wrong-guesses.zh-CN.md) | 码长到猜错也不用作废；猜的次数由 store 按"IP + 邮箱"限 | 已采纳，由 31 补充 |
-| [31](31-one-spelling-per-email.zh-CN.md) | 一个邮箱只有一种写法 | 已采纳，由 32 补充 |
+| [31](31-one-spelling-per-email.zh-CN.md) | 一个邮箱只有一种写法 | 已采纳，由 32、33 补充 |
 | [32](32-username-rules.zh-CN.md) | 用户名是 3-32 个字母、数字、点、下划线或连字符 | 已采纳 |
+| [33](33-know-the-caller-by-user-id.zh-CN.md) | store 按令牌里的 userId 认人，不按邮箱 | 已采纳 |
 
 ## 可靠性规则
 

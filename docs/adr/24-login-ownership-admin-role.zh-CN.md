@@ -2,7 +2,7 @@
 
 [English](24-login-ownership-admin-role.md) | **中文**
 
-**状态：** 已采纳，由 25 补充（激活要邮件里的验证码）
+**状态：** 已采纳，由 25 补充（激活要邮件里的验证码），由 33 补充（store 按令牌里的 userId 认人，不按邮箱）
 
 ## 背景
 ADR-23 之后，服务之间不带密钥已经调不通了，但 store 的安全规则最后一行还是 `anyRequest().permitAll()`。它的 JWT 过滤器在 token 有效时把邮箱放进请求，无效时照样放行。只有 Pay Now 自己查了订单是谁的。所以不带 token、或者带着别人的 token，任何人都能：

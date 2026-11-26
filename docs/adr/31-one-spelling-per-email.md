@@ -2,7 +2,7 @@
 
 **English** | [中文](31-one-spelling-per-email.zh-CN.md)
 
-**Status:** Accepted, amended by 32 (usernames can no longer look like an email). Amends ADR-27 (known limit "email case is not normalised") and ADR-30 (consequence "the email typed with other capitals, which the database does not match").
+**Status:** Accepted, amended by 32 (usernames can no longer look like an email) and 33 (store resolves a token by its userId, so old tokens no longer resolve to the wrong account in store). Amends ADR-27 (known limit "email case is not normalised") and ADR-30 (consequence "the email typed with other capitals, which the database does not match").
 
 ## Context
 store looked emails up and stored them exactly as typed. Postgres compares text case-sensitively, so the unique column on `account.email` let `Victim@x.com` and `victim@x.com` be two accounts, each with its own bank account, both mailing codes to one inbox. The rate limits already counted by the trimmed, lower-cased address (ADR-26); the accounts did not.
@@ -33,7 +33,7 @@ Before choosing, the local databases were checked (both compose projects): no tw
 - Pay Now looks the bank account up by the account's stored email, not the token's (review 75): a token signed before a migration may carry other capitals, and bank, matching exactly and opening an empty account when it finds none, would give the user a second account.
 
 ### Older data: migrate before this release
-**Releasing on a database that holds mixed-case emails without migrating is worse than not releasing.** Every spelling is normalised before the lookup, so a row stored as `Victim@x.com` is never found: its owner cannot log in, and anyone can register `victim@x.com` as a new, unverified row that from then on catches the owner's log-ins and old tokens (they cannot activate it, so it locks the owner out rather than letting them in). If both `Victim@x.com` and `victim@x.com` exist, the first one's tokens resolve to the second account. The local databases (both compose projects) are clean; run the check on any other environment, kind included, first.
+**Releasing on a database that holds mixed-case emails without migrating is worse than not releasing.** Every spelling is normalised before the lookup, so a row stored as `Victim@x.com` is never found: its owner cannot log in, and anyone can register `victim@x.com` as a new, unverified row that from then on catches the owner's log-ins and old tokens (they cannot activate it, so it locks the owner out rather than letting them in). If both `Victim@x.com` and `victim@x.com` exist, the first one's tokens resolved to the second account (until ADR-33: store now resolves a token by its userId; delivery still compares the email). The local databases (both compose projects) are clean; run the check on any other environment, kind included, first.
 
 1. **Check** (all must return no rows):
    ```sql
