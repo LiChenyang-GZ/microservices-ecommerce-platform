@@ -72,6 +72,35 @@ class AdminBootstrapStartupTest {
                 .as("也没被改密码").isEqualTo("his-own");
     }
 
+    /** 74 号 E7：ADMIN_EMAIL 里有大写 → 存成小写，管理员登录时输哪种大小写都能找到。现在：原样存成大写。 */
+    @Test
+    void configuredAdminEmailInCapitals_isStoredInOneSpelling() {
+        String lower = "boss-" + tag() + "@test.local";
+
+        startStore(Map.of("store.admin.email", "Boss" + lower.substring(4, 13).toUpperCase() + "@Test.Local",
+                "store.admin.password", "Adm1n-Passw0rd"));
+
+        assertThat(DB.queryForObject("SELECT role FROM account WHERE email = ?", String.class, lower)).isEqualTo("ADMIN");
+    }
+
+    /**
+     * 74 号 E7：库里已有小写 taken@ 的普通账号，ADMIN_EMAIL 配成 Taken@ → 和配成小写一样：不提升、不另建一个管理员。
+     * 现在：查不到大写的，另建了一个同信箱的管理员账号（抢先注册的人等于和管理员共用一个信箱）。
+     */
+    @Test
+    void existingUser_adminEmailInOtherCase_isNotPromoted_andNoSecondAccount() {
+        String lower = "taken-" + tag() + "@test.local";
+        startStore(Map.of());
+        DB.update("INSERT INTO account (email, username, password, email_verified, active, role) VALUES (?, ?, 'his-own', true, true, 'USER')",
+                lower, "taken-" + tag());
+
+        startStore(Map.of("store.admin.email", lower.toUpperCase(), "store.admin.password", "Adm1n-Passw0rd"));
+
+        assertThat(DB.queryForObject("SELECT count(*) FROM account WHERE lower(email) = ?", Integer.class, lower))
+                .as("没有另建一个账号").isEqualTo(1);
+        assertThat(DB.queryForObject("SELECT role FROM account WHERE email = ?", String.class, lower)).isEqualTo("USER");
+    }
+
     /** 47 号 🟡5：原来的断言查的是没人会建的 never-% 邮箱，永远成立。改成启动前后数管理员总数 */
     @Test
     void notConfigured_noAdminIsCreated() {
