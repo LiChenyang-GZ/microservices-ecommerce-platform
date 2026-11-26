@@ -21,6 +21,17 @@ import java.util.List;
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
+    /** Request attribute holding the token's userId (a Long) */
+    public static final String USER_ID = "userId";
+
+    /** A JSON integer as a Long; a string, a fraction or anything else is not an id */
+    private static Long wholeNumber(Object claim) {
+        if (claim instanceof Integer || claim instanceof Long) {
+            return ((Number) claim).longValue();
+        }
+        return null;
+    }
+
     @Autowired
     private JwtUtil jwtUtil;
 
@@ -34,12 +45,14 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 && SecurityContextHolder.getContext().getAuthentication() == null) {
             String jwt = authHeader.substring(7);
             String email = null;
+            Long userId = null;
             Role role = Role.USER;
             try {
                 // Parsing checks the signature and the expiry, once (review 44 🟡8: a second parse outside this
                 // try could throw for a token that expired in between, and the request got 500 instead of 401)
                 Claims claims = jwtUtil.parseClaims(jwt);
                 email = claims.getSubject();
+                userId = wholeNumber(claims.get("userId"));
                 // No role claim (signed before auth PR 3) -> USER, never ADMIN
                 role = Role.of(claims.get("role"));
             } catch (Exception e) {
@@ -47,15 +60,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 // still work. DEBUG, not ERROR: a browser holding an old token is normal.
                 logger.debug("Ignoring an invalid JWT: " + e.getMessage());
             }
-            if (email != null) {
+            // Every token store signs carries both. One without a whole-number userId did not come from
+            // JwtUtil#generateToken: treat it as invalid rather than guess who it is (Obsidian 82)
+            if (email != null && userId != null) {
                 // ROLE_ADMIN / ROLE_USER: SecurityConfig's hasRole("ADMIN") reads this
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                         email, null, List.of(new SimpleGrantedAuthority("ROLE_" + role.name())));
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authToken);
 
-                // Also set email as request attribute for controllers to access
-                request.setAttribute("userEmail", email);
+                // The id says who the caller is. No "userEmail" attribute any more: the email in a token is a snapshot
+                // from signing time, and nothing should look an account up by it (Obsidian 82)
+                request.setAttribute(USER_ID, userId);
             }
         }
 

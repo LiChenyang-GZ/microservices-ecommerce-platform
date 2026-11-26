@@ -186,6 +186,11 @@ public abstract class StoreIntegrationTest {
 
     // ---------- 造数据：走真实的下单流程 ----------
 
+    /** 这一单买家的账号 id（store 按令牌里的 userId 认人，82 号） */
+    protected Long buyerIdOf(PlacedOrder order) {
+        return accountRepository.findByEmail(order.buyerEmail()).orElseThrow().getId();
+    }
+
     /** 下单之后测试要用到的几个 id */
     public record PlacedOrder(Long orderId, Long paymentId, String buyerEmail, String buyerBankAccount,
                               Long warehouseProductId) {}

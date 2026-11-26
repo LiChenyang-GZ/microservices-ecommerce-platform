@@ -81,7 +81,7 @@ class PayRetryAccountIntegrationTest extends StoreIntegrationTest {
 
         // 买家重新绑好银行账号，看到页面上的 Pay Now（如果有）就点
         setBankAccount(order, order.buyerBankAccount());
-        orderProductService.retryOrderPayment(order.orderId(), order.buyerEmail());
+        orderProductService.retryOrderPayment(order.orderId(), buyerIdOf(order));
         runOutboxRounds(3);
 
         // 断言 1（核心）：bank 只见过一个键 —— 最多扣一次钱
@@ -143,7 +143,7 @@ class PayRetryAccountIntegrationTest extends StoreIntegrationTest {
 
         // F8：这时买家点 Pay Now，不能多出一条 PAY 任务（新键）
         setBankAccount(order, order.buyerBankAccount());
-        orderProductService.retryOrderPayment(order.orderId(), order.buyerEmail());
+        orderProductService.retryOrderPayment(order.orderId(), buyerIdOf(order));
         assertThat(tasksOf(order)).filteredOn(t -> "PAY".equals(t.getEventType())).hasSize(1);
         assertThat(paymentOf(order).getAttempt()).isEqualTo(1);
     }
@@ -189,7 +189,7 @@ class PayRetryAccountIntegrationTest extends StoreIntegrationTest {
         assertThat(paymentOf(order).getStatus()).isEqualTo(PaymentStatus.FAILED);
 
         setBankAccount(order, order.buyerBankAccount());
-        orderProductService.retryOrderPayment(order.orderId(), order.buyerEmail());
+        orderProductService.retryOrderPayment(order.orderId(), buyerIdOf(order));
         runOutboxRounds(3);
 
         assertThat(distinctKeys()).hasSize(1);

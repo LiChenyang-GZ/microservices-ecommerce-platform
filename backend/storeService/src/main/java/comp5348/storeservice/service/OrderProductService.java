@@ -72,8 +72,8 @@ public class OrderProductService {
      * Checkout from the HTTP API: the order belongs to the logged-in user, whatever userId the body says
      * (auth PR 2, scenario A5: the body's userId is ignored, not refused, so the frontend needs no change).
      */
-    public OrderDTO createOrderWithPaymentFor(String userEmail, CreateOrderRequest request) {
-        request.setUserId(accountOf(userEmail).getId());
+    public OrderDTO createOrderWithPaymentFor(Long callerId, CreateOrderRequest request) {
+        request.setUserId(accountOf(callerId).getId());
         return createOrderWithPayment(request);
     }
 
@@ -125,10 +125,10 @@ public class OrderProductService {
     /**
      * Get complete order information (including payment status)
      */
-    public OrderWithPaymentDTO getOrderWithPaymentInfo(Long orderId, String userEmail) {
+    public OrderWithPaymentDTO getOrderWithPaymentInfo(Long orderId, Long callerId) {
         logger.info("Getting order with payment info for order: {}", orderId);
 
-        OrderDTO order = ownOrder(orderId, userEmail);
+        OrderDTO order = ownOrder(orderId, callerId);
         
         // Get payment information
         Optional<Payment> payment = paymentService.getPaymentByOrderId(orderId);
@@ -143,9 +143,9 @@ public class OrderProductService {
     /**
      * Get user's order list (including payment status)
      */
-    public List<OrderWithPaymentDTO> getUserOrdersWithPaymentInfo(Long userId, String userEmail) {
+    public List<OrderWithPaymentDTO> getUserOrdersWithPaymentInfo(Long userId, Long callerId) {
         logger.info("Getting user orders with payment info for user: {}", userId);
-        if (!accountOf(userEmail).getId().equals(userId)) {
+        if (!accountOf(callerId).getId().equals(userId)) {
             throw new NotYourOrdersException(userId);
         }
 
@@ -187,12 +187,12 @@ public class OrderProductService {
      * Pay Now on an unpaid order (rule 8). Never calls bank: it only asks PaymentService to queue a new attempt,
      * and only if the last one definitely failed. The page then shows "payment processing" and polls the status.
      */
-    public OrderDTO retryOrderPayment(Long orderId, String userEmail) {
-        logger.info("Pay Now for order: {}, user: {}", orderId, userEmail);
+    public OrderDTO retryOrderPayment(Long orderId, Long callerId) {
+        logger.info("Pay Now for order: {}, user: {}", orderId, callerId);
 
         // The charge always comes from the order owner's bank account, so only the owner may trigger it
-        OrderDTO order = ownOrder(orderId, userEmail);
-        Account userAcc = accountOf(userEmail);
+        OrderDTO order = ownOrder(orderId, callerId);
+        Account userAcc = accountOf(callerId);
 
         if (OrderStatus.PAID.name().equals(order.getStatus())) {
             return order;
@@ -224,8 +224,8 @@ public class OrderProductService {
      * The owner never changes, so checking before the row lock is safe; the status does change, which is why
      * OrderService#cancelOrder re-reads the order once it holds the lock (review 44 🟠1).
      */
-    public OrderDTO cancelOwnOrder(Long orderId, String userEmail) {
-        ownOrder(orderId, userEmail);
+    public OrderDTO cancelOwnOrder(Long orderId, Long callerId) {
+        ownOrder(orderId, callerId);
         return orderService.cancelOrder(orderId);
     }
 
@@ -233,17 +233,21 @@ public class OrderProductService {
      * The order, if it belongs to this user. Missing and someone else's look the same (404), see
      * OrderNotFoundException. Every user-facing read or change of one order goes through here (auth PR 2).
      */
-    public OrderDTO ownOrder(Long orderId, String userEmail) {
+    public OrderDTO ownOrder(Long orderId, Long callerId) {
         OrderDTO order = orderService.getOrderById(orderId).orElseThrow(() -> new OrderNotFoundException(orderId));
-        if (!accountOf(userEmail).getId().equals(order.getUserId())) {
+        if (!accountOf(callerId).getId().equals(order.getUserId())) {
             throw new OrderNotFoundException(orderId);
         }
         return order;
     }
 
-    /** The logged-in user. The token was valid, so a missing account means it was deleted since; the request fails (400). */
-    private Account accountOf(String userEmail) {
-        return accountRepository.findByEmail(userEmail)
+    /**
+     * The logged-in user, by the token's userId (Obsidian 82). Not by the token's email: that is a snapshot from when
+     * the token was signed, and on older mixed-case data it could resolve to another account or to none (review 75 🟡3).
+     * The token was valid, so a missing account means it was deleted since; the request fails.
+     */
+    private Account accountOf(Long callerId) {
+        return accountRepository.findById(callerId)
                 .orElseThrow(() -> new IllegalStateException("No account for the logged-in user"));
     }
 }

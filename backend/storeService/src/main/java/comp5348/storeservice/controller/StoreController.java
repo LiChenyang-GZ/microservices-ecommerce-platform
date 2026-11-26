@@ -1,5 +1,6 @@
 package comp5348.storeservice.controller;
 
+import comp5348.storeservice.config.JwtAuthenticationFilter;
 import comp5348.storeservice.dto.*;
 import comp5348.storeservice.exception.NotYourOrdersException;
 import comp5348.storeservice.exception.OrderNotFoundException;
@@ -39,7 +40,7 @@ public class StoreController {
 
         try {
             // The order is the logged-in user's; a userId in the body is ignored
-            OrderDTO order = orderProductService.createOrderWithPaymentFor(userEmail(http), request);
+            OrderDTO order = orderProductService.createOrderWithPaymentFor(callerId(http), request);
             return ResponseEntity.ok(OrderResponse.success(order, "Order created with payment successfully"));
         } catch (Exception e) {
             logger.error("Error creating order with payment: {}", e.getMessage(), e);
@@ -57,7 +58,7 @@ public class StoreController {
         logger.info("GET /api/store/orders/{}/with-payment - Getting order with payment info", id);
 
         try {
-            OrderWithPaymentDTO orderWithPayment = orderProductService.getOrderWithPaymentInfo(id, userEmail(http));
+            OrderWithPaymentDTO orderWithPayment = orderProductService.getOrderWithPaymentInfo(id, callerId(http));
             return ResponseEntity.ok(orderWithPayment);
         } catch (Exception e) {
             logger.error("Error getting order with payment info for {}: {}", id, e.getMessage(), e);
@@ -75,7 +76,7 @@ public class StoreController {
         logger.info("GET /api/store/orders/user/{}/with-payment - Getting user orders with payment info", userId);
 
         try {
-            List<OrderWithPaymentDTO> orders = orderProductService.getUserOrdersWithPaymentInfo(userId, userEmail(http));
+            List<OrderWithPaymentDTO> orders = orderProductService.getUserOrdersWithPaymentInfo(userId, callerId(http));
             return ResponseEntity.ok(orders);
         } catch (NotYourOrdersException e) {
             return ResponseEntity.status(403).build();
@@ -114,7 +115,7 @@ public class StoreController {
 
         try {
             // Pay Now only queues the charge; the page polls the payment status until it settles
-            OrderDTO order = orderProductService.retryOrderPayment(id, userEmail(request));
+            OrderDTO order = orderProductService.retryOrderPayment(id, callerId(request));
             String message = "PAID".equals(order.getStatus()) ? "Order already paid" : "Payment processing";
             return ResponseEntity.ok(OrderResponse.success(order, message));
         } catch (OrderNotFoundException e) {
@@ -134,7 +135,7 @@ public class StoreController {
     public ResponseEntity<OrderResponse> cancelOrder(@PathVariable Long id, HttpServletRequest http) {
         logger.info("POST /api/store/orders/{}/cancel - Cancelling order", id);
         try {
-            OrderDTO order = orderProductService.cancelOwnOrder(id, userEmail(http));
+            OrderDTO order = orderProductService.cancelOwnOrder(id, callerId(http));
             return ResponseEntity.ok(OrderResponse.success(order, "Order cancelled successfully"));
         } catch (OrderNotFoundException e) {
             return ResponseEntity.status(404).body(OrderResponse.error(e.getMessage()));
@@ -145,8 +146,11 @@ public class StoreController {
         }
     }
 
-    /** Set by JwtAuthenticationFilter; SecurityConfig lets no request without a valid token reach these methods */
-    private static String userEmail(HttpServletRequest http) {
-        return (String) http.getAttribute("userEmail");
+    /**
+     * The token's userId, set by JwtAuthenticationFilter; SecurityConfig lets no request without a valid token reach
+     * these methods. Who the caller is comes from the id, not the email in the token (Obsidian 82).
+     */
+    private static Long callerId(HttpServletRequest http) {
+        return (Long) http.getAttribute(JwtAuthenticationFilter.USER_ID);
     }
 }

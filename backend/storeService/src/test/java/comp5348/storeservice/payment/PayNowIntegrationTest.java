@@ -52,7 +52,7 @@ class PayNowIntegrationTest extends StoreIntegrationTest {
         bankTransferSucceeds();
 
         // 动作：用户点 Pay Now
-        orderProductService.retryOrderPayment(order.orderId(), order.buyerEmail());
+        orderProductService.retryOrderPayment(order.orderId(), buyerIdOf(order));
 
         // 断言 1：Pay Now 自己不调 bank，只写任务（页面显示"支付处理中"）
         assertThat(transferRequests()).as("Pay Now 不许直接调 bank").isEmpty();
@@ -82,7 +82,7 @@ class PayNowIntegrationTest extends StoreIntegrationTest {
         givenPayment(order, current);
         bankTransferSucceeds();
 
-        orderProductService.retryOrderPayment(order.orderId(), order.buyerEmail());
+        orderProductService.retryOrderPayment(order.orderId(), buyerIdOf(order));
 
         // 断言 1：没有调 bank
         assertThat(transferRequests()).as("Payment 是 %s 时点 Pay Now，bank 不该收到扣款请求", current).isEmpty();
@@ -113,7 +113,7 @@ class PayNowIntegrationTest extends StoreIntegrationTest {
             twoTabs.submit(() -> {
                 try {
                     startGun.await();
-                    orderProductService.retryOrderPayment(order.orderId(), order.buyerEmail());
+                    orderProductService.retryOrderPayment(order.orderId(), buyerIdOf(order));
                 } catch (Throwable e) {
                     errors.add(e); // 记下来就行；第二个标签页被拒绝也是可以接受的
                 }

@@ -64,7 +64,7 @@ class KeyConflictIntegrationTest extends StoreIntegrationTest {
         assertThat(transferRequests()).as("这一轮只发 1 次").hasSize(1);
 
         // Pay Now 不能换新键
-        orderProductService.retryOrderPayment(order.orderId(), order.buyerEmail());
+        orderProductService.retryOrderPayment(order.orderId(), buyerIdOf(order));
         assertThat(tasksOf(order)).filteredOn(t -> "PAY".equals(t.getEventType())).hasSize(1);
         assertThat(paymentOf(order).getAttempt()).isEqualTo(1);
 
@@ -140,7 +140,7 @@ class KeyConflictIntegrationTest extends StoreIntegrationTest {
 
         clock.advance(Duration.ofMinutes(10));
         runOutboxRounds(1);
-        orderProductService.retryOrderPayment(order.orderId(), order.buyerEmail());
+        orderProductService.retryOrderPayment(order.orderId(), buyerIdOf(order));
         bankTransferSucceeds();
         runOutboxRounds(3);
 
