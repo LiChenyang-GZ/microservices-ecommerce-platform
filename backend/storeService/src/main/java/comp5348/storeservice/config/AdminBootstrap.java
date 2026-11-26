@@ -3,6 +3,7 @@ package comp5348.storeservice.config;
 import comp5348.storeservice.model.Account;
 import comp5348.storeservice.model.Role;
 import comp5348.storeservice.repository.AccountRepository;
+import comp5348.storeservice.utils.EmailAddress;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,7 +40,9 @@ public class AdminBootstrap implements CommandLineRunner {
                           @Value("${store.admin.email:}") String email,
                           @Value("${store.admin.password:}") String password) {
         this.accounts = accounts;
-        this.email = email == null ? "" : email.trim();
+        // One spelling per mailbox (Obsidian 74): "Admin@Shop.com" must meet an existing admin@shop.com, or a second
+        // account for the same inbox would be made admin
+        this.email = email == null ? "" : EmailAddress.normalize(email);
         this.password = password == null ? "" : password;
     }
 
