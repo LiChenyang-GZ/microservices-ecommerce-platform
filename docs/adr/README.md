@@ -38,7 +38,8 @@ ADR-01 to ADR-14 were written before the redesign was built. Code comments refer
 | [28](28-a-retry-sends-the-first-request.md) | A retried charge sends exactly the accounts of its first send | Accepted, amended by 29 |
 | [29](29-key-conflict-is-not-a-failure.md) | A key conflict is not a failure: bank says KEY_CONFLICT, store holds it as unknown | Accepted |
 | [30](30-codes-survive-wrong-guesses.md) | Codes are long enough to survive wrong guesses; store limits guesses per IP + email | Accepted, amended by 31 |
-| [31](31-one-spelling-per-email.md) | One spelling per email address | Accepted |
+| [31](31-one-spelling-per-email.md) | One spelling per email address | Accepted, amended by 32 |
+| [32](32-username-rules.md) | Usernames are 3-32 letters, digits, dot, underscore or hyphen | Accepted |
 
 ## Reliability rules
 

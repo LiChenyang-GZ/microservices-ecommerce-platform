@@ -38,7 +38,8 @@ ADR-01 到 ADR-14 是动手之前写的，代码注释按编号引用（"ADR-06"
 | [28](28-a-retry-sends-the-first-request.zh-CN.md) | 扣款重试只发第一次发送时的账号 | 已采纳，被 29 修订 |
 | [29](29-key-conflict-is-not-a-failure.zh-CN.md) | 键冲突不是失败：bank 回 KEY_CONFLICT，store 当成"未知" | 已采纳 |
 | [30](30-codes-survive-wrong-guesses.zh-CN.md) | 码长到猜错也不用作废；猜的次数由 store 按"IP + 邮箱"限 | 已采纳，由 31 补充 |
-| [31](31-one-spelling-per-email.zh-CN.md) | 一个邮箱只有一种写法 | 已采纳 |
+| [31](31-one-spelling-per-email.zh-CN.md) | 一个邮箱只有一种写法 | 已采纳，由 32 补充 |
+| [32](32-username-rules.zh-CN.md) | 用户名是 3-32 个字母、数字、点、下划线或连字符 | 已采纳 |
 
 ## 可靠性规则
 
