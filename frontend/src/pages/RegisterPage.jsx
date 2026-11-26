@@ -32,11 +32,20 @@ const RegisterPage = () => {
     }
   };
 
+  // Only what Java's String#trim() drops (code points up to U+0020), so the page and store agree: JS trim() would also
+  // drop a full-width space or NBSP, and store would then refuse a name the page let through (review 79 🟡2).
+  // The control characters in the class are the point, hence the lint exception.
+  // eslint-disable-next-line no-control-regex
+  const trimmedUsername = () => formData.username.replace(/^[\u0000- ]+|[\u0000- ]+$/g, '');
+
   const validateForm = () => {
     const newErrors = {};
     
-    if (!formData.username.trim()) {
+    if (!trimmedUsername()) {
       newErrors.username = 'Please enter a username';
+    } else if (!/^[A-Za-z0-9._-]{3,32}$/.test(trimmedUsername())) {
+      // the same rule as store's AccountService (Obsidian 78); store trims and checks again
+      newErrors.username = 'Username must be 3-32 characters: letters, digits, dot, underscore or hyphen';
     }
     
     if (!formData.email) {
@@ -88,7 +97,7 @@ const RegisterPage = () => {
     try {
       // 1. Create account
       const accountData = {
-        username: formData.username,
+        username: trimmedUsername(),
         email: formData.email,
         password: formData.password
       };

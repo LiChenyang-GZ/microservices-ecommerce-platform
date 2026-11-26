@@ -54,8 +54,8 @@ function renderPage() {
     );
 }
 
-async function fillAndSubmit() {
-    fireEvent.change(screen.getByPlaceholderText('Enter your username'), { target: { name: 'username', value: 'newuser' } });
+async function fillAndSubmit(username = 'newuser') {
+    fireEvent.change(screen.getByPlaceholderText('Enter your username'), { target: { name: 'username', value: username } });
     fireEvent.change(screen.getByPlaceholderText('Enter your email address'), { target: { name: 'email', value: EMAIL } });
     fireEvent.change(screen.getByPlaceholderText('Create a strong password'), { target: { name: 'password', value: 'pw-123456' } });
     fireEvent.change(screen.getByPlaceholderText('Confirm your password'), { target: { name: 'confirmPassword', value: 'pw-123456' } });
@@ -129,4 +129,52 @@ test('a 503 without a message still goes to the verification page, with a generi
     expect(screen.getByText('verification page')).toBeInTheDocument();
     expect(screen.getByTestId('state-email')).toHaveTextContent(EMAIL);
     expect(screen.getByTestId('state-error')).toHaveTextContent('Failed to send verification code, please try again');
+});
+
+// 用户名规则（Obsidian 78 号 U9）：和 store 一样，3-32 个字母、数字、点、下划线、连字符。不合规就在页面上提示，不发请求
+// （store 照样会拒，这里只是不让用户白等一次）。红灯：页面只查非空，带 @ / 太短的用户名照样发出去。
+const USERNAME_RULE = 'Username must be 3-32 characters: letters, digits, dot, underscore or hyphen';
+
+test.each(['bob@x.com', 'ab', 'bob smith'])('the username "%s" is refused on the page, before anything is sent', async (username) => {
+    renderPage();
+
+    await fillAndSubmit(username);
+
+    expect(screen.getByText(USERNAME_RULE)).toBeInTheDocument();
+    expect(userAPI.createAccount).not.toHaveBeenCalled();
+});
+
+// U4 / U9：前后空白不算错（store 会去掉）
+test('a username with surrounding spaces is accepted on the page', async () => {
+    userAPI.createAccount.mockResolvedValue({ success: true, message: 'created' });
+    userAPI.sendVerificationCode.mockResolvedValue({ success: true, message: 'sent' });
+    renderPage();
+
+    await fillAndSubmit('  newuser ');
+
+    expect(screen.queryByText(USERNAME_RULE)).not.toBeInTheDocument();
+    expect(userAPI.createAccount).toHaveBeenCalled();
+});
+
+// 审查 79 号 🟡2：页面和 store 去的空白要一样。JS 的 trim() 还会去全角空格（U+3000）、NBSP，Java 的 trim() 只去 ≤ U+0020；
+// 页面放行、store 拒，用户看着框里是合规的名字却被说"不合规则"。现在页面只去 ≤ U+0020，这种名字在页面就提示。
+// 红灯：页面用 trim()，全角空格结尾的名字放行了。
+test('a username ending in a full-width space is refused on the page, as store would refuse it', async () => {
+    renderPage();
+
+    await fillAndSubmit('newuser　');
+
+    expect(screen.getByText(USERNAME_RULE)).toBeInTheDocument();
+    expect(userAPI.createAccount).not.toHaveBeenCalled();
+});
+
+// 同上：页面校验的是去过空白的名字，发出去的也是它（store 会再去一次，结果一样）。红灯：发的是原文 "  newuser "。
+test('the username is sent without its surrounding spaces', async () => {
+    userAPI.createAccount.mockResolvedValue({ success: true, message: 'created' });
+    userAPI.sendVerificationCode.mockResolvedValue({ success: true, message: 'sent' });
+    renderPage();
+
+    await fillAndSubmit('  newuser ');
+
+    expect(userAPI.createAccount).toHaveBeenCalledWith(expect.objectContaining({ username: 'newuser' }));
 });

@@ -99,6 +99,23 @@ class AdminBootstrapStartupTest {
     }
 
     /**
+     * 47 号 🟠2 从注册这头堵上（78 号，审查 79 号 🟡3）：有人想注册用户名 = 配置的 ADMIN_EMAIL → 被用户名规则拒（带 @）。
+     * 回归保护，现在就该绿。
+     */
+    @Test
+    void signingUpWithTheAdminEmailAsUsername_isRefused() {
+        String adminEmail = "head-" + tag() + "@test.local";
+
+        try (ConfigurableApplicationContext store = runStore(Map.of(
+                "store.admin.email", adminEmail, "store.admin.password", "Adm1n-Passw0rd"))) {
+            AccountService accounts = store.getBean(AccountService.class);
+            assertThat(org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
+                    () -> accounts.createAccount(adminEmail, "someone-" + tag() + "@test.local", "Passw0rd-123")))
+                    .hasMessageStartingWith("Username must be 3-32 characters");
+        }
+    }
+
+    /**
      * 74 号 E7：库里已有小写 taken@ 的普通账号，ADMIN_EMAIL 配成 Taken@ → 和配成小写一样：不提升、不另建一个管理员。
      * 现在：查不到大写的，另建了一个同信箱的管理员账号（抢先注册的人等于和管理员共用一个信箱）。
      */
