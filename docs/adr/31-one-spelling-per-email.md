@@ -2,7 +2,7 @@
 
 **English** | [中文](31-one-spelling-per-email.zh-CN.md)
 
-**Status:** Accepted. Amends ADR-27 (known limit "email case is not normalised") and ADR-30 (consequence "the email typed with other capitals, which the database does not match").
+**Status:** Accepted, amended by 32 (usernames can no longer look like an email). Amends ADR-27 (known limit "email case is not normalised") and ADR-30 (consequence "the email typed with other capitals, which the database does not match").
 
 ## Context
 store looked emails up and stored them exactly as typed. Postgres compares text case-sensitively, so the unique column on `account.email` let `Victim@x.com` and `victim@x.com` be two accounts, each with its own bank account, both mailing codes to one inbox. The rate limits already counted by the trimmed, lower-cased address (ADR-26); the accounts did not.
@@ -28,7 +28,7 @@ Before choosing, the local databases were checked (both compose projects): no tw
 - The part before the `@` may be case-sensitive by RFC 5321. No mainstream provider treats it so; an address that really depends on case would receive mail at the lower-case spelling. The same trade-off as almost every site.
 - Usernames are still case-sensitive (`Bob` and `bob` are two users). Not changed here.
 - Nothing in the database enforces the spelling: a row inserted by hand with capitals would not be found. The two choke points are the guard.
-- **Usernames that look like someone else's email.** Login and the other identifier lookups try the email first (now normalised), then the username (exact). Someone whose username is `Bob@X.com` while another account's email is `bob@x.com` now reaches that other account and cannot log in with the username (they still can with their email), and the failed try counts against the other account's login limit. Sign-up accepts any username, `@` included; refusing `@` in usernames is the real fix, a separate item.
+- ~~**Usernames that look like someone else's email.** Login and the other identifier lookups try the email first (now normalised), then the username (exact). Someone whose username is `Bob@X.com` while another account's email is `bob@x.com` now reaches that other account and cannot log in with the username (they still can with their email), and the failed try counts against the other account's login limit. Sign-up accepts any username, `@` included; refusing `@` in usernames is the real fix, a separate item.~~ Fixed for new sign-ups by ADR-32: usernames can no longer contain `@`.
 - Two sign-ups racing with `A@x.com` and `a@x.com` now meet the same unique constraint, like two sign-ups with the same spelling did before: one account, one bank account (the insert fails before bank is called). The second request gets 500, not "Email already exists": an old gap, unchanged.
 - Pay Now looks the bank account up by the account's stored email, not the token's (review 75): a token signed before a migration may carry other capitals, and bank, matching exactly and opening an empty account when it finds none, would give the user a second account.
 
