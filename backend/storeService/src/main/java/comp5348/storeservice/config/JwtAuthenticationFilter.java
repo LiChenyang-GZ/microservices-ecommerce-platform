@@ -63,7 +63,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             // Every token store signs carries both. One without a whole-number userId did not come from
             // JwtUtil#generateToken: treat it as invalid rather than guess who it is (Obsidian 82)
             if (email != null && userId != null) {
-                // ROLE_ADMIN / ROLE_USER: SecurityConfig's hasRole("ADMIN") reads this
+                // ROLE_ADMIN / ROLE_USER: SecurityConfig's hasRole("ADMIN") reads this. The principal is the email, for
+                // Spring and logs only: never look an account up by it (Obsidian 82, review 83 🟡3)
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                         email, null, List.of(new SimpleGrantedAuthority("ROLE_" + role.name())));
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
