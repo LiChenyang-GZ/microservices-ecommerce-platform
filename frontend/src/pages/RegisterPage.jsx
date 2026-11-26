@@ -37,6 +37,9 @@ const RegisterPage = () => {
     
     if (!formData.username.trim()) {
       newErrors.username = 'Please enter a username';
+    } else if (!/^[A-Za-z0-9._-]{3,32}$/.test(formData.username.trim())) {
+      // the same rule as store's AccountService (Obsidian 78); store trims and checks again
+      newErrors.username = 'Username must be 3-32 characters: letters, digits, dot, underscore or hyphen';
     }
     
     if (!formData.email) {

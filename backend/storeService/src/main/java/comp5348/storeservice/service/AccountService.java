@@ -65,6 +65,15 @@ public class AccountService {
             java.util.regex.Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
 
     /**
+     * 3-32 ASCII letters, digits, ".", "_" or "-" (Obsidian 78). No "@": log-in looks an identifier up by email first,
+     * so a username shaped like someone's email reached that account (review 75 🟡1), and could pose as it on admin pages.
+     * No spaces, look-alike letters (Cyrillic "а" in "аdmin") or control characters, for the same reason. Sign-up only:
+     * older accounts keep their usernames (locally only the bootstrapped admins have an "@": their own email).
+     */
+    private static final java.util.regex.Pattern USERNAME_FORMAT = java.util.regex.Pattern.compile("^[A-Za-z0-9._-]{3,32}$");
+    static final String USERNAME_RULE = "Username must be 3-32 characters: letters, digits, dot, underscore or hyphen";
+
+    /**
      * Create account (requires email verification)
      */
     @Transactional
@@ -74,6 +83,11 @@ public class AccountService {
         // (a URL path to bank, a log line). Scenario A9.
         if (email == null || !EMAIL_FORMAT.matcher(email).matches()) {
             throw new IllegalArgumentException("Please enter a valid email address");
+        }
+        // Before anything about the email's state is said, and before bank is called (Obsidian 78)
+        username = username == null ? null : username.trim();
+        if (username == null || !USERNAME_FORMAT.matcher(username).matches()) {
+            throw new IllegalArgumentException(USERNAME_RULE);
         }
         Optional<Account> existing = accountRepository.findByEmail(email);
         if (existing.isPresent()) {
