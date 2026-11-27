@@ -2,7 +2,7 @@
 
 **English** | [中文](06-advisory-lock-publisher.zh-CN.md)
 
-**Status:** Accepted
+**Status:** Accepted. Amended by ADR-34 (a row that never goes out still holds back the rest, but alerts).
 
 ## Context
 During a rolling update two pods of a service can run at once. If both publish `event_outbox`, events go out twice and possibly out of order.

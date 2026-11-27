@@ -36,7 +36,7 @@
 |---|---|
 | 重试不能扣两次 | 每笔扣款 / 退款带幂等键（`PAY-{paymentId}-{attempt}-{随机}` / `REFUND-{paymentId}-{随机}`）。bank 用唯一约束存键，按固定顺序锁两个账户行，拿到锁后再查一次键；同一个键、内容不同就是冲突（`KEY_CONFLICT`），store 当成"未知"，绝不当失败。超时记为 `PAY_UNKNOWN`，不是失败，用**同一个键**重试，而且重试发的是第一次发送时记下的账号，一个键永远只对应一个请求（ADR-04、ADR-05、ADR-16、ADR-28、ADR-29）。 |
 | 扣款 / 退款要扛得住崩溃 | store 不在请求里直接调 bank，而是在改订单的同一个事务里写一条 PAY / REFUND 任务到 `payment_outbox`，由 `OutboxProcessor` 执行，带快重试和慢重试。 |
-| "提交"和"发送"之间不能丢事件 | 事件先作为一行写进各服务的 `event_outbox`，和业务数据同一个事务。发布器按 id 顺序逐条等 Kafka 确认，并持有 `pg_try_advisory_xact_lock`，两个实例不会发同一批（ADR-06）。Kafka 挂着也能正常付款，事件在表里等着。 |
+| "提交"和"发送"之间不能丢事件 | 事件先作为一行写进各服务的 `event_outbox`，和业务数据同一个事务。发布器按 id 顺序逐条等 Kafka 确认，并持有 `pg_try_advisory_xact_lock`，两个实例不会发同一批（ADR-06）。Kafka 挂着也能正常付款，事件在表里等着。Kafka 永远不收的一行仍然挡住后面的（为了保序），但失败 10 轮或等了 5 分钟就打一次 `ALERT event_outbox_stuck`，事件又动起来时打 `event_outbox_unstuck`（ADR-34，[学习文档 21](docs/learning/21-stuck-outbox-alerts.zh-CN.md)）。 |
 | Saga 补偿：丢件 | delivery 发 `Lost`；store 在同一个事务里把订单标成 LOST 并写退款任务；bank 确认后订单变 REFUNDED，再发 `OrderRefunded`。 |
 | 取消和建配送单赛跑 | 如果用户在 delivery 读到 `OrderPaid` 之前就取消，delivery 先插一行**取消标记**（该订单的 CANCELLED 行）；迟到的 `OrderPaid` 看到这一行就什么都不建（ADR-09）。 |
 | Kafka 至少一次投递 | 消费者在数据库事务提交后才提交 offset。重复消息无害：delivery 每个订单只有一行，tracking 用 `ON CONFLICT (event_id) DO NOTHING`，store 忽略不能让订单往前走的事件。 |
@@ -135,7 +135,7 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
 
 - [docs/learning/](docs/learning/)：每次改动一篇，讲问题、复现它的失败测试、修法和取舍（中英文各一份）。
 - 模块说明：[contracts](backend/contracts/README.zh-CN.md)、[delivery](backend/deliveryService/README.zh-CN.md)、[tracking](backend/trackingService/README.zh-CN.md)、[k8s](k8s/README.zh-CN.md)、[场景脚本](backend/docker/scenarios/README.zh-CN.md)。
-- [docs/adr/](docs/adr/README.zh-CN.md)：架构决策记录 ADR-01 到 ADR-33（中英文），以及代码注释引用的 8 条可靠性规则。
+- [docs/adr/](docs/adr/README.zh-CN.md)：架构决策记录 ADR-01 到 ADR-34（中英文），以及代码注释引用的 8 条可靠性规则。
 - [docs/legacy/](docs/legacy/)：原课程项目（只有 RabbitMQ 的版本）留下的笔记。
 
 ## 已知限制和下一步
@@ -158,6 +158,7 @@ go test -tags integration -count=1 ./...   # 加上真 Postgres + Kafka（2–3 
 - **因为键冲突停住的扣款 / 退款要等人处理**（ADR-29）：键带着不同的请求回来时 bank 回 `KEY_CONFLICT`；store 把 payment 记成 `PAY_UNKNOWN` / `REFUND_UNKNOWN`，告警一次，每 10 分钟重发同一个请求，直到有人把任务改对（步骤写在 `PaymentService#onPayKeyConflict` / `#onRefundKeyConflict`）。bank 要先于 store 发布：新 store 配老 bank，冲突还是 `REJECTED`。
 - **邮箱只有一种写法，用户名有规则**（ADR-31、ADR-32）：注册时用户名只能是 3-32 个字母、数字、点、下划线、连字符，不会再长得像邮箱；用户名仍然区分大小写，也没有保留名（能注册 `admin`，但没有任何角色）。老用户名不再检查（本机只有启动时建的管理员带 `@`，就是他们自己的邮箱）。有大小写混杂老邮箱的环境，ADR-31 上线前要先迁移（检查和更新的 SQL 在 ADR-31）；本机库是干净的。
 - **delivery 仍按令牌里的邮箱认人**（ADR-33）：配送单只有邮箱、没有 `userId`。store 和 tracking 用签过名的 `userId`。大小写混杂的老数据、以后的"改邮箱"，仍会让 delivery 的归属判断出错。
+- **卡住的工作会告警，按实例算**（ADR-34）：一直失败的非钱 outbox 任务（退款邮件、老的还库存任务）3 轮（约 15 秒）后 FAILED，打 `ALERT outbox_task_failed`；15 分钟超时取消连续失败 5 次打 `unpaid_cancel_stuck`，并继续重试；卡住的事件行打 `event_outbox_stuck`。后两个计数在内存里，重启后可能再打一次，两个实例各打一次。仍然只有 WARN 的：发送之前整轮就失败（库出问题），以及发成功了、提交却失败。store 的投递线程遇到 `Error` 没有兜住。
 - **单副本**：所有有状态组件都只有一个（Redis 也是）；store 只能一个副本，因为 `OutboxProcessor` 没有跨实例的锁。
 - **kind 入口偶发 503**（发现 I2）：一次读请求经过 Envoy Gateway 时在到达 store 之前被重置，重试就过了，原因还没查清。
 - **场景脚本 01–03 只能跑 compose**；04–08 两边都能跑。
