@@ -38,7 +38,7 @@ class CancelReadsLockedRowIntegrationTest extends StoreIntegrationTest {
 
         outer.executeWithoutResult(tx -> {
             // 1. 和 cancelOwnOrder 一样：先查归属，订单实体进了这个事务的上下文
-            orderProductService.ownOrder(order.orderId(), order.buyerEmail());
+            orderProductService.ownOrder(order.orderId(), buyerIdOf(order));
 
             // 2. 这时别的事务（比如 delivery 事件的消费者）把订单推进到 DELIVERED 并提交
             other.executeWithoutResult(t -> jdbc.update(

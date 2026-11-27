@@ -34,6 +34,11 @@ public class TokenValidationService {
             // Extract user information
             String email = jwtUtil.extractEmail(token);
             Long userId = jwtUtil.extractUserId(token);
+            // The same rule as JwtAuthenticationFilter (Obsidian 82, review 83 🟡1): every token store signs has a
+            // userId, so one without it is not store's, and delivery / tracking must not accept it either
+            if (userId == null) {
+                return TokenValidationResponse.failure("Token has no userId");
+            }
 
             return TokenValidationResponse.success(userId, email, jwtUtil.extractRole(token).name());
         } catch (Exception e) {
