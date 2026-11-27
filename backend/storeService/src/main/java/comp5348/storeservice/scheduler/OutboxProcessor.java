@@ -1,5 +1,6 @@
 package comp5348.storeservice.scheduler;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import comp5348.storeservice.adapter.BankAdapter;
@@ -20,9 +21,13 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.client.RestTemplateBuilder;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.UnexpectedRollbackException;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.RestTemplate;
 
@@ -67,6 +72,15 @@ public class OutboxProcessor {
 
     @Autowired
     private TransactionTemplate transactionTemplate;
+
+    /** For a non-money task's retry count: always its own transaction, never the one the work rolled back */
+    private TransactionTemplate requiresNew;
+
+    @Autowired
+    void setTransactionManager(PlatformTransactionManager transactionManager) {
+        requiresNew = new TransactionTemplate(transactionManager);
+        requiresNew.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+    }
 
     @Autowired
     private Clock clock;
@@ -130,12 +144,7 @@ public class OutboxProcessor {
                     // "PENDING" / "PAYMENT_PENDING": PAY tasks written before step 2
                     case OutboxService.TASK_PAY, "PENDING", "PAYMENT_PENDING" -> runPayTask(task.getId());
                     case OutboxService.TASK_REFUND -> runRefundTask(task.getId());
-                    default -> {
-                        if (task.getRetryCount() < maxRetries) {
-                            transactionTemplate.executeWithoutResult(status ->
-                                    outboxRepository.findById(task.getId()).ifPresent(this::processOutboxMessage));
-                        }
-                    }
+                    default -> runOtherTask(task);
                 }
             } catch (Exception e) {
                 // A database problem in one task must not stop the others. The task stays PENDING and is retried
@@ -247,177 +256,194 @@ public class OutboxProcessor {
     }
 
     /**
-     * Process one non-money event (emails; legacy delivery tasks are closed). Runs inside a transaction.
+     * One non-money task (refund emails; old FAILED tasks that give stock back). The work runs in one transaction.
+     * When it fails (throws, gives up, or cannot commit because something inside marked it rollback-only), the
+     * retry count is written in a transaction of its own (review 4b #7). It used to be counted inside the work's
+     * transaction and rolled back with it: the task never reached maxRetries and logged an ERROR every 5 seconds.
      */
-    private void processOutboxMessage(PaymentOutbox outbox) {
+    private void runOtherTask(PaymentOutbox task) {
+        if (task.getRetryCount() >= maxRetries) {
+            return;
+        }
+        String error;
+        try {
+            Boolean done = transactionTemplate.execute(status -> outboxRepository.findById(task.getId())
+                    .map(this::processOutboxMessage).orElse(true));
+            if (Boolean.TRUE.equals(done)) {
+                return;
+            }
+            error = "gave up (see the log above)";
+        } catch (RuntimeException e) {
+            // Rolled back on commit: the real error was caught inside and only logged above (review 88 🟡6)
+            error = e instanceof UnexpectedRollbackException
+                    ? "rolled back by an error caught inside the task (see the log lines before this)"
+                    : oneLine(NestedExceptionUtils.getMostSpecificCause(e).getMessage());
+            logger.error("Outbox task id={} ({}) failed: {}", task.getId(), task.getEventType(), error, e);
+        }
+        recordFailure(task.getId(), error);
+    }
+
+    /** +1 on the task's retry count in a new transaction; at maxRetries the task is FAILED and alerts once */
+    private void recordFailure(Long taskId, String error) {
+        requiresNew.executeWithoutResult(status -> outboxRepository.findById(taskId).ifPresent(task -> {
+            if (!"PENDING".equals(task.getStatus())) {
+                // The work did commit after all (the commit's answer was lost), or another instance finished it
+                // meanwhile: nothing to count, and no false ALERT (review 88 🟡2)
+                logger.info("Outbox task id={} is {} now, not counting this failure", taskId, task.getStatus());
+                return;
+            }
+            task.setRetryCount(task.getRetryCount() + 1);
+            if (task.getRetryCount() >= maxRetries) {
+                task.setStatus("FAILED");
+                boolean stockTask = "FAILED".equals(task.getEventType()) || "PAYMENT_FAILED".equals(task.getEventType());
+                logger.error("ALERT outbox_task_failed taskId={} type={} orderId={} retries={} lastError={}{}",
+                        task.getId(), task.getEventType(), task.getOrderId(), task.getRetryCount(), error,
+                        stockTask ? " (its stock was not given back: check this order's HOLD rows by hand)" : "");
+            } else {
+                logger.warn("Outbox task id={} failed, will retry: retryCount={}", task.getId(), task.getRetryCount());
+            }
+            outboxRepository.save(task);
+        }));
+    }
+
+    private static String oneLine(String message) {
+        return message == null ? null : message.replaceAll("\\s*\\R\\s*", " ");
+    }
+
+    /**
+     * Process one non-money event (emails; legacy delivery tasks are closed). Runs inside runOtherTask's
+     * transaction. Returns true when done; a failure is thrown (or false for an unknown type) and counted there.
+     */
+    private boolean processOutboxMessage(PaymentOutbox outbox) {
         logger.info("Processing outbox message: id={}, eventType={}, orderId={}",
                 outbox.getId(), outbox.getEventType(), outbox.getOrderId());
 
+        // Compatible with historical/async message event names: e.g., PAYMENT_SUCCESS/REFUND_SUCCESS
+        String rawEventType = outbox.getEventType();
+        String normalized;
+        if (rawEventType == null) {
+            throw new IllegalArgumentException("Outbox eventType is null");
+        }
+        switch (rawEventType) {
+            case "PAYMENT_SUCCESS":
+                normalized = "SUCCESS"; break;
+            case "PAYMENT_FAILED":
+                normalized = "FAILED"; break;
+            case "REFUND_SUCCESS":
+                normalized = "REFUNDED"; break;
+            default:
+                // Remove unified prefix for robustness
+                normalized = rawEventType.replaceFirst("^PAYMENT_", "");
+        }
+
+        PaymentStatus eventType = PaymentStatus.valueOf(normalized); // Convert string to Enum
+        switch (eventType) {
+            case SUCCESS:
+            case DELIVERY_FAILED:
+                // Written before wave 2 step 4b to create the delivery over HTTP / to refund 30 s after that
+                // failed. Delivery now comes from OrderPaid on Kafka, so there is nothing to do (E4: check for
+                // leftovers by hand before upgrading). Close it so it does not sit here forever.
+                logger.warn("Closing legacy {} task id={} for orderId={}: deliveries come from OrderPaid now",
+                        eventType, outbox.getId(), outbox.getOrderId());
+                break;
+
+            case FAILED:
+                processPaymentFailed(outbox);
+                break;
+
+            case REFUNDED:
+                processRefundSuccess(outbox);
+                break;
+
+            default:
+                logger.warn("Unknown event type: {}", outbox.getEventType());
+                return false;
+        }
+
+        outbox.setStatus("PROCESSED");
+        outbox.setProcessedAt(LocalDateTime.now(clock));
+        outboxRepository.save(outbox);
+        logger.info("Outbox message processed successfully: id={}", outbox.getId());
+        return true;
+    }
+
+    private Map<String, Object> payloadOf(PaymentOutbox outbox) {
         try {
-            boolean success = false;
-
-            // Compatible with historical/async message event names: e.g., PAYMENT_SUCCESS/REFUND_SUCCESS
-            String rawEventType = outbox.getEventType();
-            String normalized;
-            if (rawEventType == null) {
-                throw new IllegalArgumentException("Outbox eventType is null");
-            }
-            switch (rawEventType) {
-                case "PAYMENT_SUCCESS":
-                    normalized = "SUCCESS"; break;
-                case "PAYMENT_FAILED":
-                    normalized = "FAILED"; break;
-                case "REFUND_SUCCESS":
-                    normalized = "REFUNDED"; break;
-                default:
-                    // Remove unified prefix for robustness
-                    normalized = rawEventType.replaceFirst("^PAYMENT_", "");
-            }
-
-            PaymentStatus eventType = PaymentStatus.valueOf(normalized); // Convert string to Enum
-            switch (eventType) {
-                case SUCCESS:
-                case DELIVERY_FAILED:
-                    // Written before wave 2 step 4b to create the delivery over HTTP / to refund 30 s after that
-                    // failed. Delivery now comes from OrderPaid on Kafka, so there is nothing to do (E4: check for
-                    // leftovers by hand before upgrading). Close it so it does not sit here forever.
-                    logger.warn("Closing legacy {} task id={} for orderId={}: deliveries come from OrderPaid now",
-                            eventType, outbox.getId(), outbox.getOrderId());
-                    success = true;
-                    break;
-
-                case FAILED:
-                    success = processPaymentFailed(outbox);
-                    break;
-
-                case REFUNDED:
-                    success = processRefundSuccess(outbox);
-                    break;
-
-                default:
-                    logger.warn("Unknown event type: {}", outbox.getEventType());
-                    success = false; // Or throw exception directly
-            }
-
-            if (success) {
-                outbox.setStatus("PROCESSED");
-                outbox.setProcessedAt(LocalDateTime.now(clock));
-                logger.info("Outbox message processed successfully: id={}", outbox.getId());
-            } else {
-                outbox.setRetryCount(outbox.getRetryCount() + 1);
-
-                if (outbox.getRetryCount() >= maxRetries) {
-                    outbox.setStatus("FAILED");
-                    logger.error("Outbox message failed after {} retries: id={}", maxRetries, outbox.getId());
-                } else {
-                    logger.warn("Outbox message processing failed, will retry: id={}, retryCount={}",
-                            outbox.getId(), outbox.getRetryCount());
-                }
-            }
-
-            outboxRepository.save(outbox);
-
-        } catch (Exception e) {
-            logger.error("Error processing outbox message: id={}, error={}", outbox.getId(), e.getMessage(), e);
-
-            outbox.setRetryCount(outbox.getRetryCount() + 1);
-
-            if (outbox.getRetryCount() >= maxRetries) {
-                outbox.setStatus("FAILED");
-            }
-
-            outboxRepository.save(outbox);
+            return objectMapper.readValue(outbox.getPayload(), new TypeReference<Map<String, Object>>() {});
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("Unreadable payload of outbox task " + outbox.getId(), e);
         }
     }
 
     /**
-     * Process payment failed event - release reserved inventory + send email notification
+     * Process payment failed event - release reserved inventory + send email notification.
+     * Only tasks written before 7b654a5 (2025-12-09) are left: nothing writes FAILED tasks any more; today the
+     * stock of a failed payment comes back through UnpaidOrderCanceller. A failure to release is thrown, not
+     * swallowed: the whole task rolls back and runOtherTask counts it.
      */
-    private boolean processPaymentFailed(PaymentOutbox outbox) {
+    private void processPaymentFailed(PaymentOutbox outbox) {
+        Map<String, Object> payload = payloadOf(outbox);
+        Long orderId = Long.valueOf(payload.get("orderId").toString());
+        String error = String.valueOf(payload.get("error"));
+
+        logger.info("Payment failed for orderId={}, error={}", orderId, error);
+
+        Order order = orderRepository.findById(orderId).orElse(null);
+        if (order == null) {
+            logger.warn("Order not found for failed payment, cannot release stock. orderId={}", orderId);
+            return; // Order doesn't exist, no need to release inventory, consider processing successful
+        }
+
+        // 1. Release inventory reservation
+        if (order.getInventoryTransactionIds() != null && !order.getInventoryTransactionIds().isEmpty()) {
+            List<Long> txIds = Arrays.stream(order.getInventoryTransactionIds().split(","))
+                    .filter(s -> s != null && !s.trim().isEmpty())
+                    .map(Long::valueOf)
+                    .collect(Collectors.toList());
+
+            if (!txIds.isEmpty()) {
+                UnholdProductRequest unholdRequest = new UnholdProductRequest();
+                unholdRequest.setInventoryTransactionIds(txIds);
+                warehouseService.unholdProduct(unholdRequest);
+                logger.info("Released inventory for failed payment, orderId={}", orderId);
+            }
+        }
+
+        // 2. Send failure notification email
         try {
-            Map<String, Object> payload = objectMapper.readValue(outbox.getPayload(), new TypeReference<Map<String, Object>>() {});
-            Long orderId = Long.valueOf(payload.get("orderId").toString());
-            String error = payload.get("error").toString();
+            accountRepository.findById(order.getUserId()).ifPresent(acc -> {
+                if (acc.getEmail() != null) {
+                    emailAdapter.sendOrderFailed(acc.getEmail(), String.valueOf(orderId), error);
+                }
+            });
+        } catch (Exception e) {
+            logger.warn("Failed to send order failure email for orderId={}: {}", orderId, e.getMessage());
+            // Email sending failure doesn't affect main flow
+        }
+    }
 
-            logger.info("Payment failed for orderId={}, error={}", orderId, error);
+    /**
+     * Process refund success event - send email notification. A payload it cannot read is thrown and counted.
+     */
+    private void processRefundSuccess(PaymentOutbox outbox) {
+        Map<String, Object> payload = payloadOf(outbox);
+        Long orderId = Long.valueOf(payload.get("orderId").toString());
+        String refundTxnId = payload.get("refundTxnId").toString();
 
+        logger.info("Refund success for orderId={}, refundTxnId={}", orderId, refundTxnId);
+
+        try {
             Order order = orderRepository.findById(orderId).orElse(null);
-            if (order == null) {
-                logger.warn("Order not found for failed payment, cannot release stock. orderId={}", orderId);
-                return true; // Order doesn't exist, no need to release inventory, consider processing successful
+            String email = null;
+            if (order != null) {
+                var acc = accountRepository.findById(order.getUserId()).orElse(null);
+                if (acc != null) email = acc.getEmail();
             }
-
-            // 1. Release inventory reservation
-            try {
-                if (order.getInventoryTransactionIds() != null && !order.getInventoryTransactionIds().isEmpty()) {
-                    List<Long> txIds = Arrays.stream(order.getInventoryTransactionIds().split(","))
-                            .filter(s -> s != null && !s.trim().isEmpty())
-                            .map(Long::valueOf)
-                            .collect(Collectors.toList());
-
-                    if (!txIds.isEmpty()) {
-                        UnholdProductRequest unholdRequest = new UnholdProductRequest();
-                        unholdRequest.setInventoryTransactionIds(txIds);
-                        warehouseService.unholdProduct(unholdRequest);
-                        logger.info("Released inventory for failed payment, orderId={}", orderId);
-                    }
-                }
-            } catch (Exception e) {
-                logger.error("Failed to release inventory for orderId={}. Will retry. Error: {}", orderId, e.getMessage(), e);
-                return false; // Releasing inventory is a critical step, must retry on failure
+            if (email != null) {
+                emailAdapter.sendRefundSuccess(email, String.valueOf(orderId), refundTxnId);
             }
-
-            // 2. Send failure notification email
-            try {
-                accountRepository.findById(order.getUserId()).ifPresent(acc -> {
-                    if (acc.getEmail() != null) {
-                        emailAdapter.sendOrderFailed(acc.getEmail(), String.valueOf(orderId), error);
-                    }
-                });
-            } catch (Exception e) {
-                logger.warn("Failed to send order failure email for orderId={}: {}", orderId, e.getMessage());
-                // Email sending failure doesn't affect main flow, don't return false
-            }
-
-            return true;
-
         } catch (Exception e) {
-            logger.error("Failed to process PAYMENT_FAILED for outboxId={}: {}", outbox.getId(), e.getMessage(), e);
-            return false;
-        }
-    }
-    
-    /**
-     * Process refund success event - send email notification
-     */
-    private boolean processRefundSuccess(PaymentOutbox outbox) {
-        try {
-            Map<String, Object> payload = objectMapper.readValue(
-                    outbox.getPayload(), new TypeReference<Map<String, Object>>() {});
-            Long orderId = Long.valueOf(payload.get("orderId").toString());
-            String refundTxnId = payload.get("refundTxnId").toString();
-            
-            logger.info("Refund success for orderId={}, refundTxnId={}", orderId, refundTxnId);
-            
-            try {
-                Order order = orderRepository.findById(orderId).orElse(null);
-                String email = null;
-                if (order != null) {
-                    var acc = accountRepository.findById(order.getUserId()).orElse(null);
-                    if (acc != null) email = acc.getEmail();
-                }
-                if (email != null) {
-                    emailAdapter.sendRefundSuccess(email, String.valueOf(orderId), refundTxnId);
-                }
-            } catch (Exception e) {
-                logger.warn("Send refund success email error: {}", e.getMessage());
-            }
-
-            return true;
-            
-        } catch (Exception e) {
-            logger.error("Failed to process REFUND_SUCCESS: {}", e.getMessage(), e);
-            return false;
+            logger.warn("Send refund success email error: {}", e.getMessage());
         }
     }
 }

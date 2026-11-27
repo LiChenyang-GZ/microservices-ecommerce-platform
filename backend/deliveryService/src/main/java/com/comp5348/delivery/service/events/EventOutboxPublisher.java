@@ -5,12 +5,14 @@ import com.comp5348.delivery.repository.EventOutboxRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -26,6 +28,12 @@ import java.util.concurrent.TimeUnit;
  * If one send fails, the round stops there and commits what was already acked; the next round starts from the
  * failed row, so order is kept. A crash after the send but before the commit sends the row again (at least once;
  * consumers de-duplicate, rule 4).
+ *
+ * A row that never goes out (bigger than Kafka's message limit, topic deleted) therefore holds back every later
+ * event. That is kept on purpose (order), but not silently (review 4b #8, Obsidian 87): when the same row has
+ * failed stuck-after-failures rounds in a row, or it fails after waiting stuck-after-minutes since it was written,
+ * one ALERT event_outbox_stuck; once events move again, one INFO event_outbox_unstuck. Kept in memory: a restart
+ * starts counting again. A round that fails before sending (database trouble) is not counted: only a WARN.
  */
 @Component
 public class EventOutboxPublisher {
@@ -42,6 +50,17 @@ public class EventOutboxPublisher {
 
     @Value("${event-outbox.publisher.send-timeout-ms:15000}")
     private long sendTimeoutMs;
+
+    @Value("${event-outbox.publisher.stuck-after-failures:10}")
+    private int stuckAfterFailures = 10;
+
+    @Value("${event-outbox.publisher.stuck-after-minutes:5}")
+    private long stuckAfterMinutes = 5;
+
+    /** The row the last failed send was for, how many rounds in a row it failed, and whether it alerted */
+    private Long failingRowId;
+    private int failuresInARow;
+    private boolean alerted;
 
     public EventOutboxPublisher(EventOutboxRepository outboxRepository, KafkaTemplate<String, String> kafkaTemplate,
                                 JdbcTemplate jdbc, TransactionTemplate transactionTemplate) {
@@ -67,6 +86,7 @@ public class EventOutboxPublisher {
             return; // another instance is publishing this round
         }
         List<EventOutbox> batch = outboxRepository.findTop100BySentAtIsNullOrderByIdAsc();
+        noteHeadOfQueue(batch);
         for (EventOutbox row : batch) {
             try {
                 kafkaTemplate.send(row.getTopic(), row.getOrderId(), row.getPayload())
@@ -77,9 +97,52 @@ public class EventOutboxPublisher {
             } catch (Exception e) {
                 logger.warn("Kafka send failed for event_outbox id={} ({} {}), stopping this round: {}",
                         row.getId(), row.getEventType(), row.getOrderId(), e.getMessage());
+                noteFailure(row, e);
                 return; // rows before this one stay marked; this one is first in the next round
             }
             row.setSentAt(Instant.now());
+            noteSent();
         }
+    }
+
+    private synchronized void noteFailure(EventOutbox row, Exception e) {
+        if (!row.getId().equals(failingRowId)) {
+            failingRowId = row.getId();
+            failuresInARow = 0;
+            alerted = false;
+        }
+        failuresInARow++;
+        long waitingSeconds = Duration.between(row.getCreatedAt(), Instant.now()).toSeconds();
+        if (!alerted && (failuresInARow >= stuckAfterFailures || waitingSeconds >= stuckAfterMinutes * 60)) {
+            alerted = true;
+            logger.error("ALERT event_outbox_stuck id={} eventType={} orderId={} failures={} waitingSeconds={} "
+                            + "error={} (every later event waits behind this row)",
+                    row.getId(), row.getEventType(), row.getOrderId(), failuresInARow, waitingSeconds,
+                    NestedExceptionUtils.getMostSpecificCause(e).toString());
+        }
+    }
+
+    /**
+     * The row this instance saw failing is no longer first: another instance sent it, or someone removed it.
+     * Without this, with two instances the one that alerted might never log unstuck (review 88 🟡1).
+     */
+    private synchronized void noteHeadOfQueue(List<EventOutbox> batch) {
+        if (failingRowId != null && (batch.isEmpty() || !batch.get(0).getId().equals(failingRowId))) {
+            noteSent();
+        }
+    }
+
+    /** A send went through: whatever was failing before has been sent or removed */
+    private synchronized void noteSent() {
+        if (failingRowId == null) {
+            return;
+        }
+        if (alerted) {
+            logger.info("event_outbox_unstuck id={} afterFailures={} (events are moving again)",
+                    failingRowId, failuresInARow);
+        }
+        failingRowId = null;
+        failuresInARow = 0;
+        alerted = false;
     }
 }
