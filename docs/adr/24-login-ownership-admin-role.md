@@ -2,7 +2,7 @@
 
 **English** | [中文](24-login-ownership-admin-role.zh-CN.md)
 
-**Status:** Accepted, amended by 25 (activation checks the emailed code)
+**Status:** Accepted, amended by 25 (activation checks the emailed code) and 33 (store knows the caller by the token's userId, not its email)
 
 ## Context
 After ADR-23, services could no longer call each other without a secret, but store still ended its security rules with `anyRequest().permitAll()`. Its JWT filter put the email on the request when a token was valid and let the request through when it was not. Only Pay Now checked who owned the order. So, with no token or with a stranger's token, anyone could:
