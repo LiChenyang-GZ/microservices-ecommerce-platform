@@ -13,7 +13,7 @@ ADR-01 to ADR-14 were written before the redesign was built. Code comments refer
 | [03](03-transactional-outbox.md) | Events and money tasks are written through an outbox | Accepted |
 | [04](04-single-money-path-idempotent.md) | One path moves money, and every call is idempotent | Accepted, amended by 16 |
 | [05](05-timeout-is-not-failure.md) | A timeout is not a failure | Accepted |
-| [06](06-advisory-lock-publisher.md) | One outbox publisher at a time, by a transaction-scoped advisory lock | Accepted |
+| [06](06-advisory-lock-publisher.md) | One outbox publisher at a time, by a transaction-scoped advisory lock | Accepted, amended by 34 |
 | [07](07-order-by-order-dedupe-in-consumers.md) | Events are ordered per order, and consumers de-duplicate | Accepted |
 | [08](08-two-kinds-of-consumer-failure.md) | Consumer failures: wait out an outage, move a bad message aside | Accepted, refined |
 | [09](09-cancel-sync-call-and-marker.md) | Cancelling an order: a synchronous call plus a cancel marker | Accepted |
@@ -41,6 +41,7 @@ ADR-01 to ADR-14 were written before the redesign was built. Code comments refer
 | [31](31-one-spelling-per-email.md) | One spelling per email address | Accepted, amended by 32, 33 |
 | [32](32-username-rules.md) | Usernames are 3-32 letters, digits, dot, underscore or hyphen | Accepted |
 | [33](33-know-the-caller-by-user-id.md) | store knows the caller by the token's userId, not its email | Accepted |
+| [34](34-stuck-outbox-alerts.md) | A stuck outbox is counted and alerts, it does not repeat forever | Accepted |
 
 ## Reliability rules
 

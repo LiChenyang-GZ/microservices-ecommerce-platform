@@ -13,7 +13,7 @@ ADR-01 到 ADR-14 是动手之前写的，代码注释按编号引用（"ADR-06"
 | [03](03-transactional-outbox.zh-CN.md) | 事件和资金任务都先写进 outbox | 已采纳 |
 | [04](04-single-money-path-idempotent.zh-CN.md) | 动钱只有一条路，每次调用都幂等 | 已采纳，由 16 修订 |
 | [05](05-timeout-is-not-failure.zh-CN.md) | 超时不等于失败 | 已采纳 |
-| [06](06-advisory-lock-publisher.zh-CN.md) | 同一时间只有一个 outbox 发布器：事务级咨询锁 | 已采纳 |
+| [06](06-advisory-lock-publisher.zh-CN.md) | 同一时间只有一个 outbox 发布器：事务级咨询锁 | 已采纳，被 34 修订 |
 | [07](07-order-by-order-dedupe-in-consumers.zh-CN.md) | 按订单保序，消费者自己去重 | 已采纳 |
 | [08](08-two-kinds-of-consumer-failure.zh-CN.md) | 消费失败：故障就原地等，坏消息就挪开 | 已采纳，实现时细化 |
 | [09](09-cancel-sync-call-and-marker.zh-CN.md) | 取消订单：同步调用 + 取消标记 | 已采纳 |
@@ -41,6 +41,7 @@ ADR-01 到 ADR-14 是动手之前写的，代码注释按编号引用（"ADR-06"
 | [31](31-one-spelling-per-email.zh-CN.md) | 一个邮箱只有一种写法 | 已采纳，由 32、33 补充 |
 | [32](32-username-rules.zh-CN.md) | 用户名是 3-32 个字母、数字、点、下划线或连字符 | 已采纳 |
 | [33](33-know-the-caller-by-user-id.zh-CN.md) | store 按令牌里的 userId 认人，不按邮箱 | 已采纳 |
+| [34](34-stuck-outbox-alerts.zh-CN.md) | outbox 卡住了要计数、要告警，不能无限重复 | 已采纳 |
 
 ## 可靠性规则
 
