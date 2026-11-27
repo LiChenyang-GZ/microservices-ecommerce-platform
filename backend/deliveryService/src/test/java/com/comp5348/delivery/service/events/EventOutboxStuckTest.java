@@ -46,8 +46,12 @@ import static org.mockito.Mockito.when;
 @ExtendWith(OutputCaptureExtension.class)
 class EventOutboxStuckTest {
 
-    private static final String STUCK = "ALERT event_outbox_stuck";
-    private static final String UNSTUCK = "event_outbox_unstuck";
+    /**
+     * 这里的行 id 从 900001 起，日志只看这些 id：同一个测试进程里可能还有集成测试起的 Spring 上下文，
+     * 它真的投递线程也在往控制台打 stuck / unstuck（抓日志抓的是整个进程的输出）。
+     */
+    private static final String STUCK = "ALERT event_outbox_stuck id=900";
+    private static final String UNSTUCK = "event_outbox_unstuck id=900";
 
     private final EventOutboxRepository repository = mock(EventOutboxRepository.class);
     @SuppressWarnings("unchecked")
@@ -57,7 +61,7 @@ class EventOutboxStuckTest {
 
     /** 假的 event_outbox 表 */
     private final List<EventOutbox> table = new ArrayList<>();
-    private long nextId = 1;
+    private long nextId = 900_001;
     private EventOutboxPublisher publisher;
 
     @BeforeEach
@@ -121,7 +125,7 @@ class EventOutboxStuckTest {
         assertThat(output.getOut()).as("才 9 轮").doesNotContain(STUCK);
 
         rounds(1);
-        assertThat(output.getOut()).contains(STUCK + " id=" + poison.getId() + " eventType=DeliveryCreated orderId=501 failures=10 waitingSeconds=")
+        assertThat(output.getOut()).contains("ALERT event_outbox_stuck id=" + poison.getId() + " eventType=DeliveryCreated orderId=501 failures=10 waitingSeconds=")
                 .contains("The message is 1200000 bytes");
         assertThat(behind.getSentAt()).as("后面的行还在等").isNull();
         verify(kafka, never()).send(anyString(), eq("502"), anyString());
@@ -144,7 +148,7 @@ class EventOutboxStuckTest {
 
         rounds(1);
 
-        assertThat(output.getOut()).contains(STUCK + " id=" + old.getId() + " eventType=DeliveryCreated orderId=501 failures=1 ");
+        assertThat(output.getOut()).contains("ALERT event_outbox_stuck id=" + old.getId() + " eventType=DeliveryCreated orderId=501 failures=1 ");
     }
 
     /** S4：卡住的行后来发出去了 → 打 unstuck，后面的行跟着发出去；之后另一行再卡住会再 ALERT */
@@ -160,11 +164,11 @@ class EventOutboxStuckTest {
 
         assertThat(poison.getSentAt()).isNotNull();
         assertThat(behind.getSentAt()).isNotNull();
-        assertThat(output.getOut()).contains(UNSTUCK + " id=" + poison.getId());
+        assertThat(output.getOut()).contains("event_outbox_unstuck id=" + poison.getId());
 
         EventOutbox next = row("503", "poison");
         rounds(10);
-        assertThat(output.getOut()).contains(STUCK + " id=" + next.getId());
+        assertThat(output.getOut()).contains("ALERT event_outbox_stuck id=" + next.getId());
         assertThat(occurrences(output, STUCK)).isEqualTo(2);
     }
 

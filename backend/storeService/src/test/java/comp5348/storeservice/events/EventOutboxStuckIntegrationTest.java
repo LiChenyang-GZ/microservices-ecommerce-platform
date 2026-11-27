@@ -36,8 +36,14 @@ class EventOutboxStuckIntegrationTest extends DeliveryEventsTestBase {
             await().atMost(Duration.ofSeconds(20)).untilAsserted(() ->
                     assertThat(output.getOut()).contains("ALERT event_outbox_stuck id=" + poisonId
                             + " eventType=OrderPlaced orderId=990000001 failures="));
+            assertThat(output.getOut()).as("ALERT 里写的是真正的原因，不是外层的 \"Send failed\"")
+                    .containsPattern("ALERT event_outbox_stuck id=" + poisonId + " .*RecordTooLargeException");
             assertThat(orderEventTypesOf(order)).as("被挡住了：后面订单的事件一条都没发").isEmpty();
-            assertThat(occurrences(output.getOut(), "ALERT event_outbox_stuck id=" + poisonId)).isEqualTo(1);
+            // 不是每轮都打。不能断言"正好 1 次"：全量跑时这个进程里有好几个 Spring 上下文，各有一个投递线程，
+            // 谁拿到咨询锁谁发，每个都会数满 10 次、各打一次（生产上两个 pod 也是每个 pod 一次）。
+            // 每个实例第 10 次失败才打，所以 ALERT 数 × 10 ≤ 失败（WARN）数；"每个实例只打一次"由单元测试 S2 管
+            assertThat(occurrences(output.getOut(), "ALERT event_outbox_stuck id=" + poisonId + " ") * 10)
+                    .isLessThanOrEqualTo(occurrences(output.getOut(), "Kafka send failed for event_outbox id=" + poisonId + " "));
 
             jdbc.update("DELETE FROM event_outbox WHERE id = ?", poisonId); // 人来处理了
 
