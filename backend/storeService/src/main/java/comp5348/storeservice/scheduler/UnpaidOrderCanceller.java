@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.NestedExceptionUtils;
+import org.springframework.transaction.UnexpectedRollbackException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -110,7 +111,9 @@ public class UnpaidOrderCanceller {
         if (failures == stuckAfterFailures) {
             logger.error("ALERT unpaid_cancel_stuck orderId={} failures={} lastError={} (the order stays "
                             + "PENDING_PAYMENT and its stock stays held until this cancel goes through)",
-                    orderId, failures, oneLine(NestedExceptionUtils.getMostSpecificCause(e).getMessage()));
+                    orderId, failures, e instanceof UnexpectedRollbackException
+                            ? "rolled back by an error caught inside the cancel (see the log lines before this)"
+                            : oneLine(NestedExceptionUtils.getMostSpecificCause(e).getMessage()));
         }
     }
 

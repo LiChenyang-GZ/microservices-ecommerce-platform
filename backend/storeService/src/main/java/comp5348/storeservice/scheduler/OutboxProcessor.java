@@ -27,6 +27,7 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.UnexpectedRollbackException;
 import org.springframework.transaction.support.TransactionTemplate;
 import org.springframework.web.client.RestTemplate;
 
@@ -273,7 +274,10 @@ public class OutboxProcessor {
             }
             error = "gave up (see the log above)";
         } catch (RuntimeException e) {
-            error = oneLine(NestedExceptionUtils.getMostSpecificCause(e).getMessage());
+            // Rolled back on commit: the real error was caught inside and only logged above (review 88 🟡6)
+            error = e instanceof UnexpectedRollbackException
+                    ? "rolled back by an error caught inside the task (see the log lines before this)"
+                    : oneLine(NestedExceptionUtils.getMostSpecificCause(e).getMessage());
             logger.error("Outbox task id={} ({}) failed: {}", task.getId(), task.getEventType(), error, e);
         }
         recordFailure(task.getId(), error);
@@ -282,6 +286,12 @@ public class OutboxProcessor {
     /** +1 on the task's retry count in a new transaction; at maxRetries the task is FAILED and alerts once */
     private void recordFailure(Long taskId, String error) {
         requiresNew.executeWithoutResult(status -> outboxRepository.findById(taskId).ifPresent(task -> {
+            if (!"PENDING".equals(task.getStatus())) {
+                // The work did commit after all (the commit's answer was lost), or another instance finished it
+                // meanwhile: nothing to count, and no false ALERT (review 88 🟡2)
+                logger.info("Outbox task id={} is {} now, not counting this failure", taskId, task.getStatus());
+                return;
+            }
             task.setRetryCount(task.getRetryCount() + 1);
             if (task.getRetryCount() >= maxRetries) {
                 task.setStatus("FAILED");

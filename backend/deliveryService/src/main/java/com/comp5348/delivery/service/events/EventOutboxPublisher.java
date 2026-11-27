@@ -86,6 +86,7 @@ public class EventOutboxPublisher {
             return; // another instance is publishing this round
         }
         List<EventOutbox> batch = outboxRepository.findTop100BySentAtIsNullOrderByIdAsc();
+        noteHeadOfQueue(batch);
         for (EventOutbox row : batch) {
             try {
                 kafkaTemplate.send(row.getTopic(), row.getOrderId(), row.getPayload())
@@ -118,6 +119,16 @@ public class EventOutboxPublisher {
                             + "error={} (every later event waits behind this row)",
                     row.getId(), row.getEventType(), row.getOrderId(), failuresInARow, waitingSeconds,
                     NestedExceptionUtils.getMostSpecificCause(e).toString());
+        }
+    }
+
+    /**
+     * The row this instance saw failing is no longer first: another instance sent it, or someone removed it.
+     * Without this, with two instances the one that alerted might never log unstuck (review 88 🟡1).
+     */
+    private synchronized void noteHeadOfQueue(List<EventOutbox> batch) {
+        if (failingRowId != null && (batch.isEmpty() || !batch.get(0).getId().equals(failingRowId))) {
+            noteSent();
         }
     }
 
