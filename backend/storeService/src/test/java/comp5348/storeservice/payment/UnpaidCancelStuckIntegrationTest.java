@@ -45,8 +45,10 @@ class UnpaidCancelStuckIntegrationTest extends DeliveryEventsTestBase {
             assertThat(output.getOut()).as("才失败 4 次").doesNotContain(alertFor(order));
 
             unpaidOrderCanceller.cancelExpiredUnpaidOrders();
-            assertThat(output.getOut()).contains(alertFor(order) + "failures=5")
-                    .contains("stock row " + order.warehouseProductId() + " is broken");
+            // lastError 锁在 ALERT 这一行上（每轮的 ERROR 行本来就带这句，审查 88 🟡7）
+            assertThat(output.getOut()).containsPattern(java.util.regex.Pattern.quote(
+                    alertFor(order) + "failures=5 lastError=")
+                    + "[^\n]*stock row " + order.warehouseProductId() + " is broken");
 
             unpaidOrderCanceller.cancelExpiredUnpaidOrders();
             unpaidOrderCanceller.cancelExpiredUnpaidOrders();

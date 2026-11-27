@@ -45,7 +45,7 @@ class OutboxRetryCountIntegrationTest extends DeliveryEventsTestBase {
     }
 
     private static String alertFor(PaymentOutbox task) {
-        return "ALERT outbox_task_failed taskId=" + task.getId();
+        return "ALERT outbox_task_failed taskId=" + task.getId() + " "; // 结尾空格：taskId=12 不能把 taskId=123 也算进去
     }
 
     /** R1：还库存每次都失败 → 每轮计数 +1 真的写进库，第 3 轮后任务 FAILED，不再重试 */
@@ -79,9 +79,10 @@ class OutboxRetryCountIntegrationTest extends DeliveryEventsTestBase {
             assertThat(output.getOut()).as("还没到上限，不该告警").doesNotContain(alertFor(task));
 
             runOutboxRounds(1);
-            assertThat(output.getOut())
-                    .contains(alertFor(task) + " type=FAILED orderId=" + order.orderId() + " retries=3")
-                    .contains("stock row " + order.warehouseProductId() + " is broken");
+            // lastError 要锁在 ALERT 这一行上：每轮的 ERROR 行本来就带这句，只查整个输出证明不了 ALERT 填对了（审查 88 🟡7）
+            assertThat(output.getOut()).containsPattern(java.util.regex.Pattern.quote(
+                    alertFor(task) + "type=FAILED orderId=" + order.orderId() + " retries=3 lastError=")
+                    + "[^\n]*stock row " + order.warehouseProductId() + " is broken");
 
             runOutboxRounds(3);
             assertThat(occurrences(output.getOut(), alertFor(task))).as("只打一次").isEqualTo(1);
@@ -138,7 +139,56 @@ class OutboxRetryCountIntegrationTest extends DeliveryEventsTestBase {
 
         assertThat(onlyTaskOf(order).getStatus()).isEqualTo("FAILED");
         assertThat(onlyTaskOf(order).getRetryCount()).isEqualTo(3);
-        assertThat(output.getOut()).contains(alertFor(task) + " type=REFUNDED orderId=" + order.orderId());
+        assertThat(output.getOut()).contains(alertFor(task) + "type=REFUNDED orderId=" + order.orderId());
         assertThat(occurrences(output.getOut(), alertFor(task))).isEqualTo(1);
+    }
+
+    /**
+     * R5b（审查 88 🟡3）：原来 #7 的那条路——里面某一步把事务标成只能回滚，异常在里面被 catch 掉，
+     * 提交时才 UnexpectedRollbackException。这里用退款邮件：发邮件时事务被标成只能回滚、再抛，
+     * processRefundSuccess 吞掉这个异常（"邮件失败不影响主流程"）。计数照样要 +1、到上限 FAILED + 一次 ALERT。
+     * （main 上这条是红的：retry_count 一直 0。）
+     */
+    @Test
+    void failureSwallowedInsideButTransactionRollbackOnly_isStillCounted(CapturedOutput output) {
+        PlacedOrder order = placeOrder();
+        jdbc.update("DELETE FROM payment_outbox WHERE order_id = ?", order.orderId());
+        outboxService.createRefundSuccessEvent(order.orderId(), "8002");
+        PaymentOutbox task = onlyTaskOf(order);
+        // 在事务里调一次会失败的仓库方法：仓库代理的事务拦截器把外层事务标成只能回滚（和查账号时库出错一样），再抛
+        org.mockito.Mockito.doAnswer(inv -> {
+            accountRepository.findById(null);
+            throw new RuntimeException("not reached");
+        }).when(emailAdapter).sendRefundSuccess(anyString(), anyString(), anyString());
+
+        runOutboxRounds(4);
+
+        assertThat(onlyTaskOf(order).getStatus()).isEqualTo("FAILED");
+        assertThat(onlyTaskOf(order).getRetryCount()).isEqualTo(3);
+        assertThat(occurrences(output.getOut(), alertFor(task))).isEqualTo(1);
+        // 审查 88 🟡6：这时最里层的异常只是 "Transaction silently rolled back…"，看了不知道查什么。ALERT 要说清楚
+        assertThat(output.getOut()).contains(alertFor(task) + "type=REFUNDED orderId=" + order.orderId()
+                + " retries=3 lastError=rolled back by an error caught inside the task (see the log lines before this)");
+    }
+
+    /**
+     * 审查 88 🟡2：recordFailure 只动还是 PENDING 的任务。做事的事务其实提交了（提交时连接断了、客户端以为失败），
+     * 或者滚动更新时另一个 pod 已经处理完了：任务已是 PROCESSED，不能再 +1、更不能被改成 FAILED、打假 ALERT。
+     */
+    @Test
+    void recordFailure_leavesATaskThatIsNoLongerPendingAlone(CapturedOutput output) {
+        PlacedOrder order = placeOrder();
+        jdbc.update("DELETE FROM payment_outbox WHERE order_id = ?", order.orderId());
+        outboxService.createRefundSuccessEvent(order.orderId(), "8003");
+        PaymentOutbox task = onlyTaskOf(order);
+        jdbc.update("UPDATE payment_outbox SET status = 'PROCESSED', retry_count = 2 WHERE id = ?", task.getId());
+
+        org.springframework.test.util.ReflectionTestUtils.invokeMethod(
+                (Object) org.springframework.test.util.AopTestUtils.getUltimateTargetObject(outboxProcessor),
+                "recordFailure", task.getId(), "commit result unknown");
+
+        assertThat(onlyTaskOf(order).getStatus()).isEqualTo("PROCESSED");
+        assertThat(onlyTaskOf(order).getRetryCount()).isEqualTo(2);
+        assertThat(output.getOut()).doesNotContain(alertFor(task));
     }
 }
