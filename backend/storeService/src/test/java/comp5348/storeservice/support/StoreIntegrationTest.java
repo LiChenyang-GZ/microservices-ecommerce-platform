@@ -265,6 +265,35 @@ public abstract class StoreIntegrationTest {
         return orderRepository.findById(order.orderId()).orElseThrow();
     }
 
+    // ---------- "数据坏了"的替身：让改某一行库存每次都报错（87 号） ----------
+
+    /**
+     * 给这一行库存装一个 Postgres 触发器：之后任何 UPDATE 这一行都抛错（只管这一行，别的库存行照常）。
+     * 模拟"还库存每次都失败"的确定性错误：unholdProduct 把数量加回去时这一行报错，整个事务回滚。
+     * 用完一定要在 finally 里 repairStockRow，否则后面的测试碰到这一行也会失败。
+     */
+    protected void breakStockRow(Long warehouseProductId) {
+        jdbc.execute("CREATE OR REPLACE FUNCTION test_broken_stock() RETURNS trigger AS $$ "
+                + "BEGIN RAISE EXCEPTION 'test: stock row % is broken', OLD.id; END $$ LANGUAGE plpgsql");
+        jdbc.execute("CREATE TRIGGER test_broken_stock_" + warehouseProductId
+                + " BEFORE UPDATE ON warehouse_products FOR EACH ROW WHEN (OLD.id = " + warehouseProductId + ")"
+                + " EXECUTE FUNCTION test_broken_stock()");
+    }
+
+    /** 拆掉 breakStockRow 装的触发器：这一行又能改了（"暂时性错误好了"也用它） */
+    protected void repairStockRow(Long warehouseProductId) {
+        jdbc.execute("DROP TRIGGER IF EXISTS test_broken_stock_" + warehouseProductId + " ON warehouse_products");
+    }
+
+    /** 日志里某段文字出现了几次（ALERT 只该打一次，不能每轮都打） */
+    protected static int occurrences(CharSequence log, String text) {
+        int count = 0;
+        for (int i = log.toString().indexOf(text); i >= 0; i = log.toString().indexOf(text, i + text.length())) {
+            count++;
+        }
+        return count;
+    }
+
     /**
      * 这一单"当前这次扣款"的键：PAY-{paymentId}-{attempt}-{随机段}。随机段存在 Payment 上，所以从数据库读。
      * （审查 #1 之后键里加了随机段，测试不能再自己拼出键来，攻击者也不能。）
